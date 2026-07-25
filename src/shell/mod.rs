@@ -55,10 +55,17 @@ pub fn run() -> anyhow::Result<()> {
         .with_transparent(true)
         .with_ipc_handler(move |request: http::Request<String>| {
             let msg = request.body();
+            println!("⚡ [Thor Rust Chrome IPC Rx] {}", msg);
             let payload: serde_json::Value = serde_json::from_str(msg).unwrap_or_default();
             if let Some(cmd) = payload["cmd"].as_str() {
                 match cmd {
+                    "log" => {
+                        if let Some(log_msg) = payload["message"].as_str() {
+                            println!("⚡ [Thor JS Client Log] {}", log_msg);
+                        }
+                    }
                     "expand_chrome" => {
+                        println!("⚡ [Thor Rust] Expanding chrome webview bounds to MODAL_HEIGHT (520px)");
                         if let Some(ref wv) = *chrome_for_ipc.borrow() {
                             let _ = wv.set_bounds(Rect {
                                 position: dpi::LogicalPosition::new(0.0, 0.0).into(),
@@ -67,6 +74,7 @@ pub fn run() -> anyhow::Result<()> {
                         }
                     }
                     "shrink_chrome" => {
+                        println!("⚡ [Thor Rust] Shrinking chrome webview bounds to CHROME_HEIGHT (48px)");
                         if let Some(ref wv) = *chrome_for_ipc.borrow() {
                             let _ = wv.set_bounds(Rect {
                                 position: dpi::LogicalPosition::new(0.0, 0.0).into(),
@@ -77,7 +85,7 @@ pub fn run() -> anyhow::Result<()> {
                     "navigate" => {
                         if let Some(url) = payload["url"].as_str() {
                             if let Some(ref wv) = *content_for_ipc.borrow() {
-                                println!("[Thor] Navigating content webview to: {}", url);
+                                println!("⚡ [Thor Rust] Navigating content webview to: {}", url);
                                 let _ = wv.load_url(url);
                             }
                         }
@@ -133,10 +141,14 @@ pub fn run() -> anyhow::Result<()> {
 
             function handleKey(e) {
                 const isCmdOrCtrl = e.metaKey || e.ctrlKey;
-                if (!isCmdOrCtrl) return;
-
                 const key = e.key ? e.key.toLowerCase() : '';
                 const code = e.code ? e.code.toLowerCase() : '';
+
+                if (isCmdOrCtrl) {
+                    sendIpc(JSON.stringify({ cmd: 'log', message: '[Thor Content JS Key] key=' + e.key + ' code=' + e.code + ' meta=' + e.metaKey + ' shift=' + e.shiftKey }));
+                }
+
+                if (!isCmdOrCtrl) return;
 
                 if (e.shiftKey && (key === 'k' || code === 'keyk')) {
                     e.preventDefault();
@@ -181,14 +193,22 @@ pub fn run() -> anyhow::Result<()> {
         .with_initialization_script(hotkey_script)
         .with_ipc_handler(move |request: http::Request<String>| {
             let msg = request.body();
+            println!("⚡ [Thor Rust Content IPC Rx] {}", msg);
             let payload: serde_json::Value = serde_json::from_str(msg).unwrap_or_default();
             if let Some(cmd) = payload["cmd"].as_str() {
                 if let Some(ref chrome_wv) = *chrome_for_hotkeys.borrow() {
                     match cmd {
+                        "log" => {
+                            if let Some(log_msg) = payload["message"].as_str() {
+                                println!("⚡ [Thor JS Client Log] {}", log_msg);
+                            }
+                        }
                         "hotkey_cmd_k" => {
+                            println!("⚡ [Thor Rust Handler] Hotkey CMD+K received from Content -> Triggering Command Palette");
                             let _ = chrome_wv.evaluate_script("openModalFromHotkey('features')");
                         }
                         "hotkey_cmd_shift_k" => {
+                            println!("⚡ [Thor Rust Handler] Hotkey CMD+SHIFT+K received from Content -> Triggering Bookmarks");
                             let _ = chrome_wv.evaluate_script("openModalFromHotkey('bookmarks_history')");
                         }
                         "hotkey_new_tab" => {
@@ -238,7 +258,7 @@ pub fn run() -> anyhow::Result<()> {
 
     println!("============================================================");
     println!("🚀 [Thor Shell] Matte Obsidian Developer Browser ACTIVE!");
-    println!("🚀 [Thor Shell] High Performance WKWebView loaded — ⌘K & ⌘⇧K active.");
+    println!("🚀 [Thor Shell] Logging enabled for IPC & Hotkey listeners.");
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {
@@ -249,6 +269,9 @@ pub fn run() -> anyhow::Result<()> {
             Event::WindowEvent { event, .. } => match event {
                 WindowEvent::CloseRequested => {
                     *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::KeyboardInput { event: ref key_evt, .. } => {
+                    println!("⚡ [Thor Tao Keyboard Event] {:?}", key_evt);
                 }
                 WindowEvent::Resized(new_size) => {
                     let w = new_size.width as f64;

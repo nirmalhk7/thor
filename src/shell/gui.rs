@@ -505,17 +505,25 @@ function genId() { return Math.random().toString(36).substr(2, 9); }
 
 function ipc(cmd, data) {
   const p = Object.assign({ cmd }, data || {});
+  console.log('[Thor Chrome IPC Out]', JSON.stringify(p));
   try {
     if (window.ipc && window.ipc.postMessage) {
       window.ipc.postMessage(JSON.stringify(p));
     } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
       window.webkit.messageHandlers.ipc.postMessage(JSON.stringify(p));
     }
-  } catch(e) {}
+  } catch(e) {
+    console.error('[Thor Chrome IPC Error]', e);
+  }
+}
+
+function logToRust(msg) {
+  ipc('log', { message: msg });
 }
 
 // ==================== TAB MANAGEMENT ====================
 function newTab() {
+  logToRust('[Thor JS] newTab() triggered');
   tabs.forEach(t => t.active = false);
   const newUrl = 'https://www.google.com';
   tabs.push({ id: genId(), title: 'Google', url: newUrl, active: true });
@@ -569,11 +577,13 @@ urlInput.addEventListener('keydown', (e) => {
 });
 urlInput.addEventListener('focus', () => urlInput.select());
 
-// ==================== KEYBOARD EVENT LISTENER ====================
+// ==================== KEYBOARD EVENT LISTENER WITH DETAILED LOGGING ====================
 function handleGlobalKeydown(e) {
   const isCmdOrCtrl = e.metaKey || e.ctrlKey;
   const key = e.key ? e.key.toLowerCase() : '';
   const code = e.code ? e.code.toLowerCase() : '';
+
+  logToRust(`[Thor Chrome Keydown] key='${e.key}', code='${e.code}', meta=${e.metaKey}, ctrl=${e.ctrlKey}, shift=${e.shiftKey}`);
 
   if (e.key === 'Escape') {
     closeModal();
@@ -586,6 +596,7 @@ function handleGlobalKeydown(e) {
   if (e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
+    logToRust('[Thor Chrome Hotkey Matched] CMD+SHIFT+K triggered');
     toggleModal('bookmarks_history');
     return;
   }
@@ -594,6 +605,7 @@ function handleGlobalKeydown(e) {
   if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
+    logToRust('[Thor Chrome Hotkey Matched] CMD+K triggered');
     toggleModal('features');
     return;
   }
@@ -618,6 +630,7 @@ document.addEventListener('keydown', handleGlobalKeydown, true);
 
 // ==================== MODAL LOGIC ====================
 function toggleModal(defaultTab = 'features') {
+  logToRust('[Thor JS] toggleModal(' + defaultTab + ')');
   const overlay = document.getElementById('modalOverlay');
   if (overlay.classList.contains('active')) {
     closeModal();
@@ -627,6 +640,7 @@ function toggleModal(defaultTab = 'features') {
 }
 
 function openModal(defaultTab = 'features') {
+  logToRust('[Thor JS] openModal(' + defaultTab + ')');
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.add('active');
   ipc('expand_chrome'); // Expand webview height in Rust to 520px
@@ -643,6 +657,7 @@ function openModal(defaultTab = 'features') {
 }
 
 function closeModal() {
+  logToRust('[Thor JS] closeModal()');
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.remove('active');
   ipc('shrink_chrome'); // Shrink webview height in Rust back to 48px
@@ -828,6 +843,7 @@ window.focusUrlInput = function() {
 };
 
 window.openModalFromHotkey = function(type) {
+  logToRust('[Thor JS] openModalFromHotkey(' + type + ') invoked');
   toggleModal(type);
 };
 
