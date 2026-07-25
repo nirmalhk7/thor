@@ -1,5 +1,6 @@
 pub mod compositor;
 pub mod crash_ui;
+pub mod gui;
 pub mod physics;
 pub mod shaders;
 
@@ -13,18 +14,7 @@ use winit::{
 pub fn run() -> anyhow::Result<()> {
     println!("[Thor Shell Log] Initializing native OS window event loop on main thread...");
 
-    #[cfg(target_os = "macos")]
-    println!("[Thor Shell Log] Backend: macOS Metal GPU API");
-    
-    #[cfg(target_os = "windows")]
-    println!("[Thor Shell Log] Backend: Windows DX12 GPU API");
-    
-    #[cfg(target_os = "linux")]
-    println!("[Thor Shell Log] Backend: Linux Vulkan GPU API");
-
     let event_loop = EventLoop::new()?;
-    println!("[Thor Shell Log] winit EventLoop created successfully.");
-
     let window = Arc::new(
         WindowBuilder::new()
             .with_title("Thor - Ultimate Developer Browser ⚡")
@@ -32,55 +22,59 @@ pub fn run() -> anyhow::Result<()> {
             .build(&event_loop)?,
     );
 
-    println!("[Thor Shell Log] Native OS Window handle constructed: ID {:?}", window.id());
     window.focus_window();
-    println!("[Thor Shell Log] Window focus requested from OS window manager.");
 
-    println!("[Thor Shell Log] Initializing wgpu Compositor pipeline...");
     let mut compositor = pollster::block_on(compositor::Compositor::new(Arc::clone(&window)))?;
-    println!("[Thor Shell Log] wgpu Compositor initialized. Surface size: {}x{}", compositor.size.width, compositor.size.height);
+    let egui_ctx = egui::Context::default();
+    let mut egui_state = egui_winit::State::new(
+        egui_ctx.clone(),
+        egui::ViewportId::ROOT,
+        &window,
+        Some(window.scale_factor() as f32),
+        None,
+    );
+
+    let mut gui_state = gui::ThorGuiState::new();
 
     println!("============================================================");
     println!("🚀 [Thor Shell Log] Native Obsidian Glass GPU compositor ACTIVE!");
-    println!("🚀 [Thor Shell Log] Entering 120Hz Event & Render Loop...");
+    println!("🚀 [Thor Shell Log] Rendering Posh Developer Workspace UI...");
     println!("============================================================");
-
-    let mut frame_count: u64 = 0;
 
     event_loop.run(move |event, elwt| {
         match event {
-            Event::WindowEvent { event, .. } => match event {
-                WindowEvent::CloseRequested => {
-                    println!("[Thor Shell Log] CloseRequested received. Exiting application...");
-                    elwt.exit();
+            Event::WindowEvent { event, .. } => {
+                let response = egui_state.on_window_event(&window, &event);
+                if response.repaint {
+                    window.request_redraw();
                 }
-                WindowEvent::Resized(physical_size) => {
-                    println!("[Thor Shell Log] Window Resized: {}x{}", physical_size.width, physical_size.height);
-                    compositor.resize(physical_size);
-                }
-                WindowEvent::RedrawRequested => {
-                    frame_count += 1;
-                    if frame_count <= 5 || frame_count % 300 == 0 {
-                        println!("[Thor Shell Log] Render Frame #{}", frame_count);
-                    }
 
-                    match compositor.render() {
-                        Ok(_) => {}
-                        Err(wgpu::SurfaceError::Lost) => {
-                            eprintln!("[Thor Shell Log Error] Surface lost, reconfiguring...");
-                            compositor.resize(compositor.size);
-                        }
-                        Err(wgpu::SurfaceError::OutOfMemory) => {
-                            eprintln!("[Thor Shell Log Error] Surface out of memory! Exiting...");
-                            elwt.exit();
-                        }
-                        Err(e) => {
-                            eprintln!("[Thor Shell Log Error] GPU Surface error: {:?}", e);
+                match event {
+                    WindowEvent::CloseRequested => {
+                        println!("[Thor Shell Log] CloseRequested received. Exiting application...");
+                        elwt.exit();
+                    }
+                    WindowEvent::Resized(physical_size) => {
+                        compositor.resize(physical_size);
+                    }
+                    WindowEvent::RedrawRequested => {
+                        let raw_input = egui_state.take_egui_input(&window);
+                        let full_output = egui_ctx.run(raw_input, |ctx| {
+                            gui::render_thor_ui(ctx, &mut gui_state);
+                        });
+
+                        egui_state.handle_platform_output(&window, full_output.platform_output.clone());
+
+                        match compositor.render_gui(&egui_ctx, full_output, &window) {
+                            Ok(_) => {}
+                            Err(wgpu::SurfaceError::Lost) => compositor.resize(compositor.size),
+                            Err(wgpu::SurfaceError::OutOfMemory) => elwt.exit(),
+                            Err(e) => eprintln!("[Thor Shell Log Error] GPU Surface error: {:?}", e),
                         }
                     }
+                    _ => {}
                 }
-                _ => {}
-            },
+            }
             Event::AboutToWait => {
                 window.request_redraw();
             }

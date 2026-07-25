@@ -14,6 +14,10 @@ parking_lot = "0.12"
 winit = "0.29"
 libc = "0.2"
 pollster = "0.3"
+egui = "0.26"
+egui-wgpu = "0.26"
+egui-winit = "0.26"
+
 
 
 

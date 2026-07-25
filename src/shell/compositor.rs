@@ -1,12 +1,14 @@
 use std::sync::Arc;
 use winit::window::Window;
+use egui_wgpu::Renderer;
 
 pub struct Compositor {
     surface: wgpu::Surface<'static>,
-    device: wgpu::Device,
-    queue: wgpu::Queue,
-    config: wgpu::SurfaceConfiguration,
+    pub device: wgpu::Device,
+    pub queue: wgpu::Queue,
+    pub config: wgpu::SurfaceConfiguration,
     pub size: winit::dpi::PhysicalSize<u32>,
+    pub egui_renderer: Renderer,
 }
 
 impl Compositor {
@@ -14,7 +16,6 @@ impl Compositor {
         let size = window.inner_size();
         let instance = wgpu::Instance::default();
         
-        // Safety: Window outlives surface in the event loop
         let surface = unsafe { instance.create_surface_unsafe(wgpu::SurfaceTargetUnsafe::from_window(&*window)?) }?;
         
         let adapter = instance
@@ -57,12 +58,15 @@ impl Compositor {
         };
         surface.configure(&device, &config);
 
+        let egui_renderer = Renderer::new(&device, texture_format, None, 1);
+
         Ok(Self {
             surface,
             device,
             queue,
             config,
             size,
+            egui_renderer,
         })
     }
 
@@ -75,26 +79,50 @@ impl Compositor {
         }
     }
 
-    pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
+    pub fn render_gui(
+        &mut self,
+        ctx: &egui::Context,
+        full_output: egui::FullOutput,
+        window: &Window,
+    ) -> Result<(), wgpu::SurfaceError> {
         let output = self.surface.get_current_texture()?;
         let view = output
             .texture
             .create_view(&wgpu::TextureViewDescriptor::default());
 
+        let tris = ctx.tessellate(full_output.shapes, full_output.pixels_per_point);
+
+        for (id, delta) in &full_output.textures_delta.set {
+            self.egui_renderer
+                .update_texture(&self.device, &self.queue, *id, delta);
+        }
+
+        let screen_descriptor = egui_wgpu::renderer::ScreenDescriptor {
+            size_in_pixels: [self.config.width, self.config.height],
+            pixels_per_point: window.scale_factor() as f32,
+        };
+
         let mut encoder = self
             .device
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
-                label: Some("Obsidian Glass Render Encoder"),
+                label: Some("Thor Obsidian Glass Encoder"),
             });
 
+        self.egui_renderer.update_buffers(
+            &self.device,
+            &self.queue,
+            &mut encoder,
+            &tris,
+            &screen_descriptor,
+        );
+
         {
-            let _render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Obsidian Glass Clear Pass"),
+            let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: Some("Thor Glass Render Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view: &view,
                     resolve_target: None,
                     ops: wgpu::Operations {
-                        // Obsidian Glass Dark Void: r: 0.07, g: 0.08, b: 0.11, a: 1.0 (hsl(225, 12%, 8%))
                         load: wgpu::LoadOp::Clear(wgpu::Color {
                             r: 0.07,
                             g: 0.08,
@@ -108,6 +136,13 @@ impl Compositor {
                 timestamp_writes: None,
                 occlusion_query_set: None,
             });
+
+            self.egui_renderer
+                .render(&mut render_pass, &tris, &screen_descriptor);
+        }
+
+        for id in &full_output.textures_delta.free {
+            self.egui_renderer.free_texture(id);
         }
 
         self.queue.submit(std::iter::once(encoder.finish()));
