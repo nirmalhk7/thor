@@ -1,5 +1,4 @@
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::thread;
 
 /// Represents a console.log event from the JS runtime
 #[derive(Debug, Clone)]

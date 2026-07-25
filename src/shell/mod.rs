@@ -124,19 +124,23 @@ pub fn run() -> anyhow::Result<()> {
                         }
                         "hotkey_cmd_k" => {
                             println!("⚡ [Thor Hotkey] CMD+K triggered from Content -> Opening Command Palette");
+                            let _ = chrome_wv.focus();
                             let _ = chrome_wv.evaluate_script("openModalFromHotkey('features')");
                         }
                         "hotkey_cmd_shift_k" => {
                             println!("⚡ [Thor Hotkey] CMD+SHIFT+K triggered from Content -> Opening Bookmarks");
+                            let _ = chrome_wv.focus();
                             let _ = chrome_wv.evaluate_script("openModalFromHotkey('bookmarks_history')");
                         }
                         "hotkey_new_tab" => {
+                            let _ = chrome_wv.focus();
                             let _ = chrome_wv.evaluate_script("newTab()");
                         }
                         "hotkey_close_tab" => {
                             let _ = chrome_wv.evaluate_script("const ai = tabs.findIndex(t => t.active); if (ai >= 0) closeTab(ai);");
                         }
                         "hotkey_focus_url" => {
+                            let _ = chrome_wv.focus();
                             let _ = chrome_wv.evaluate_script("focusUrlInput()");
                         }
                         "hotkey_reload" => {
@@ -193,6 +197,7 @@ pub fn run() -> anyhow::Result<()> {
                                 position: dpi::LogicalPosition::new(0.0, 0.0).into(),
                                 size: dpi::LogicalSize::new(1440.0, MODAL_HEIGHT).into(),
                             });
+                            let _ = wv.focus();
                         }
                     }
                     "shrink_chrome" => {
@@ -203,6 +208,22 @@ pub fn run() -> anyhow::Result<()> {
                                 size: dpi::LogicalSize::new(1440.0, CHROME_HEIGHT).into(),
                             });
                         }
+                        if let Some(ref wv) = *content_for_ipc.borrow() {
+                            let _ = wv.focus();
+                        }
+                    }
+                    "open_ide" => {
+                        let ide_name = payload["ide"].as_str().unwrap_or("vscode");
+                        let path = payload["path"].as_str().unwrap_or(".");
+                        let line = payload["line"].as_u64().map(|l| l as usize);
+                        let col = payload["col"].as_u64().map(|c| c as usize);
+                        let ide = match ide_name {
+                            "cursor" => crate::dx::ide_bridge::Ide::Cursor,
+                            "webstorm" => crate::dx::ide_bridge::Ide::WebStorm,
+                            _ => crate::dx::ide_bridge::Ide::VSCode,
+                        };
+                        println!("⚡ [Thor Rust] Opening file in IDE ({}): {}", ide_name, path);
+                        let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                     }
                     "navigate" => {
                         if let Some(url) = payload["url"].as_str() {

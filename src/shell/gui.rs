@@ -485,9 +485,11 @@ let historyItems = [
 
 const devToolsFeatures = [
   { icon: '🛠️', title: 'Toggle WebKit Developer Tools', action: () => ipc('toggle_devtools'), category: 'devtools', badge: 'F12 / ⌘⌥I' },
+  { icon: '💻', title: 'Open Project in VS Code', action: () => ipc('open_ide', { ide: 'vscode', path: '.' }), category: 'devtools', badge: 'vscode://' },
+  { icon: '⚡', title: 'Open Project in Cursor AI Editor', action: () => ipc('open_ide', { ide: 'cursor', path: '.' }), category: 'devtools', badge: 'cursor://' },
+  { icon: '🚀', title: 'Open Project in WebStorm', action: () => ipc('open_ide', { ide: 'webstorm', path: '.' }), category: 'devtools', badge: 'webstorm://' },
   { icon: '🧊', title: 'Obsidian 3D DOM Snapshotter', action: () => alert('Capturing 3D DOM layout tree...'), category: 'devtools', badge: 'wgpu' },
   { icon: '📐', title: 'Multi-Viewport Sync Canvas (Mobile/Tablet/Desktop)', action: () => alert('Multi-viewport sync enabled.'), category: 'devtools', badge: '120Hz' },
-  { icon: '🔗', title: 'IDE Jump (Option+Click DOM -> VS Code / Cursor)', action: () => alert('VS Code bridge ready.'), category: 'devtools', badge: 'vscode://' },
   { icon: '📊', title: 'Live SLA Metrics: Cold-Start <30ms | IPC 0.4μs', action: () => alert('SLA metrics active.'), category: 'devtools', badge: 'SPSC Ring' },
 ];
 
