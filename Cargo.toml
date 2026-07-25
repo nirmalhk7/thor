@@ -1,0 +1,21 @@
+[package]
+name = "thor"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+mimalloc = "0.1"
+wgpu = "0.19"
+glam = "0.25"
+tokio = { version = "1.36", features = ["full"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+parking_lot = "0.12"
+winit = "0.29"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.5"
+icrate = { version = "0.1", features = ["Foundation", "AppKit"] }
+
+[target.'cfg(target_os = "windows")'.dependencies]
+windows = { version = "0.54", features = ["Win32_Foundation", "Win32_UI_WindowsAndMessaging"] }
