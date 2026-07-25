@@ -53,19 +53,21 @@ pub struct WarmUpThread;
 
 impl WarmUpThread {
     pub fn prefetch_ram_on_hover(address: *mut libc::c_void, length: usize) {
+        let addr_val = address as usize;
         thread::spawn(move || {
             thread::sleep(Duration::from_millis(50));
+            let ptr = addr_val as *mut libc::c_void;
             #[cfg(target_os = "linux")]
             {
                 unsafe {
-                    libc::madvise(address, length, libc::MADV_WILLNEED);
+                    libc::madvise(ptr, length, libc::MADV_WILLNEED);
                 }
                 println!("Linux: madvise MADV_WILLNEED triggered");
             }
             #[cfg(target_os = "macos")]
             {
                 unsafe {
-                    libc::madvise(address, length, libc::MADV_WILLNEED);
+                    libc::madvise(ptr, length, libc::MADV_WILLNEED);
                 }
                 println!("macOS: madvise MADV_WILLNEED triggered");
             }
@@ -76,3 +78,4 @@ impl WarmUpThread {
         });
     }
 }
+
