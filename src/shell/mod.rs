@@ -13,7 +13,7 @@ use tao::{
 };
 use wry::{dpi, Rect, WebView, WebViewBuilder};
 
-const CHROME_HEIGHT: f64 = 96.0;
+const CHROME_HEIGHT: f64 = 48.0;
 
 pub fn run() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing native OS window event loop on main thread...");
@@ -114,6 +114,7 @@ pub fn run() -> anyhow::Result<()> {
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {
+        let _window = &window;
         *control_flow = ControlFlow::Wait;
 
         match event {
