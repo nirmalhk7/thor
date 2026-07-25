@@ -198,11 +198,13 @@ pub fn run() -> anyhow::Result<()> {
                                 size: dpi::LogicalSize::new(1440.0, MODAL_HEIGHT).into(),
                             });
                             let _ = wv.focus();
+                            let _ = wv.evaluate_script("document.body.style.height = '520px'; window.dispatchEvent(new Event('resize'));");
                         }
                     }
                     "shrink_chrome" => {
                         println!("⚡ [Thor Rust] Shrinking chrome webview bounds to CHROME_HEIGHT (48px)");
                         if let Some(ref wv) = *chrome_for_ipc.borrow() {
+                            let _ = wv.evaluate_script("document.body.style.height = '48px';");
                             let _ = wv.set_bounds(Rect {
                                 position: dpi::LogicalPosition::new(0.0, 0.0).into(),
                                 size: dpi::LogicalSize::new(1440.0, CHROME_HEIGHT).into(),

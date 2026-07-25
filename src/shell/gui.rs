@@ -239,12 +239,14 @@ pub fn get_chrome_html() -> String {
     display: none;
     position: fixed;
     top: 46px;
-    left: 0; right: 0; bottom: 0;
-    background: rgba(0, 0, 0, 0.65);
+    left: 0;
+    width: 100vw;
+    height: 474px;
+    background: rgba(0, 0, 0, 0.75);
     z-index: 100;
     align-items: flex-start;
     justify-content: center;
-    padding-top: 20px;
+    padding-top: 16px;
   }
   .modal-overlay.active {
     display: flex;
@@ -846,7 +848,7 @@ window.focusUrlInput = function() {
 
 window.openModalFromHotkey = function(type) {
   logToRust('[Thor JS] openModalFromHotkey(' + type + ') invoked');
-  toggleModal(type);
+  openModal(type);
 };
 
 // ==================== RENDER TABS ====================
