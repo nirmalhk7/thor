@@ -13,15 +13,15 @@ pub fn get_chrome_html() -> String {
     --bg-void: #0b0c10;
     --bg-chrome: #121318;
     --bg-modal: #161820;
-    --bg-card: rgba(255, 255, 255, 0.04);
-    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-card: rgba(255, 255, 255, 0.05);
+    --bg-hover: rgba(255, 255, 255, 0.08);
     --bg-active: #1e202a;
     --accent: #3b82f6;
     --text: #f1f5f9;
     --text-secondary: #94a3b8;
     --text-dim: #64748b;
     --border: rgba(255, 255, 255, 0.08);
-    --border-active: rgba(255, 255, 255, 0.2);
+    --border-active: rgba(255, 255, 255, 0.22);
     --transition: 120ms ease-out;
   }
 
@@ -421,10 +421,10 @@ pub fn get_chrome_html() -> String {
 
     <!-- Actions -->
     <div class="actions">
-      <button class="action-btn" onclick="openModal('features')" title="Command Palette (⌘K)">
+      <button class="action-btn" onclick="toggleModal('features')" title="Command Palette (⌘K)">
         <span>⌘K</span>
       </button>
-      <button class="action-btn" onclick="openModal('bookmarks_history')" title="Bookmarks & History (⌘⇧K)">
+      <button class="action-btn" onclick="toggleModal('bookmarks_history')" title="Bookmarks & History (⌘⇧K)">
         <span>⌘⇧K</span>
       </button>
       <button class="action-btn" onclick="ipc('toggle_devtools')" title="DevTools (F12)">
@@ -505,7 +505,13 @@ function genId() { return Math.random().toString(36).substr(2, 9); }
 
 function ipc(cmd, data) {
   const p = Object.assign({ cmd }, data || {});
-  if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(JSON.stringify(p));
+  try {
+    if (window.ipc && window.ipc.postMessage) {
+      window.ipc.postMessage(JSON.stringify(p));
+    } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
+      window.webkit.messageHandlers.ipc.postMessage(JSON.stringify(p));
+    }
+  } catch(e) {}
 }
 
 // ==================== TAB MANAGEMENT ====================
@@ -563,8 +569,8 @@ urlInput.addEventListener('keydown', (e) => {
 });
 urlInput.addEventListener('focus', () => urlInput.select());
 
-// ==================== CAPTURE PHASE KEYBOARD EVENT LISTENER ====================
-window.addEventListener('keydown', (e) => {
+// ==================== KEYBOARD EVENT LISTENER ====================
+function handleGlobalKeydown(e) {
   const isCmdOrCtrl = e.metaKey || e.ctrlKey;
   const key = e.key ? e.key.toLowerCase() : '';
   const code = e.code ? e.code.toLowerCase() : '';
@@ -580,7 +586,7 @@ window.addEventListener('keydown', (e) => {
   if (e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
-    openModal('bookmarks_history');
+    toggleModal('bookmarks_history');
     return;
   }
 
@@ -588,7 +594,7 @@ window.addEventListener('keydown', (e) => {
   if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
-    openModal('features');
+    toggleModal('features');
     return;
   }
 
@@ -605,9 +611,21 @@ window.addEventListener('keydown', (e) => {
     const i = parseInt(key) - 1;
     if (i < tabs.length) switchTab(i);
   }
-}, true); // Capture phase ensures hotkey fires reliably
+}
+
+window.addEventListener('keydown', handleGlobalKeydown, true);
+document.addEventListener('keydown', handleGlobalKeydown, true);
 
 // ==================== MODAL LOGIC ====================
+function toggleModal(defaultTab = 'features') {
+  const overlay = document.getElementById('modalOverlay');
+  if (overlay.classList.contains('active')) {
+    closeModal();
+  } else {
+    openModal(defaultTab);
+  }
+}
+
 function openModal(defaultTab = 'features') {
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.add('active');
@@ -810,7 +828,7 @@ window.focusUrlInput = function() {
 };
 
 window.openModalFromHotkey = function(type) {
-  openModal(type);
+  toggleModal(type);
 };
 
 // ==================== RENDER TABS ====================

@@ -120,35 +120,54 @@ pub fn run() -> anyhow::Result<()> {
 
     // Hotkey listener script to inject into content webview in capture phase
     let hotkey_script = r#"
-        window.addEventListener('keydown', (e) => {
-            const isCmdOrCtrl = e.metaKey || e.ctrlKey;
-            const key = e.key ? e.key.toLowerCase() : '';
-            const code = e.code ? e.code.toLowerCase() : '';
-
-            if (!isCmdOrCtrl) return;
-
-            if (e.shiftKey && (key === 'k' || code === 'keyk')) {
-                e.preventDefault();
-                e.stopPropagation();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
-            } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
-                e.preventDefault();
-                e.stopPropagation();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_k' }));
-            } else if (key === 't') {
-                e.preventDefault();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_new_tab' }));
-            } else if (key === 'w') {
-                e.preventDefault();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_close_tab' }));
-            } else if (key === 'l') {
-                e.preventDefault();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_focus_url' }));
-            } else if (key === 'r') {
-                e.preventDefault();
-                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_reload' }));
+        (function() {
+            function sendIpc(msg) {
+                try {
+                    if (window.ipc && window.ipc.postMessage) {
+                        window.ipc.postMessage(msg);
+                    } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
+                        window.webkit.messageHandlers.ipc.postMessage(msg);
+                    }
+                } catch(e) {}
             }
-        }, true);
+
+            function handleKey(e) {
+                const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+                if (!isCmdOrCtrl) return;
+
+                const key = e.key ? e.key.toLowerCase() : '';
+                const code = e.code ? e.code.toLowerCase() : '';
+
+                if (e.shiftKey && (key === 'k' || code === 'keyk')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
+                } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_cmd_k' }));
+                } else if (key === 't') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_new_tab' }));
+                } else if (key === 'w') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_close_tab' }));
+                } else if (key === 'l') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_focus_url' }));
+                } else if (key === 'r') {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({ cmd: 'hotkey_reload' }));
+                }
+            }
+
+            window.addEventListener('keydown', handleKey, true);
+            document.addEventListener('keydown', handleKey, true);
+        })();
     "#;
 
     // Build Content WebView — actual web pages with high-performance WKWebView configuration
