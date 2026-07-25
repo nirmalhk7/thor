@@ -17,6 +17,7 @@ use wry::{dpi, Rect, WebView, WebViewBuilder};
 use tao::platform::macos::WindowBuilderExtMacOS;
 
 const CHROME_HEIGHT: f64 = 48.0;
+const MODAL_HEIGHT: f64 = 520.0;
 
 pub fn run() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing native OS window event loop on main thread...");
@@ -40,10 +41,11 @@ pub fn run() -> anyhow::Result<()> {
     let chrome_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
     let content_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
 
-    // Clones for IPC handler (chrome → content)
+    // Clones for IPC handler (chrome → content & window bounds)
     let content_for_ipc = content_ref.clone();
+    let chrome_for_ipc = chrome_ref.clone();
 
-    // Build Chrome WebView — browser UI (tabs, address bar, navigation)
+    // Build Chrome WebView — browser UI (tabs, address bar, navigation, modals)
     let chrome = WebViewBuilder::new()
         .with_html(gui::get_chrome_html())
         .with_bounds(Rect {
@@ -55,34 +57,95 @@ pub fn run() -> anyhow::Result<()> {
             let msg = request.body();
             let payload: serde_json::Value = serde_json::from_str(msg).unwrap_or_default();
             if let Some(cmd) = payload["cmd"].as_str() {
-                if let Some(ref wv) = *content_for_ipc.borrow() {
-                    match cmd {
-                        "navigate" => {
-                            if let Some(url) = payload["url"].as_str() {
-                                println!("[Thor] Navigating to: {}", url);
+                match cmd {
+                    "expand_chrome" => {
+                        if let Some(ref wv) = *chrome_for_ipc.borrow() {
+                            let _ = wv.set_bounds(Rect {
+                                position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+                                size: dpi::LogicalSize::new(1440.0, MODAL_HEIGHT).into(),
+                            });
+                        }
+                    }
+                    "shrink_chrome" => {
+                        if let Some(ref wv) = *chrome_for_ipc.borrow() {
+                            let _ = wv.set_bounds(Rect {
+                                position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+                                size: dpi::LogicalSize::new(1440.0, CHROME_HEIGHT).into(),
+                            });
+                        }
+                    }
+                    "navigate" => {
+                        if let Some(url) = payload["url"].as_str() {
+                            if let Some(ref wv) = *content_for_ipc.borrow() {
+                                println!("[Thor] Navigating content webview to: {}", url);
                                 let _ = wv.load_url(url);
                             }
                         }
-                        "back" => { let _ = wv.evaluate_script("history.back()"); }
-                        "forward" => { let _ = wv.evaluate_script("history.forward()"); }
-                        "reload" => { let _ = wv.evaluate_script("location.reload()"); }
-                        "toggle_devtools" => {
+                    }
+                    "back" => {
+                        if let Some(ref wv) = *content_for_ipc.borrow() {
+                            let _ = wv.evaluate_script("history.back()");
+                        }
+                    }
+                    "forward" => {
+                        if let Some(ref wv) = *content_for_ipc.borrow() {
+                            let _ = wv.evaluate_script("history.forward()");
+                        }
+                    }
+                    "reload" => {
+                        if let Some(ref wv) = *content_for_ipc.borrow() {
+                            let _ = wv.evaluate_script("location.reload()");
+                        }
+                    }
+                    "toggle_devtools" => {
+                        if let Some(ref wv) = *content_for_ipc.borrow() {
                             if wv.is_devtools_open() {
                                 wv.close_devtools();
                             } else {
                                 wv.open_devtools();
                             }
                         }
-                        _ => {}
                     }
+                    _ => {}
                 }
             }
         })
         .build_as_child(&window)?;
 
-    // Clones for content handlers (content → chrome sync)
+    // Clones for content handlers (content → chrome sync & hotkeys)
     let chrome_for_title = chrome_ref.clone();
     let chrome_for_nav = chrome_ref.clone();
+    let chrome_for_hotkeys = chrome_ref.clone();
+    let content_for_hotkeys = content_ref.clone();
+
+    // Hotkey listener script to inject into content webview
+    let hotkey_script = r#"
+        window.addEventListener('keydown', (e) => {
+            const cmd = e.metaKey || e.ctrlKey;
+            if (!cmd) return;
+            const key = e.key.toLowerCase();
+
+            if (e.shiftKey && key === 'k') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
+            } else if (key === 'k') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_k' }));
+            } else if (key === 't') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_new_tab' }));
+            } else if (key === 'w') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_close_tab' }));
+            } else if (key === 'l') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_focus_url' }));
+            } else if (key === 'r') {
+                e.preventDefault();
+                window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_reload' }));
+            }
+        });
+    "#;
 
     // Build Content WebView — actual web pages
     let content = WebViewBuilder::new()
@@ -92,6 +155,38 @@ pub fn run() -> anyhow::Result<()> {
             size: dpi::LogicalSize::new(1440.0, 900.0 - CHROME_HEIGHT).into(),
         })
         .with_devtools(true)
+        .with_initialization_script(hotkey_script)
+        .with_ipc_handler(move |request: http::Request<String>| {
+            let msg = request.body();
+            let payload: serde_json::Value = serde_json::from_str(msg).unwrap_or_default();
+            if let Some(cmd) = payload["cmd"].as_str() {
+                if let Some(ref chrome_wv) = *chrome_for_hotkeys.borrow() {
+                    match cmd {
+                        "hotkey_cmd_k" => {
+                            let _ = chrome_wv.evaluate_script("openModalFromHotkey('features')");
+                        }
+                        "hotkey_cmd_shift_k" => {
+                            let _ = chrome_wv.evaluate_script("openModalFromHotkey('bookmarks_history')");
+                        }
+                        "hotkey_new_tab" => {
+                            let _ = chrome_wv.evaluate_script("newTab()");
+                        }
+                        "hotkey_close_tab" => {
+                            let _ = chrome_wv.evaluate_script("const ai = tabs.findIndex(t => t.active); if (ai >= 0) closeTab(ai);");
+                        }
+                        "hotkey_focus_url" => {
+                            let _ = chrome_wv.evaluate_script("focusUrlInput()");
+                        }
+                        "hotkey_reload" => {
+                            if let Some(ref content_wv) = *content_for_hotkeys.borrow() {
+                                let _ = content_wv.evaluate_script("location.reload()");
+                            }
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        })
         .with_document_title_changed_handler(move |title: String| {
             if let Some(ref wv) = *chrome_for_title.borrow() {
                 let escaped = serde_json::to_string(&title).unwrap_or_default();
@@ -106,8 +201,6 @@ pub fn run() -> anyhow::Result<()> {
             true // allow all navigations
         })
         .with_new_window_req_handler(|_url: String| {
-            // Block target="_blank" from opening system browser
-            // The navigation handler will catch subsequent loads
             false
         })
         .build_as_child(&window)?;
@@ -122,7 +215,7 @@ pub fn run() -> anyhow::Result<()> {
 
     println!("============================================================");
     println!("🚀 [Thor Shell] Functional developer browser ACTIVE!");
-    println!("🚀 [Thor Shell] WKWebView engine loaded — browsing enabled.");
+    println!("🚀 [Thor Shell] WKWebView engine loaded — Cmd+K & Cmd+Shift+K ready.");
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {
