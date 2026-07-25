@@ -13,16 +13,28 @@ use tao::{
 };
 use wry::{dpi, Rect, WebView, WebViewBuilder};
 
+#[cfg(target_os = "macos")]
+use tao::platform::macos::WindowBuilderExtMacOS;
+
 const CHROME_HEIGHT: f64 = 48.0;
 
 pub fn run() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing native OS window event loop on main thread...");
 
     let event_loop = EventLoop::new();
-    let window = WindowBuilder::new()
+    let mut builder = WindowBuilder::new()
         .with_title("Thor — Developer Browser ⚡")
-        .with_inner_size(tao::dpi::LogicalSize::new(1440.0, 900.0))
-        .build(&event_loop)?;
+        .with_inner_size(tao::dpi::LogicalSize::new(1440.0, 900.0));
+
+    #[cfg(target_os = "macos")]
+    {
+        builder = builder
+            .with_titlebar_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_title_hidden(true);
+    }
+
+    let window = builder.build(&event_loop)?;
 
     // Shared refs for cross-webview communication
     let chrome_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
