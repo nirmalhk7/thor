@@ -12,10 +12,17 @@ pub mod net;
 pub mod network;
 pub mod shell;
 
-#[tokio::main]
-async fn main() -> anyhow::Result<()> {
-    println!("⚡ Launching Thor Developer Browser Engine & Native Shell...");
-    shell::run().await?;
+fn main() -> anyhow::Result<()> {
+    println!("============================================================");
+    println!("⚡ [Thor Main Log] Starting Thor Developer Browser...");
+    println!("⚡ [Thor Main Log] Initializing Tokio background runtime...");
+    let _rt = tokio::runtime::Builder::new_multi_thread()
+        .enable_all()
+        .build()?;
+    println!("⚡ [Thor Main Log] Tokio runtime active.");
+    println!("⚡ [Thor Main Log] Delegating execution to native shell on main OS thread...");
+    println!("============================================================");
+
+    shell::run()?;
     Ok(())
 }
-
