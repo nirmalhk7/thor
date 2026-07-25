@@ -3,11 +3,19 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
-mod shell;
+pub mod daemon;
+pub mod devtools;
+pub mod dx;
+pub mod engine;
+pub mod ipc;
+pub mod net;
+pub mod network;
+pub mod shell;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
-    println!("Launching Thor Native Shell...");
+    println!("⚡ Launching Thor Developer Browser Engine & Native Shell...");
     shell::run().await?;
     Ok(())
 }
+
