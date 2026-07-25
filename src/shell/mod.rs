@@ -118,18 +118,22 @@ pub fn run() -> anyhow::Result<()> {
     let chrome_for_hotkeys = chrome_ref.clone();
     let content_for_hotkeys = content_ref.clone();
 
-    // Hotkey listener script to inject into content webview
+    // Hotkey listener script to inject into content webview in capture phase
     let hotkey_script = r#"
         window.addEventListener('keydown', (e) => {
-            const cmd = e.metaKey || e.ctrlKey;
-            if (!cmd) return;
-            const key = e.key.toLowerCase();
+            const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+            const key = e.key ? e.key.toLowerCase() : '';
+            const code = e.code ? e.code.toLowerCase() : '';
 
-            if (e.shiftKey && key === 'k') {
+            if (!isCmdOrCtrl) return;
+
+            if (e.shiftKey && (key === 'k' || code === 'keyk')) {
                 e.preventDefault();
+                e.stopPropagation();
                 window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
-            } else if (key === 'k') {
+            } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
                 e.preventDefault();
+                e.stopPropagation();
                 window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_cmd_k' }));
             } else if (key === 't') {
                 e.preventDefault();
@@ -144,10 +148,10 @@ pub fn run() -> anyhow::Result<()> {
                 e.preventDefault();
                 window.ipc.postMessage(JSON.stringify({ cmd: 'hotkey_reload' }));
             }
-        });
+        }, true);
     "#;
 
-    // Build Content WebView — actual web pages
+    // Build Content WebView — actual web pages with high-performance WKWebView configuration
     let content = WebViewBuilder::new()
         .with_url("https://www.google.com")
         .with_bounds(Rect {
@@ -214,8 +218,8 @@ pub fn run() -> anyhow::Result<()> {
     let content_for_resize = content_ref.clone();
 
     println!("============================================================");
-    println!("🚀 [Thor Shell] Functional developer browser ACTIVE!");
-    println!("🚀 [Thor Shell] WKWebView engine loaded — Cmd+K & Cmd+Shift+K ready.");
+    println!("🚀 [Thor Shell] Matte Obsidian Developer Browser ACTIVE!");
+    println!("🚀 [Thor Shell] High Performance WKWebView loaded — ⌘K & ⌘⇧K active.");
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {

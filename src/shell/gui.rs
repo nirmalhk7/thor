@@ -1,4 +1,4 @@
-/// Thor Browser Chrome — Obsidian Glass Developer UI
+/// Thor Browser Chrome — Clean Matte Obsidian Developer UI
 /// Returns complete HTML/CSS/JS as a string for the chrome webview.
 pub fn get_chrome_html() -> String {
     r##"<!DOCTYPE html>
@@ -10,25 +10,19 @@ pub fn get_chrome_html() -> String {
   @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
 
   :root {
-    --bg-void: #08090d;
-    --bg-chrome: rgba(12, 14, 20, 0.94);
-    --bg-modal: rgba(16, 18, 26, 0.96);
+    --bg-void: #0b0c10;
+    --bg-chrome: #121318;
+    --bg-modal: #161820;
     --bg-card: rgba(255, 255, 255, 0.04);
-    --bg-hover: rgba(255, 255, 255, 0.06);
-    --violet: #a855f7;
-    --violet-glow: rgba(168, 85, 247, 0.35);
-    --violet-dim: rgba(168, 85, 247, 0.15);
-    --cyan: #22d3ee;
-    --cyan-dim: rgba(34, 211, 238, 0.12);
-    --green: #34d399;
-    --orange: #fb923c;
-    --red: #f87171;
-    --text: #f8fafc;
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-active: #1e202a;
+    --accent: #3b82f6;
+    --text: #f1f5f9;
     --text-secondary: #94a3b8;
     --text-dim: #64748b;
     --border: rgba(255, 255, 255, 0.08);
-    --border-active: rgba(168, 85, 247, 0.5);
-    --transition: 160ms cubic-bezier(0.4, 0, 0.2, 1);
+    --border-active: rgba(255, 255, 255, 0.2);
+    --transition: 120ms ease-out;
   }
 
   * { box-sizing: border-box; margin: 0; padding: 0; }
@@ -43,37 +37,10 @@ pub fn get_chrome_html() -> String {
     -webkit-user-select: none;
   }
 
-  /* Animated gradient top edge */
-  .glow-edge {
-    height: 2px;
-    background: linear-gradient(90deg, #7c3aed, #a855f7, #22d3ee, #34d399, #fb923c, #f87171, #a855f7, #7c3aed);
-    background-size: 300% 100%;
-    animation: edgeFlow 4s ease-in-out infinite;
-    position: relative;
-    z-index: 10;
-  }
-  .glow-edge::after {
-    content: '';
-    position: absolute;
-    inset: 0;
-    background: inherit;
-    background-size: inherit;
-    animation: inherit;
-    filter: blur(6px);
-    opacity: 0.5;
-    transform: translateY(1px);
-  }
-  @keyframes edgeFlow {
-    0%, 100% { background-position: 0% 50%; }
-    50% { background-position: 100% 50%; }
-  }
-
-  /* Single-row header chrome */
+  /* Single-row header chrome - Clean Matte Dark Slate */
   .chrome-row {
     height: 46px;
     background: var(--bg-chrome);
-    backdrop-filter: blur(40px) saturate(1.4);
-    -webkit-backdrop-filter: blur(40px) saturate(1.4);
     display: flex;
     align-items: center;
     padding: 0 10px 0 78px; /* macOS traffic lights spacing */
@@ -82,16 +49,6 @@ pub fn get_chrome_html() -> String {
     position: relative;
     z-index: 5;
     -webkit-app-region: drag;
-  }
-
-  /* Noise overlay */
-  .chrome-row::before {
-    content: '';
-    position: absolute;
-    inset: 0;
-    opacity: 0.015;
-    background-image: url("data:image/svg+xml,%3Csvg viewBox='0 0 256 256' xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.9' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-    pointer-events: none;
   }
 
   /* === TABS === */
@@ -111,13 +68,13 @@ pub fn get_chrome_html() -> String {
     max-width: 180px;
     background: transparent;
     border: 1px solid transparent;
-    border-radius: 7px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
     padding: 0 8px;
     gap: 6px;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition);
     position: relative;
     flex-shrink: 1;
   }
@@ -125,30 +82,27 @@ pub fn get_chrome_html() -> String {
   .tab:hover { background: var(--bg-hover); }
 
   .tab.active {
-    background: rgba(168, 85, 247, 0.12);
-    border-color: rgba(168, 85, 247, 0.3);
-    box-shadow: 0 0 10px var(--violet-glow);
+    background: var(--bg-active);
+    border-color: var(--border-active);
   }
 
   .tab-fav {
     width: 15px; height: 15px;
-    border-radius: 4px;
+    border-radius: 3px;
     display: flex; align-items: center; justify-content: center;
     font-size: 10px; flex-shrink: 0;
     background: rgba(255,255,255,0.06);
-    color: var(--text-dim);
+    color: var(--text-secondary);
   }
   .tab.active .tab-fav {
-    background: var(--violet);
+    background: var(--accent);
     color: #fff;
-    box-shadow: 0 0 8px var(--violet-glow);
   }
 
   .tab-title {
-    font-size: 11.5px; font-weight: 500;
+    font-size: 12px; font-weight: 500;
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
     color: var(--text-secondary);
-    transition: color var(--transition);
   }
   .tab.active .tab-title { color: var(--text); font-weight: 600; }
   .tab:hover .tab-title { color: var(--text); }
@@ -163,23 +117,23 @@ pub fn get_chrome_html() -> String {
     flex-shrink: 0;
   }
   .tab:hover .tab-x, .tab.active .tab-x { opacity: 0.6; }
-  .tab-x:hover { opacity: 1 !important; background: rgba(248,113,113,0.2); color: var(--red); }
+  .tab-x:hover { opacity: 1 !important; background: rgba(255,255,255,0.12); color: var(--text); }
 
   .new-tab {
     -webkit-app-region: no-drag;
     width: 28px; height: 28px;
-    border-radius: 7px;
+    border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
     font-size: 16px; color: var(--text-secondary);
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition);
     flex-shrink: 0;
   }
-  .new-tab:hover { background: var(--violet-dim); color: var(--violet); transform: scale(1.08); }
+  .new-tab:hover { background: var(--bg-hover); color: var(--text); }
 
   /* Divider */
   .sep {
-    width: 1px; height: 20px;
+    width: 1px; height: 18px;
     background: var(--border);
     flex-shrink: 0;
     margin: 0 4px;
@@ -189,16 +143,15 @@ pub fn get_chrome_html() -> String {
   .nav-btn {
     -webkit-app-region: no-drag;
     width: 28px; height: 28px;
-    border-radius: 7px;
+    border-radius: 6px;
     border: none; background: transparent;
     color: var(--text-secondary);
     display: flex; align-items: center; justify-content: center;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition);
     flex-shrink: 0;
   }
-  .nav-btn:hover { background: var(--bg-hover); color: var(--text); transform: scale(1.06); }
-  .nav-btn:active { transform: scale(0.94); }
+  .nav-btn:hover { background: var(--bg-hover); color: var(--text); }
   .nav-btn svg { width: 14px; height: 14px; fill: currentColor; }
 
   /* Omnibox Search Bar */
@@ -206,32 +159,26 @@ pub fn get_chrome_html() -> String {
     -webkit-app-region: no-drag;
     flex: 1;
     min-width: 180px;
-    height: 32px;
-    background: rgba(0, 0, 0, 0.3);
+    height: 30px;
+    background: rgba(0, 0, 0, 0.35);
     border: 1px solid var(--border);
-    border-radius: 16px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
-    padding: 0 12px;
+    padding: 0 10px;
     gap: 8px;
-    transition: all 200ms cubic-bezier(0.4, 0, 0.2, 1);
-    position: relative;
+    transition: border-color var(--transition);
   }
   .omnibox:focus-within {
     border-color: var(--border-active);
-    box-shadow: 0 0 0 2px var(--violet-glow), 0 4px 20px rgba(0,0,0,0.3);
     background: rgba(0, 0, 0, 0.5);
   }
 
-  .ssl-dot {
-    width: 6px; height: 6px;
-    border-radius: 50%;
-    background: var(--green);
-    box-shadow: 0 0 6px rgba(52, 211, 153, 0.5);
-    animation: pulse 2s ease-in-out infinite;
+  .ssl-icon {
+    font-size: 11px;
+    color: var(--text-dim);
     flex-shrink: 0;
   }
-  @keyframes pulse { 0%,100%{opacity:1}50%{opacity:0.4} }
 
   .url-input {
     flex: 1;
@@ -240,11 +187,10 @@ pub fn get_chrome_html() -> String {
     color: var(--text);
     font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
     font-size: 12px; font-weight: 400;
-    letter-spacing: -0.02em;
+    letter-spacing: -0.01em;
     min-width: 0;
   }
   .url-input::placeholder { color: var(--text-dim); }
-  .url-input::selection { background: var(--violet-dim); }
 
   /* Actions */
   .actions {
@@ -258,7 +204,7 @@ pub fn get_chrome_html() -> String {
   .action-btn {
     height: 28px;
     padding: 0 8px;
-    border-radius: 7px;
+    border-radius: 6px;
     border: 1px solid var(--border);
     background: var(--bg-card);
     color: var(--text-secondary);
@@ -270,14 +216,14 @@ pub fn get_chrome_html() -> String {
     transition: all var(--transition);
   }
   .action-btn:hover {
-    background: var(--violet-dim);
+    background: var(--bg-hover);
     border-color: var(--border-active);
-    color: var(--violet);
+    color: var(--text);
   }
   .action-btn svg { width: 13px; height: 13px; fill: currentColor; }
 
   .kbd {
-    font-size: 9.5px;
+    font-size: 10px;
     font-weight: 600;
     color: var(--text-dim);
     background: rgba(255,255,255,0.06);
@@ -285,51 +231,40 @@ pub fn get_chrome_html() -> String {
     padding: 1px 5px;
     border-radius: 4px;
     pointer-events: none;
-    line-height: 15px;
+    line-height: 14px;
   }
 
   /* === FEATURE PALETTE MODAL OVERLAY (CMD+K / CMD+SHIFT+K) === */
   .modal-overlay {
     display: none;
     position: fixed;
-    top: 48px;
+    top: 46px;
     left: 0; right: 0; bottom: 0;
-    background: rgba(8, 9, 13, 0.7);
-    backdrop-filter: blur(16px);
-    -webkit-backdrop-filter: blur(16px);
+    background: rgba(0, 0, 0, 0.65);
     z-index: 100;
     align-items: flex-start;
     justify-content: center;
-    padding-top: 24px;
-    opacity: 0;
-    transition: opacity 180ms ease-out;
+    padding-top: 20px;
   }
   .modal-overlay.active {
     display: flex;
-    opacity: 1;
   }
 
   .modal-box {
-    width: 680px;
-    max-width: 90vw;
+    width: 660px;
+    max-width: 92vw;
     background: var(--bg-modal);
     border: 1px solid var(--border-active);
-    border-radius: 14px;
-    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6), 0 0 30px var(--violet-glow);
+    border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
     overflow: hidden;
     display: flex;
     flex-direction: column;
-    animation: modalSlide 200ms cubic-bezier(0.16, 1, 0.3, 1);
-  }
-
-  @keyframes modalSlide {
-    from { transform: translateY(-12px) scale(0.98); opacity: 0; }
-    to { transform: translateY(0) scale(1); opacity: 1; }
   }
 
   /* Modal Search Input */
   .modal-search-row {
-    padding: 14px 16px;
+    padding: 12px 14px;
     border-bottom: 1px solid var(--border);
     display: flex;
     align-items: center;
@@ -337,15 +272,15 @@ pub fn get_chrome_html() -> String {
     background: rgba(0,0,0,0.2);
   }
   .modal-search-icon {
-    color: var(--violet);
-    font-size: 16px;
+    color: var(--accent);
+    font-size: 14px;
   }
   .modal-search-input {
     flex: 1;
     background: transparent;
     border: none; outline: none;
     color: var(--text);
-    font-size: 14px;
+    font-size: 13.5px;
     font-family: 'Inter', sans-serif;
   }
   .modal-search-input::placeholder { color: var(--text-dim); }
@@ -353,52 +288,52 @@ pub fn get_chrome_html() -> String {
   /* Modal Tabs */
   .modal-tabs {
     display: flex;
-    padding: 8px 14px 0 14px;
-    gap: 6px;
+    padding: 6px 12px 0 12px;
+    gap: 4px;
     border-bottom: 1px solid var(--border);
     background: rgba(0,0,0,0.1);
   }
   .modal-tab-btn {
-    padding: 6px 12px;
-    font-size: 12px;
+    padding: 6px 10px;
+    font-size: 11.5px;
     font-weight: 500;
     color: var(--text-dim);
     border: none;
     background: transparent;
     cursor: pointer;
-    border-radius: 6px 6px 0 0;
+    border-radius: 4px 4px 0 0;
     transition: all var(--transition);
   }
   .modal-tab-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
   .modal-tab-btn.active {
-    color: var(--violet);
+    color: var(--text);
     font-weight: 600;
-    border-bottom: 2px solid var(--violet);
-    background: var(--violet-dim);
+    border-bottom: 2px solid var(--accent);
+    background: rgba(255,255,255,0.04);
   }
 
   /* Modal Items List */
   .modal-list {
     max-height: 320px;
     overflow-y: auto;
-    padding: 8px;
+    padding: 6px;
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 2px;
   }
   .modal-item {
-    padding: 10px 12px;
-    border-radius: 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     cursor: pointer;
-    transition: all var(--transition);
+    transition: background var(--transition);
     background: transparent;
   }
   .modal-item:hover, .modal-item.selected {
-    background: var(--violet-dim);
-    border: 1px solid rgba(168, 85, 247, 0.3);
+    background: var(--bg-hover);
+    border: 1px solid var(--border-active);
   }
   .modal-item-left {
     display: flex;
@@ -407,12 +342,12 @@ pub fn get_chrome_html() -> String {
     overflow: hidden;
   }
   .modal-item-icon {
-    width: 28px; height: 28px;
-    border-radius: 6px;
+    width: 26px; height: 26px;
+    border-radius: 5px;
     background: rgba(255,255,255,0.06);
     display: flex; align-items: center; justify-content: center;
-    font-size: 13px;
-    color: var(--violet);
+    font-size: 12px;
+    color: var(--text-secondary);
     flex-shrink: 0;
   }
   .modal-item-text {
@@ -421,7 +356,7 @@ pub fn get_chrome_html() -> String {
     overflow: hidden;
   }
   .modal-item-title {
-    font-size: 13px;
+    font-size: 12.5px;
     font-weight: 500;
     color: var(--text);
     white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
@@ -437,14 +372,14 @@ pub fn get_chrome_html() -> String {
     padding: 2px 6px;
     border-radius: 4px;
     background: rgba(255,255,255,0.06);
-    color: var(--cyan);
+    color: var(--text-secondary);
     font-family: monospace;
     flex-shrink: 0;
   }
 
   /* Modal Footer */
   .modal-footer {
-    padding: 8px 16px;
+    padding: 6px 14px;
     background: rgba(0,0,0,0.25);
     border-top: 1px solid var(--border);
     display: flex;
@@ -455,11 +390,10 @@ pub fn get_chrome_html() -> String {
   }
 
   ::-webkit-scrollbar { width: 4px; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.1); border-radius: 2px; }
+  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.12); border-radius: 2px; }
 </style>
 </head>
 <body>
-  <div class="glow-edge"></div>
   <div class="chrome-row">
     <!-- Tabs -->
     <div class="tabs" id="tabBar"></div>
@@ -480,14 +414,14 @@ pub fn get_chrome_html() -> String {
 
     <!-- Omnibox Search Bar -->
     <div class="omnibox">
-      <div class="ssl-dot"></div>
+      <div class="ssl-icon">🔒</div>
       <input type="text" class="url-input" id="urlInput"
              placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off">
     </div>
 
     <!-- Actions -->
     <div class="actions">
-      <button class="action-btn" onclick="openModal('features')" title="Feature Panel (⌘K)">
+      <button class="action-btn" onclick="openModal('features')" title="Command Palette (⌘K)">
         <span>⌘K</span>
       </button>
       <button class="action-btn" onclick="openModal('bookmarks_history')" title="Bookmarks & History (⌘⇧K)">
@@ -504,9 +438,9 @@ pub fn get_chrome_html() -> String {
     <div class="modal-box">
       <!-- Search Row -->
       <div class="modal-search-row">
-        <span class="modal-search-icon">⚡</span>
+        <span class="modal-search-icon">🔍</span>
         <input type="text" class="modal-search-input" id="modalSearchInput" 
-               placeholder="Type a command, bookmark, history URL, setting, or developer tool..."
+               placeholder="Type a command, bookmark, history URL, setting, or dev tool..."
                oninput="filterModalItems()" onkeydown="handleModalKeydown(event)">
         <span class="kbd">ESC to close</span>
       </div>
@@ -516,7 +450,7 @@ pub fn get_chrome_html() -> String {
         <button class="modal-tab-btn active" id="mtab-all" onclick="switchModalTab('all')">All Features</button>
         <button class="modal-tab-btn" id="mtab-bookmarks" onclick="switchModalTab('bookmarks')">Bookmarks</button>
         <button class="modal-tab-btn" id="mtab-history" onclick="switchModalTab('history')">History</button>
-        <button class="modal-tab-btn" id="mtab-devtools" onclick="switchModalTab('devtools')">Developer Tools</button>
+        <button class="modal-tab-btn" id="mtab-devtools" onclick="switchModalTab('devtools')">DevTools</button>
         <button class="modal-tab-btn" id="mtab-settings" onclick="switchModalTab('settings')">Settings</button>
       </div>
 
@@ -629,23 +563,36 @@ urlInput.addEventListener('keydown', (e) => {
 });
 urlInput.addEventListener('focus', () => urlInput.select());
 
-// ==================== KEYBOARD SHORTCUTS ====================
-document.addEventListener('keydown', (e) => {
-  const cmd = e.metaKey || e.ctrlKey;
+// ==================== CAPTURE PHASE KEYBOARD EVENT LISTENER ====================
+window.addEventListener('keydown', (e) => {
+  const isCmdOrCtrl = e.metaKey || e.ctrlKey;
+  const key = e.key ? e.key.toLowerCase() : '';
+  const code = e.code ? e.code.toLowerCase() : '';
+
   if (e.key === 'Escape') {
     closeModal();
     return;
   }
-  if (!cmd) return;
 
-  if (e.shiftKey && e.key.toLowerCase() === 'k') {
+  if (!isCmdOrCtrl) return;
+
+  // CMD+SHIFT+K (Bookmarks & History Search)
+  if (e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
+    e.stopPropagation();
     openModal('bookmarks_history');
     return;
   }
 
-  switch (e.key.toLowerCase()) {
-    case 'k': e.preventDefault(); openModal('features'); break;
+  // CMD+K (Command Palette)
+  if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
+    e.preventDefault();
+    e.stopPropagation();
+    openModal('features');
+    return;
+  }
+
+  switch (key) {
     case 't': e.preventDefault(); newTab(); break;
     case 'w': e.preventDefault(); { const i = tabs.findIndex(t => t.active); if (i >= 0) closeTab(i); } break;
     case 'l': e.preventDefault(); urlInput.focus(); break;
@@ -653,10 +600,14 @@ document.addEventListener('keydown', (e) => {
     case ']': e.preventDefault(); ipc('forward'); break;
     case 'r': e.preventDefault(); ipc('reload'); break;
   }
-  if (e.key >= '1' && e.key <= '9') { e.preventDefault(); const i = parseInt(e.key) - 1; if (i < tabs.length) switchTab(i); }
-});
+  if (key >= '1' && key <= '9') {
+    e.preventDefault();
+    const i = parseInt(key) - 1;
+    if (i < tabs.length) switchTab(i);
+  }
+}, true); // Capture phase ensures hotkey fires reliably
 
-// ==================== MODAL (CMD+K / CMD+SHIFT+K) LOGIC ====================
+// ==================== MODAL LOGIC ====================
 function openModal(defaultTab = 'features') {
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.add('active');
@@ -670,7 +621,7 @@ function openModal(defaultTab = 'features') {
 
   const sInput = document.getElementById('modalSearchInput');
   sInput.value = '';
-  setTimeout(() => sInput.focus(), 50);
+  setTimeout(() => sInput.focus(), 30);
 }
 
 function closeModal() {
@@ -729,7 +680,7 @@ function renderModalList() {
   document.getElementById('modalCounter').textContent = filteredItems.length + ' items';
 
   if (filteredItems.length === 0) {
-    listEl.innerHTML = '<div style="padding: 24px; text-align: center; color: var(--text-dim); font-size: 13px;">No matching items found. Type to search or press Enter to search Google.</div>';
+    listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 12.5px;">No matching items found. Type to search or press Enter to navigate to URL.</div>';
     return;
   }
 
@@ -836,7 +787,6 @@ window.updateUrl = function(url) {
   if (activeTab) activeTab.url = url;
   if (document.activeElement !== urlInput) urlInput.value = url;
 
-  // Record in history if real URL
   if (url && !url.startsWith('about:')) {
     const exists = historyItems.find(h => h.url === url);
     if (!exists) {
