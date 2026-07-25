@@ -27,6 +27,8 @@ pub async fn run() -> anyhow::Result<()> {
             .with_inner_size(winit::dpi::LogicalSize::new(1280.0, 800.0))
             .build(&event_loop)?,
     );
+    window.focus_window();
+
 
     let mut compositor = compositor::Compositor::new(Arc::clone(&window)).await?;
 
