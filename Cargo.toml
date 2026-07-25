@@ -17,6 +17,10 @@ pollster = "0.3"
 egui = "0.26"
 egui-wgpu = "0.26"
 egui-winit = "0.26"
+tao = "0.30"
+wry = "0.47"
+serde_json = "1.0"
+http = "1.1"
 
 
 

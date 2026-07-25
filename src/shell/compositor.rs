@@ -97,10 +97,11 @@ impl Compositor {
                 .update_texture(&self.device, &self.queue, *id, delta);
         }
 
-        let screen_descriptor = egui_wgpu::renderer::ScreenDescriptor {
+        let screen_descriptor = egui_wgpu::ScreenDescriptor {
             size_in_pixels: [self.config.width, self.config.height],
             pixels_per_point: window.scale_factor() as f32,
         };
+
 
         let mut encoder = self
             .device
