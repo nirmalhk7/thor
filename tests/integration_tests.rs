@@ -309,7 +309,7 @@ mod tests {
             }
         }"#;
 
-        let bookmarks = parse_chrome_bookmarks(json_data);
+        let bookmarks = parse_chrome_bookmarks(json_data).unwrap();
         assert_eq!(bookmarks.len(), 2);
         assert_eq!(bookmarks[0].title, "Rust Language");
         assert_eq!(bookmarks[0].item_type, PaletteItemType::Bookmark);
