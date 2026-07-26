@@ -35,7 +35,7 @@ fn create_content_tab(
         .with_user_agent(crate::net::security_shield::CHROMIUM_USER_AGENT)
         .with_back_forward_navigation_gestures(true)
         .with_bounds(Rect {
-            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+            position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
             size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
         })
         .with_devtools(true)
@@ -558,7 +558,7 @@ pub fn run() -> anyhow::Result<()> {
     let chrome = WebViewBuilder::new()
         .with_html(gui::get_chrome_html())
         .with_bounds(Rect {
-            position: dpi::LogicalPosition::new(0.0, initial_logical.height - CHROME_HEIGHT).into(),
+            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: dpi::LogicalSize::new(initial_logical.width, CHROME_HEIGHT).into(),
         })
         .with_transparent(true)
@@ -642,7 +642,7 @@ pub fn run() -> anyhow::Result<()> {
                             for (id, wv) in pool.iter() {
                                 if id == target_id {
                                     let _ = wv.set_bounds(Rect {
-                                        position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+                                        position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
                                         size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
                                     });
                                     let _ = wv.focus();
@@ -791,7 +791,7 @@ pub fn run() -> anyhow::Result<()> {
 
                     if let Some(ref wv) = *chrome_for_resize.borrow() {
                         let _ = wv.set_bounds(Rect {
-                            position: dpi::LogicalPosition::new(0.0, h - CHROME_HEIGHT).into(),
+                            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
                             size: dpi::LogicalSize::new(w, CHROME_HEIGHT).into(),
                         });
                     }
@@ -801,7 +801,7 @@ pub fn run() -> anyhow::Result<()> {
                     for (id, wv) in pool.iter() {
                         if id == &cur_active {
                             let _ = wv.set_bounds(Rect {
-                                position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+                                position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
                                 size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
                             });
                         } else {
