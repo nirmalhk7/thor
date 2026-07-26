@@ -93,11 +93,20 @@ impl SecurityShield {
     /// Get standard anti-tracking security headers to attach to requests (DNT and GPC included)
     pub fn get_security_headers() -> Vec<(&'static str, &'static str)> {
         vec![
+            ("User-Agent", CHROMIUM_USER_AGENT),
+            ("Sec-CH-UA", r#""Not/A)Brand";v="8", "Chromium";v="126", "Thor";v="1""#),
+            ("Sec-CH-UA-Mobile", "?0"),
+            ("Sec-CH-UA-Platform", r#""macOS""#),
             ("DNT", "1"),
             ("Sec-GPC", "1"), // Global Privacy Control
             ("X-Content-Type-Options", "nosniff"),
             ("X-Frame-Options", "SAMEORIGIN"),
         ]
+    }
+
+    /// Get modern Chromium standard User-Agent header string
+    pub fn chromium_user_agent() -> &'static str {
+        CHROMIUM_USER_AGENT
     }
 
     /// Get specific DNT (Do Not Track) and GPC (Global Privacy Control) headers
@@ -108,6 +117,10 @@ impl SecurityShield {
         ]
     }
 }
+
+/// Modern Chromium standard User-Agent header string (Chrome 126+)
+pub const CHROMIUM_USER_AGENT: &str =
+    "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36 Thor/1.0";
 
 #[cfg(test)]
 mod tests {

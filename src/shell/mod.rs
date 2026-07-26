@@ -32,6 +32,7 @@ fn create_content_tab(
 
     let wv = WebViewBuilder::new()
         .with_url(url)
+        .with_user_agent(crate::net::security_shield::CHROMIUM_USER_AGENT)
         .with_bounds(Rect {
             position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
             size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),

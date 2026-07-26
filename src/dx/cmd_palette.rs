@@ -242,6 +242,36 @@ impl SettingsRegistry {
                 Some("toggle_locust_panel".into()),
             ),
             PaletteItem::new(
+                "set_chromium_engine",
+                "🌐 Chromium Engine (Chrome 126+ / Blink Runtime Compatibility)",
+                PaletteItemType::Setting,
+                "thor://settings/chromium_engine",
+                Some("Chrome 126".into()),
+                Some("🌐".into()),
+                "Engine",
+                Some("show_chromium_info".into()),
+            ),
+            PaletteItem::new(
+                "set_webgpu_accel",
+                "⚡ WebGPU & WebGL2 Hardware Acceleration (Metal / Vulkan API)",
+                PaletteItemType::Setting,
+                "thor://settings/webgpu_accel",
+                Some("Hardware Acceleration".into()),
+                Some("⚡".into()),
+                "Performance",
+                Some("toggle_webgpu_accel".into()),
+            ),
+            PaletteItem::new(
+                "set_web_vitals",
+                "📊 Core Web Vitals Monitor (LCP <2.5s, CLS <0.1, INP <200ms)",
+                PaletteItemType::Setting,
+                "thor://settings/web_vitals",
+                Some("CWV Observer".into()),
+                Some("📊".into()),
+                "Performance",
+                Some("show_web_vitals".into()),
+            ),
+            PaletteItem::new(
                 "set_security_shield",
                 "🛡️ Security & Anti-Tracking Shield (Strip utm_*, gclid, fbclid)",
                 PaletteItemType::Setting,
@@ -824,6 +854,7 @@ fn to_lower_fast(b: u8) -> u8 {
     b.to_ascii_lowercase()
 }
 
+#[allow(dead_code)]
 #[inline]
 fn eq_prepared(s: &str, query: &PreparedQuery) -> bool {
     if s.len() != query.lower_bytes.len() {

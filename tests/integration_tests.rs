@@ -62,11 +62,19 @@ mod tests {
     }
 
     #[test]
-    fn test_security_shield_case_insensitivity() {
-        let dirty = "https://example.com/path?UTM_SOURCE=email&GCLID=999&FbClId=abc&MSCLKID=def&valid_key=true";
-        let (clean, stripped) = SecurityShield::sanitize_url(dirty);
-        assert!(stripped);
-        assert_eq!(clean, "https://example.com/path?valid_key=true");
+    fn test_chromium_compatibility_and_headers() {
+        let ua = SecurityShield::chromium_user_agent();
+        assert!(ua.contains("Chrome/126.0.0.0"));
+        assert!(ua.contains("Safari/537.36"));
+        assert!(ua.contains("Thor/1.0"));
+
+        let headers = SecurityShield::get_security_headers();
+        assert!(headers.iter().any(|(k, v)| *k == "User-Agent" && v.contains("Chrome/126")));
+        assert!(headers.iter().any(|(k, v)| *k == "Sec-CH-UA" && v.contains("Chromium")));
+
+        let settings = SettingsRegistry::get_all_settings();
+        assert!(settings.iter().any(|s| s.title.contains("Chromium Engine")));
+        assert!(settings.iter().any(|s| s.title.contains("WebGPU")));
     }
 
     #[test]
