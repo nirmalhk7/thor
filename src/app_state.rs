@@ -98,6 +98,7 @@ fn persist_mode(mode: ProfileMode) {
 pub struct AppState {
     profiles: ProfileManager,
     tamper: TrafficTamperEngine,
+    idor: crate::net::idor_matrix::IdorMatrixEngine,
     security: SecurityShieldToggles,
     tab_history: Mutex<TabHistoryTracker>,
     locust: Mutex<Option<LocustHandle>>,
@@ -116,10 +117,12 @@ impl AppState {
         // Interception off by default (SEC-020).
         let tamper = TrafficTamperEngine::new();
         tamper.set_interception_enabled(false);
+        let idor = crate::net::idor_matrix::IdorMatrixEngine::new();
 
         Self {
             profiles,
             tamper,
+            idor,
             security,
             tab_history: Mutex::new(TabHistoryTracker::new()),
             locust: Mutex::new(None),
@@ -137,6 +140,10 @@ impl AppState {
 
     pub fn tamper(&self) -> &TrafficTamperEngine {
         &self.tamper
+    }
+
+    pub fn idor(&self) -> &crate::net::idor_matrix::IdorMatrixEngine {
+        &self.idor
     }
 
     pub fn security(&self) -> &SecurityShieldToggles {
@@ -248,8 +255,11 @@ mod tests {
         assert_eq!(b.tab_history().get_history_for_tab("tab-1").len(), 1);
     }
 
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_app_state_locust_start_stop() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{addr}/");
@@ -269,7 +279,7 @@ mod tests {
         let state = AppState::global();
         let _ = state.locust_stop();
         state.locust_start(&url, 2, 0, 2).expect("locust_start");
-        std::thread::sleep(Duration::from_millis(600));
+        std::thread::sleep(Duration::from_millis(1000));
         assert!(state.locust_is_running() || state.locust_snapshot().is_some());
         let scored = state.locust_stop().expect("locust_stop metrics");
         assert!(scored.total_requests > 0);
@@ -278,6 +288,7 @@ mod tests {
 
     #[test]
     fn test_locust_public_blocked_without_ack() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let state = AppState::global();
         let _ = state.locust_stop();
         let err = state.locust_start("https://example.com/", 2, 0, 2);

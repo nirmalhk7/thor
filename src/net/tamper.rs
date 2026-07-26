@@ -55,44 +55,51 @@ pub struct TamperRule {
     pub match_header_key: Option<String>,
     pub replace_header_key: String,
     pub replace_header_value: String,
+}use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Debug, Default)]
+struct TamperEngineInner {
+    interception_enabled: AtomicBool,
+    pending_interceptions: RwLock<Vec<InterceptedRequest>>,
+    history: RwLock<Vec<(InterceptedRequest, Option<InterceptedResponse>)>>,
+    rules: RwLock<Vec<TamperRule>>,
 }
 
 /// Central Interceptor & Repeater engine for Thor
 #[derive(Debug, Clone, Default)]
 pub struct TrafficTamperEngine {
-    interception_enabled: Arc<RwLock<bool>>,
-    pending_interceptions: Arc<RwLock<Vec<InterceptedRequest>>>,
-    history: Arc<RwLock<Vec<(InterceptedRequest, Option<InterceptedResponse>)>>>,
-    rules: Arc<RwLock<Vec<TamperRule>>>,
+    inner: Arc<TamperEngineInner>,
 }
 
 impl TrafficTamperEngine {
     pub fn new() -> Self {
         Self {
-            interception_enabled: Arc::new(RwLock::new(false)),
-            pending_interceptions: Arc::new(RwLock::new(Vec::new())),
-            history: Arc::new(RwLock::new(Vec::new())),
-            rules: Arc::new(RwLock::new(Vec::new())),
+            inner: Arc::new(TamperEngineInner::default()),
         }
     }
 
     /// Toggle live traffic interception state
     pub fn set_interception_enabled(&self, enabled: bool) {
-        if let Ok(mut lock) = self.interception_enabled.write() {
-            *lock = enabled;
-        }
+        self.inner.interception_enabled.store(enabled, Ordering::Release);
     }
 
     pub fn is_interception_enabled(&self) -> bool {
-        *self.interception_enabled.read().unwrap_or_else(|e| e.into_inner())
+        self.inner.interception_enabled.load(Ordering::Acquire)
     }
 
     /// Process an outgoing request through rules and interception pipeline
     pub fn process_outgoing_request(&self, mut req: InterceptedRequest) -> Option<InterceptedRequest> {
         // Apply match & replace rules
-        if let Ok(rules) = self.rules.read() {
-            for rule in rules.iter().filter(|r| r.enabled) {
-                if req.url.contains(&rule.target_url_pattern) {
+        let rules = self.inner.rules.read().unwrap_or_else(|e| e.into_inner());
+        for rule in rules.iter().filter(|r| r.enabled) {
+            if req.url.contains(&rule.target_url_pattern) {
+                let mut match_ok = true;
+                if let Some(ref header_key) = rule.match_header_key {
+                    if !req.headers.contains_key(header_key) {
+                        match_ok = false;
+                    }
+                }
+                if match_ok {
                     req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
                     req.is_modified = true;
                 }
@@ -101,9 +108,8 @@ impl TrafficTamperEngine {
 
         // If interception is active, queue request for manual review/modification
         if self.is_interception_enabled() {
-            if let Ok(mut pending) = self.pending_interceptions.write() {
-                pending.push(req);
-            }
+            let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+            pending.push(req);
             None // Paused for user editing
         } else {
             Some(req)
@@ -112,47 +118,75 @@ impl TrafficTamperEngine {
 
     /// Get all pending intercepted requests waiting for manual tampering
     pub fn get_pending_requests(&self) -> Vec<InterceptedRequest> {
-        self.pending_interceptions.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner.pending_interceptions.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Forward a pending request (with optional manual edits)
     pub fn forward_request(&self, request_id: &str, edited_req: Option<InterceptedRequest>) -> Option<InterceptedRequest> {
-        if let Ok(mut pending) = self.pending_interceptions.write() {
-            if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
-                let req = pending.remove(pos);
-                return Some(edited_req.unwrap_or(req));
-            }
+        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+            let req = pending.remove(pos);
+            return Some(edited_req.unwrap_or(req));
         }
         None
     }
 
     /// Drop/cancel an intercepted request without forwarding
     pub fn drop_request(&self, request_id: &str) -> bool {
-        if let Ok(mut pending) = self.pending_interceptions.write() {
-            if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
-                pending.remove(pos);
-                return true;
-            }
+        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+            let req = pending.remove(pos);
+            self.record_history(req, None);
+            return true;
         }
         false
     }
 
     /// Record completed request/response pair into history for Repeater/Inspector
     pub fn record_history(&self, req: InterceptedRequest, resp: Option<InterceptedResponse>) {
-        if let Ok(mut hist) = self.history.write() {
-            hist.push((req, resp));
-        }
+        let mut hist = self.inner.history.write().unwrap_or_else(|e| e.into_inner());
+        hist.push((req, resp));
     }
 
     pub fn get_history(&self) -> Vec<(InterceptedRequest, Option<InterceptedResponse>)> {
-        self.history.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner.history.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Add automated tamper rule
     pub fn add_rule(&self, rule: TamperRule) {
-        if let Ok(mut rules) = self.rules.write() {
+        if let Ok(mut rules) = self.inner.rules.write() {
             rules.push(rule);
         }
+    }
+
+    /// Retrieve a specific request by ID from pending or history
+    pub fn get_request_by_id(&self, request_id: &str) -> Option<InterceptedRequest> {
+        if let Ok(pending) = self.inner.pending_interceptions.read() {
+            if let Some(req) = pending.iter().find(|r| r.id == request_id) {
+                return Some(req.clone());
+            }
+        }
+        if let Ok(hist) = self.inner.history.read() {
+            if let Some((req, _)) = hist.iter().find(|(r, _)| r.id == request_id) {
+                return Some(req.clone());
+            }
+        }
+        None
+    }
+
+    /// Retrieve the most recent recorded or intercepted request
+    pub fn get_latest_request(&self) -> Option<InterceptedRequest> {
+        if let Ok(pending) = self.inner.pending_interceptions.read() {
+            if let Some(req) = pending.last() {
+                return Some(req.clone());
+            }
+        }
+        if let Ok(hist) = self.inner.history.read() {
+            if let Some((req, _)) = hist.last() {
+                return Some(req.clone());
+            }
+        }
+        None
     }
 }
 

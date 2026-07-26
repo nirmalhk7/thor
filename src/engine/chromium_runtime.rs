@@ -560,4 +560,45 @@ mod tests {
         Arc::clone(&rt).shutdown_blocking().expect("shutdown");
         let _ = Duration::from_millis(1);
     }
+
+    #[test]
+    fn test_concurrent_tab_id_generation() {
+        use std::thread;
+        use std::collections::HashSet;
+        use std::sync::{Arc, Mutex};
+        
+        let thread_count = 10;
+        let iters_per_thread = 100_000; // 1,000,000 total IDs
+        let mut handles = vec![];
+        let results = Arc::new(Mutex::new(Vec::with_capacity(thread_count * iters_per_thread)));
+        
+        for _ in 0..thread_count {
+            let results_clone = Arc::clone(&results);
+            handles.push(thread::spawn(move || {
+                let mut local_ids = Vec::with_capacity(iters_per_thread);
+                for _ in 0..iters_per_thread {
+                    local_ids.push(crate::engine::chromium_runtime::next_tab_id().0);
+                }
+                results_clone.lock().unwrap().extend(local_ids);
+            }));
+        }
+        
+        for h in handles {
+            h.join().unwrap();
+        }
+        
+        let all_ids = results.lock().unwrap();
+        assert_eq!(all_ids.len(), thread_count * iters_per_thread, "Should generate 1,000,000 IDs");
+        
+        // Use a boolean array for fast unique check if IDs are sequential, 
+        // or a HashSet since memory is fine (1M elements in HashSet is ~16MB).
+        // A vec with sort and dedup is faster.
+        let mut sorted_ids = all_ids.clone();
+        sorted_ids.sort_unstable();
+        let original_len = sorted_ids.len();
+        sorted_ids.dedup();
+        let dedup_len = sorted_ids.len();
+        
+        assert_eq!(original_len, dedup_len, "Found {} collisions in Tab ID generation!", original_len - dedup_len);
+    }
 }

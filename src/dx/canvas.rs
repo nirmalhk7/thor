@@ -11,6 +11,7 @@ pub enum ViewportEvent {
     Scroll { x: f32, y: f32 },
     Click { x: f32, y: f32, element_id: Option<String> },
     FormInput { element_id: String, value: String },
+    DomSnapshot3D { layer_count: usize },
 }
 
 /// Multi-viewport synchronized scroll/click/form event bus across 3-6 breakpoint panes.

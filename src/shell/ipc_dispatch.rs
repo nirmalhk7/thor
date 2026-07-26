@@ -170,6 +170,22 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 DispatchResult::Err("Failed to save bookmark".into())
             }
         }
+        "run_idor_matrix" => {
+            let req_id = payload["request_id"].as_str();
+            let req = match req_id {
+                Some(id) => state.tamper().get_request_by_id(id),
+                None => state.tamper().get_latest_request(),
+            };
+            if let Some(r) = req {
+                let idor_engine = state.idor().clone();
+                let rt = tokio::runtime::Handle::current();
+                let result = rt.block_on(idor_engine.run_matrix(&r, vec![]));
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                DispatchResult::Message(format!("idor:matrix_result:{}", json))
+            } else {
+                DispatchResult::Err("No request available to run IDOR matrix scan".into())
+            }
+        }
         "remove_bookmark" => {
             let url = payload["url"].as_str().unwrap_or("").to_string();
             if url.is_empty() {

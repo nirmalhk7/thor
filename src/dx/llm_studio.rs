@@ -78,6 +78,7 @@ pub struct SseStreamParser {
     total_tokens: usize,
     accumulated_text: String,
     is_complete: bool,
+    buffer: String,
 }
 
 impl SseStreamParser {
@@ -89,15 +90,19 @@ impl SseStreamParser {
             total_tokens: 0,
             accumulated_text: String::new(),
             is_complete: false,
+            buffer: String::new(),
         }
     }
 
     /// Process a raw SSE chunk string (e.g. `data: {"choices":[{"delta":{"content":"Hello"}}]}`)
     pub fn feed_chunk(&mut self, chunk_raw: &str, current_time_ms: u64) -> SseStreamMetrics {
         self.total_chunks += 1;
+        self.buffer.push_str(chunk_raw);
 
-        // Parse content delta from SSE data frame
-        for line in chunk_raw.lines() {
+        // Process full lines from the buffer
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer.drain(..=pos);
             let trimmed = line.trim();
             if trimmed == "data: [DONE]" {
                 self.is_complete = true;
@@ -120,7 +125,9 @@ impl SseStreamParser {
                             }
                             let chunk_tokens = LlmStudio::count_tokens(text);
                             self.total_tokens += chunk_tokens;
-                            self.accumulated_text.push_str(text);
+                            if self.accumulated_text.len() < 10_000_000 {
+                                self.accumulated_text.push_str(text);
+                            }
                         }
                     }
                 } else if !payload.is_empty() && payload != "[DONE]" {
@@ -130,7 +137,9 @@ impl SseStreamParser {
                     }
                     let chunk_tokens = LlmStudio::count_tokens(payload);
                     self.total_tokens += chunk_tokens;
-                    self.accumulated_text.push_str(payload);
+                    if self.accumulated_text.len() < 10_000_000 {
+                        self.accumulated_text.push_str(payload);
+                    }
                 }
             }
         }
@@ -170,7 +179,11 @@ impl LlmStudio {
         if text.is_empty() {
             return 0;
         }
-        let char_count = text.chars().count();
+        let char_count = if text.is_ascii() {
+            text.len()
+        } else {
+            text.chars().count()
+        };
         let word_count = text.split_whitespace().count();
 
         // Blend character-based and word-based estimation

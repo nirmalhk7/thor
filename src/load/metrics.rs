@@ -111,10 +111,15 @@ impl MetricsCollector {
             let avg = sum / (lats.len() as f64);
             let min = lats[0];
             let max = lats[lats.len() - 1];
-            let p50 = lats[(lats.len() as f64 * 0.50) as usize % lats.len()];
-            let p90 = lats[(lats.len() as f64 * 0.90) as usize % lats.len()];
-            let p95 = lats[(lats.len() as f64 * 0.95) as usize % lats.len()];
-            let p99 = lats[(lats.len() as f64 * 0.99) as usize % lats.len()];
+            let last_idx = lats.len() - 1;
+            let calc_p = |pct: f64| -> f64 {
+                let idx = ((last_idx as f64) * pct).round() as usize;
+                lats[idx.min(last_idx)]
+            };
+            let p50 = calc_p(0.50);
+            let p90 = calc_p(0.90);
+            let p95 = calc_p(0.95);
+            let p99 = calc_p(0.99);
             (min, max, avg, p50, p90, p95, p99)
         };
 

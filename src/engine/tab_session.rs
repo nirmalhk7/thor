@@ -7,10 +7,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
+use chromiumoxide::cdp::browser_protocol::network::ClearBrowserCookiesParams;
 use chromiumoxide::cdp::browser_protocol::page::{
     BringToFrontParams, GetNavigationHistoryParams, NavigateToHistoryEntryParams,
     StopLoadingParams,
 };
+use chromiumoxide::cdp::browser_protocol::storage::ClearDataForOriginParams;
 use chromiumoxide::cdp::browser_protocol::target::{
     ActivateTargetParams, OpenDevToolsParams, TargetId,
 };
@@ -68,11 +70,13 @@ impl IdentityContext {
     }
 
     pub fn ephemeral(profile_id: &str) -> Self {
+        static NEXT_EPHEMERAL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        Self::new(&format!("ephemeral-{nanos}"), profile_id, true)
+        let counter = NEXT_EPHEMERAL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self::new(&format!("ephemeral-{nanos}-{counter}"), profile_id, true)
     }
 
     pub fn set_cookie(&mut self, key: &str, val: &str) {
@@ -554,13 +558,26 @@ impl TabSession {
     /// Close the CDP target and expire session.
     pub async fn close(self) -> ChromiumResult<()> {
         *self.lifecycle.write() = TabLifecycle::Expired;
-        if self.is_ephemeral_context() {
+        let is_ephemeral = self.is_ephemeral_context();
+        if is_ephemeral {
             self.identity_context.lock().cookies.clear();
             self.identity_context.lock().local_storage.clear();
             self.identity_context.lock().auth_tokens.clear();
         }
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
+            if is_ephemeral {
+                if let Ok(Some(url)) = page.url().await {
+                    if !url.is_empty() {
+                        let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
+                        if !origin.is_empty() {
+                            let _ = page
+                                .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
+                                .await;
+                        }
+                    }
+                }
+            }
             page.close().await?;
         }
         Ok(())
@@ -568,7 +585,8 @@ impl TabSession {
 
     pub fn close_blocking(self) -> ChromiumResult<()> {
         *self.lifecycle.write() = TabLifecycle::Expired;
-        if self.is_ephemeral_context() {
+        let is_ephemeral = self.is_ephemeral_context();
+        if is_ephemeral {
             self.identity_context.lock().cookies.clear();
             self.identity_context.lock().local_storage.clear();
             self.identity_context.lock().auth_tokens.clear();
@@ -577,6 +595,18 @@ impl TabSession {
         if let Some(page) = page_opt {
             let handle = self.runtime.handle().clone();
             block_on_handle(&handle, async move {
+                if is_ephemeral {
+                    if let Ok(Some(url)) = page.url().await {
+                        if !url.is_empty() {
+                            let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
+                            if !origin.is_empty() {
+                                let _ = page
+                                    .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
+                                    .await;
+                            }
+                        }
+                    }
+                }
                 page.close().await?;
                 Ok(())
             })
@@ -657,5 +687,45 @@ mod tests {
         assert_eq!(ctx.get_cookie("session_id").map(|s| s.as_str()), Some("secret_123"));
         assert_eq!(ctx.get_local_storage("theme").map(|s| s.as_str()), Some("dark"));
         assert_eq!(ctx.get_auth_token("api.dev").map(|s| s.as_str()), Some("Bearer token_xyz"));
+    }
+
+    #[test]
+    fn test_ephemeral_identity_context_collision() {
+        use std::thread;
+        use std::collections::HashSet;
+        use std::sync::{Arc, Mutex};
+        
+        let thread_count = 10;
+        let iters = 1000;
+        let mut handles = vec![];
+        let results = Arc::new(Mutex::new(Vec::new()));
+        
+        for _ in 0..thread_count {
+            let results_clone = Arc::clone(&results);
+            handles.push(thread::spawn(move || {
+                let mut local_ids = Vec::new();
+                for _ in 0..iters {
+                    let ctx = IdentityContext::ephemeral("dev_host");
+                    local_ids.push(ctx.id);
+                }
+                results_clone.lock().unwrap().extend(local_ids);
+            }));
+        }
+        
+        for h in handles {
+            h.join().unwrap();
+        }
+        
+        let all_ids = results.lock().unwrap();
+        let mut unique_ids = HashSet::new();
+        let mut collisions = 0;
+        for id in all_ids.iter() {
+            if !unique_ids.insert(id.clone()) {
+                collisions += 1;
+            }
+        }
+        
+        // Assert no collisions
+        assert_eq!(collisions, 0, "Found {} collisions in ephemeral ID generation!", collisions);
     }
 }

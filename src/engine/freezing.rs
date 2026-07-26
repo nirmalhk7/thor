@@ -102,6 +102,40 @@ impl WarmUpThread {
     }
 }
 
+use super::tab_session::TabLifecycle;
+
+/// State machine manager for 4-Stage Tab Lifecycle
+/// (Active -> Frozen -> Discarded -> Expired).
+pub struct TabLifecycleManager;
+
+impl TabLifecycleManager {
+    /// Validate state transition according to 4-Stage Lifecycle rules
+    pub fn can_transition(from: TabLifecycle, to: TabLifecycle) -> bool {
+        match (from, to) {
+            (a, b) if a == b => true,
+            (TabLifecycle::Expired, _) => false,
+            (TabLifecycle::Active, TabLifecycle::Frozen)
+            | (TabLifecycle::Active, TabLifecycle::Discarded)
+            | (TabLifecycle::Active, TabLifecycle::Expired) => true,
+            (TabLifecycle::Frozen, TabLifecycle::Active)
+            | (TabLifecycle::Frozen, TabLifecycle::Discarded)
+            | (TabLifecycle::Frozen, TabLifecycle::Expired) => true,
+            (TabLifecycle::Discarded, TabLifecycle::Active)
+            | (TabLifecycle::Discarded, TabLifecycle::Expired) => true,
+            _ => false,
+        }
+    }
+
+    /// Perform validated state transition
+    pub fn transition(current: TabLifecycle, next: TabLifecycle) -> Result<TabLifecycle, String> {
+        if Self::can_transition(current, next) {
+            Ok(next)
+        } else {
+            Err(format!("Invalid 4-Stage Lifecycle transition from {:?} to {:?}", current, next))
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -114,5 +148,17 @@ mod tests {
             let err = ProcessFreezer::freeze_process(u32::MAX - 2);
             assert!(err.is_err());
         }
+    }
+
+    #[test]
+    fn test_four_stage_lifecycle_transitions() {
+        assert!(TabLifecycleManager::can_transition(TabLifecycle::Active, TabLifecycle::Frozen));
+        assert!(TabLifecycleManager::can_transition(TabLifecycle::Frozen, TabLifecycle::Discarded));
+        assert!(TabLifecycleManager::can_transition(TabLifecycle::Discarded, TabLifecycle::Expired));
+        assert!(TabLifecycleManager::can_transition(TabLifecycle::Discarded, TabLifecycle::Active));
+        assert!(!TabLifecycleManager::can_transition(TabLifecycle::Expired, TabLifecycle::Active));
+
+        let state = TabLifecycleManager::transition(TabLifecycle::Active, TabLifecycle::Frozen).unwrap();
+        assert_eq!(state, TabLifecycle::Frozen);
     }
 }

@@ -26,7 +26,8 @@ use super::{
 
 #[cfg(target_os = "macos")]
 use super::{
-    open_tool_in_omnibar_chromium, run_omnibar_tool_go_chromium, setup_macos_app_menu,
+    open_tool_in_omnibar_chromium, run_omnibar_tool_go_chromium, setup_macos_app_icon,
+    setup_macos_app_menu,
 };
 
 #[cfg(target_os = "macos")]
@@ -36,7 +37,10 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing Chromium dual-window shell...");
 
     #[cfg(target_os = "macos")]
-    setup_macos_app_menu();
+    {
+        setup_macos_app_menu();
+        setup_macos_app_icon();
+    }
 
     let _ = AppState::global();
 

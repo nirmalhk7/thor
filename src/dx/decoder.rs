@@ -109,36 +109,48 @@ impl DecoderStudio {
     }
 
     fn is_hex(s: &str) -> bool {
-        !s.is_empty() && s.len() % 2 == 0 && s.chars().all(|c| c.is_ascii_hexdigit())
+        !s.is_empty() && s.len() % 2 == 0 && s.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
     fn is_base64(s: &str) -> bool {
         if s.is_empty() || s.len() % 4 != 0 {
             return false;
         }
-        s.chars().all(|c| c.is_ascii_alphanumeric() || c == '+' || c == '/' || c == '=')
+        s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
     }
 
-    /// Helper URL-safe base64 decoder
+    /// Helper URL-safe base64 decoder (zero dynamic map allocation)
     pub fn decode_base64_url(s: &str) -> Result<Vec<u8>, String> {
-        let mut base64_str = s.replace('-', "+").replace('_', "/");
-        while base64_str.len() % 4 != 0 {
-            base64_str.push('=');
+        let bytes = s.as_bytes();
+        let mut clean_bytes = Vec::with_capacity(bytes.len());
+        for &b in bytes {
+            if b != b'=' && !b.is_ascii_whitespace() {
+                clean_bytes.push(b);
+            }
+        }
+        if clean_bytes.is_empty() {
+            return Ok(Vec::new());
         }
 
-        use std::collections::HashMap;
-        let b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-        let char_map: HashMap<char, u8> = b64_chars.chars().zip(0..64).collect();
+        #[inline(always)]
+        fn b64_val(b: u8) -> Result<u32, &'static str> {
+            match b {
+                b'A'..=b'Z' => Ok((b - b'A') as u32),
+                b'a'..=b'z' => Ok((b - b'a' + 26) as u32),
+                b'0'..=b'9' => Ok((b - b'0' + 52) as u32),
+                b'+' | b'-' => Ok(62),
+                b'/' | b'_' => Ok(63),
+                _ => Err("Invalid base64 character"),
+            }
+        }
 
-        let clean_bytes: Vec<u8> = base64_str.bytes().filter(|&b| b != b'=').collect();
-        let mut out = Vec::new();
-
+        let mut out = Vec::with_capacity((clean_bytes.len() * 3) / 4);
         let mut i = 0;
         while i < clean_bytes.len() {
-            let b0 = *char_map.get(&(clean_bytes[i] as char)).ok_or("Invalid char")? as u32;
-            let b1 = if i + 1 < clean_bytes.len() { *char_map.get(&(clean_bytes[i + 1] as char)).ok_or("Invalid char")? as u32 } else { 0 };
-            let b2 = if i + 2 < clean_bytes.len() { *char_map.get(&(clean_bytes[i + 2] as char)).ok_or("Invalid char")? as u32 } else { 0 };
-            let b3 = if i + 3 < clean_bytes.len() { *char_map.get(&(clean_bytes[i + 3] as char)).ok_or("Invalid char")? as u32 } else { 0 };
+            let b0 = b64_val(clean_bytes[i])?;
+            let b1 = if i + 1 < clean_bytes.len() { b64_val(clean_bytes[i + 1])? } else { 0 };
+            let b2 = if i + 2 < clean_bytes.len() { b64_val(clean_bytes[i + 2])? } else { 0 };
+            let b3 = if i + 3 < clean_bytes.len() { b64_val(clean_bytes[i + 3])? } else { 0 };
 
             let triple = (b0 << 18) | (b1 << 12) | (b2 << 6) | b3;
 

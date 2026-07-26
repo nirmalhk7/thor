@@ -1423,6 +1423,10 @@ fn run_omnibar_tool_go(
             }
             false
         }
+        native_toolbar::ChromeToolMode::Idor => {
+            tb.set_status("Running IDOR scan…");
+            false
+        }
     }
 }
 
@@ -1575,6 +1579,29 @@ pub(crate) fn setup_macos_app_menu() {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn setup_macos_app_icon() {
+    use cocoa::appkit::NSApp;
+    use cocoa::base::{id, nil};
+    use cocoa::foundation::NSData;
+    use objc::{class, msg_send, sel, sel_impl};
+
+    unsafe {
+        let icon_bytes = include_bytes!("../../assets/thor_app_icon.jpg");
+        let data = NSData::dataWithBytes_length_(
+            nil,
+            icon_bytes.as_ptr() as *const std::ffi::c_void,
+            icon_bytes.len() as u64,
+        );
+        let image: id = msg_send![class!(NSImage), alloc];
+        let image: id = msg_send![image, initWithData: data];
+        if !image.is_null() {
+            let app = NSApp();
+            let _: () = msg_send![app, setApplicationIconImage: image];
+        }
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     run_wry_shell()
 }
@@ -1587,7 +1614,10 @@ fn run_wry_shell() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing wry in-window shell...");
 
     #[cfg(target_os = "macos")]
-    setup_macos_app_menu();
+    {
+        setup_macos_app_menu();
+        setup_macos_app_icon();
+    }
 
     let _ = AppState::global();
     let _ = CHROME_HEIGHT; // keep referenced
@@ -2089,6 +2119,21 @@ pub(crate) fn open_tool_in_omnibar_chromium(
                     s["intercept"]
                 ));
             }
+            native_toolbar::ChromeToolMode::Idor => {
+                tb.set_tool_mode(mode);
+                match ipc_dispatch::dispatch_privileged("run_idor_matrix", &serde_json::json!({})) {
+                    ipc_dispatch::DispatchResult::Message(m) => {
+                        let summary = if m.contains("vulnerability_count") {
+                            "IDOR scan finished"
+                        } else {
+                            &m
+                        };
+                        tb.set_status(summary);
+                    }
+                    ipc_dispatch::DispatchResult::Err(e) => tb.set_status(&format!("IDOR Err: {e}")),
+                    _ => tb.set_status("IDOR scan completed"),
+                }
+            }
             _ => {
                 tb.set_tool_mode(mode);
             }
@@ -2226,6 +2271,10 @@ pub(crate) fn run_omnibar_tool_go_chromium(
             })();"#;
             let _ = tabs.evaluate_active(script);
             tb.set_status("Capturing…");
+            false
+        }
+        native_toolbar::ChromeToolMode::Idor => {
+            tb.set_status("Running IDOR scan…");
             false
         }
     }
