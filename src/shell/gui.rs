@@ -440,10 +440,6 @@ pub fn get_chrome_html() -> String {
     </div>
   </div>
 
-  <!-- Content Viewport -->
-  <iframe id="contentFrame" src="https://www.google.com" 
-          style="width: 100vw; height: calc(100vh - 46px); border: none; background: #ffffff; display: block;"></iframe>
-
   <!-- FEATURE PALETTE / BOOKMARKS MODAL -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBackdrop(event)">
     <div class="modal-box">
@@ -535,10 +531,7 @@ function logToRust(msg) {
 }
 
 function loadContentUrl(url) {
-  const iframe = document.getElementById('contentFrame');
-  if (iframe) {
-    iframe.src = url;
-  }
+  ipc('navigate', { url });
   updateSslStatus(url);
 }
 
@@ -635,9 +628,9 @@ function handleGlobalKeydown(e) {
     case 't': e.preventDefault(); newTab(); break;
     case 'w': e.preventDefault(); { const i = tabs.findIndex(t => t.active); if (i >= 0) closeTab(i); } break;
     case 'l': e.preventDefault(); urlInput.focus(); break;
-    case '[': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.history.back(); } break;
-    case ']': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.history.forward(); } break;
-    case 'r': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.location.reload(); } break;
+    case '[': e.preventDefault(); ipc('back'); break;
+    case ']': e.preventDefault(); ipc('forward'); break;
+    case 'r': e.preventDefault(); ipc('reload'); break;
   }
   if (key >= '1' && key <= '9') {
     e.preventDefault();
