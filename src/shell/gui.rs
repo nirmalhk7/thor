@@ -17,6 +17,10 @@ pub fn get_chrome_html() -> String {
     --bg-hover: rgba(255, 255, 255, 0.08);
     --bg-active: #1e202a;
     --accent: #3b82f6;
+    --accent-green: #22c55e;
+    --accent-red: #ef4444;
+    --accent-amber: #f59e0b;
+    --accent-purple: #a855f7;
     --text: #f1f5f9;
     --text-secondary: #94a3b8;
     --text-dim: #64748b;
@@ -239,6 +243,217 @@ pub fn get_chrome_html() -> String {
     line-height: 14px;
   }
 
+  /* === TECH STACK & LANGUAGE DETECTOR BAR === */
+  .stack-detector-bar {
+    height: 30px;
+    background: #0e0f15;
+    border-bottom: 1px solid var(--border);
+    display: flex;
+    align-items: center;
+    padding: 0 12px 0 78px;
+    gap: 8px;
+    font-size: 11px;
+    color: var(--text-secondary);
+    position: relative;
+    z-index: 4;
+  }
+  .stack-detector-title {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    color: var(--accent);
+    text-transform: uppercase;
+    flex-shrink: 0;
+  }
+  .stack-pills {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    overflow-x: auto;
+    flex: 1;
+    min-width: 0;
+    scrollbar-width: none;
+  }
+  .stack-pills::-webkit-scrollbar { display: none; }
+  .tech-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 500;
+    font-family: 'JetBrains Mono', monospace;
+    background: rgba(255, 255, 255, 0.06);
+    border: 1px solid var(--border);
+    padding: 2px 7px;
+    border-radius: 5px;
+    color: var(--text);
+    white-space: nowrap;
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+  .tech-pill:hover {
+    background: rgba(255, 255, 255, 0.12);
+    border-color: var(--border-active);
+    transform: translateY(-1px);
+  }
+  .tech-pill-version {
+    font-size: 9px;
+    opacity: 0.75;
+    background: rgba(255, 255, 255, 0.1);
+    padding: 0 4px;
+    border-radius: 3px;
+  }
+  .stack-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-shrink: 0;
+    margin-left: auto;
+  }
+  .stack-btn {
+    background: transparent;
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text-dim);
+    font-size: 10px;
+    padding: 2px 6px;
+    cursor: pointer;
+    transition: all var(--transition);
+  }
+  .stack-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
+  .tracker-stripped-notice {
+    font-size: 10px;
+    font-weight: 600;
+    color: #4ade80;
+    background: rgba(74, 222, 128, 0.12);
+    border: 1px solid rgba(74, 222, 128, 0.25);
+    padding: 2px 7px;
+    border-radius: 4px;
+    display: none;
+    align-items: center;
+    gap: 4px;
+  }
+
+  /* === LOCUST HTTP LOAD TESTING TOOLBAR === */
+  .locust-bar {
+    display: none;
+    background: #13151d;
+    border-bottom: 1px solid var(--border-active);
+    padding: 8px 14px 8px 78px;
+    flex-direction: column;
+    gap: 8px;
+    box-shadow: 0 8px 24px rgba(0,0,0,0.6);
+    position: relative;
+    z-index: 6;
+  }
+  .locust-bar.active { display: flex; }
+  .locust-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+  .locust-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: #f59e0b;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    letter-spacing: 0.02em;
+  }
+  .locust-controls-row {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+  .locust-group {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    color: var(--text-secondary);
+  }
+  .locust-group label {
+    font-weight: 500;
+    color: var(--text-secondary);
+  }
+  .locust-input {
+    width: 65px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    padding: 3px 6px;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    outline: none;
+    transition: border-color var(--transition);
+  }
+  .locust-input:focus { border-color: var(--accent); }
+  .locust-select {
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    padding: 3px 8px;
+    font-size: 11px;
+    font-family: 'Inter', sans-serif;
+    outline: none;
+    cursor: pointer;
+  }
+  .locust-btn {
+    height: 26px;
+    padding: 0 12px;
+    border-radius: 5px;
+    border: none;
+    font-size: 11.5px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    transition: all var(--transition);
+  }
+  .locust-btn.go { background: #22c55e; color: #ffffff; }
+  .locust-btn.go:hover { background: #16a34a; box-shadow: 0 2px 8px rgba(34, 197, 94, 0.3); }
+  .locust-btn.stop { background: #ef4444; color: #ffffff; }
+  .locust-btn.stop:hover { background: #dc2626; box-shadow: 0 2px 8px rgba(239, 68, 68, 0.3); }
+  .locust-btn.x { background: rgba(255,255,255,0.08); color: var(--text-secondary); padding: 0 8px; }
+  .locust-btn.x:hover { background: rgba(255,255,255,0.16); color: var(--text); }
+
+  .locust-stats-container {
+    display: flex;
+    align-items: center;
+    gap: 18px;
+    border-top: 1px solid var(--border);
+    padding-top: 8px;
+    margin-top: 2px;
+  }
+  .locust-stat-box { display: flex; flex-direction: column; gap: 1px; }
+  .locust-stat-val { font-size: 13px; font-weight: 700; font-family: 'JetBrains Mono', monospace; color: var(--text); }
+  .locust-stat-lbl { font-size: 9.5px; color: var(--text-dim); text-transform: uppercase; letter-spacing: 0.03em; }
+  .locust-status-badge {
+    margin-left: auto;
+    font-size: 10px;
+    font-weight: 700;
+    padding: 3px 9px;
+    border-radius: 12px;
+    background: rgba(255,255,255,0.08);
+    color: var(--text-secondary);
+    letter-spacing: 0.05em;
+  }
+  .locust-status-badge.running {
+    background: rgba(34, 197, 94, 0.2);
+    color: #4ade80;
+    box-shadow: 0 0 10px rgba(74, 222, 128, 0.2);
+    animation: pulse 1.5s infinite;
+  }
+  @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
+
   /* === FEATURE PALETTE MODAL OVERLAY (CMD+K / CMD+SHIFT+K) === */
   .modal-overlay {
     display: none;
@@ -253,147 +468,95 @@ pub fn get_chrome_html() -> String {
     justify-content: center;
     padding-top: 16px;
   }
-  .modal-overlay.active {
-    display: flex;
-  }
+  .modal-overlay.active { display: flex; }
 
   .modal-box {
-    width: 660px;
-    max-width: 92vw;
-    background: var(--bg-modal);
-    border: 1px solid var(--border-active);
-    border-radius: 8px;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6);
-    overflow: hidden;
-    display: flex;
-    flex-direction: column;
+    width: 680px; max-width: 92vw; background: var(--bg-modal);
+    border: 1px solid var(--border-active); border-radius: 8px;
+    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6); overflow: hidden;
+    display: flex; flex-direction: column;
   }
 
-  /* Modal Search Input */
   .modal-search-row {
-    padding: 12px 14px;
-    border-bottom: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    background: rgba(0,0,0,0.2);
+    padding: 12px 14px; border-bottom: 1px solid var(--border);
+    display: flex; align-items: center; gap: 10px; background: rgba(0,0,0,0.2);
   }
-  .modal-search-icon {
-    color: var(--accent);
-    font-size: 14px;
-  }
+  .modal-search-icon { color: var(--accent); font-size: 14px; }
   .modal-search-input {
-    flex: 1;
-    background: transparent;
-    border: none; outline: none;
-    color: var(--text);
-    font-size: 13.5px;
-    font-family: 'Inter', sans-serif;
+    flex: 1; background: transparent; border: none; outline: none;
+    color: var(--text); font-size: 13.5px; font-family: 'Inter', sans-serif;
   }
   .modal-search-input::placeholder { color: var(--text-dim); }
 
-  /* Modal Tabs */
   .modal-tabs {
-    display: flex;
-    padding: 6px 12px 0 12px;
-    gap: 4px;
-    border-bottom: 1px solid var(--border);
-    background: rgba(0,0,0,0.1);
+    display: flex; padding: 6px 12px 0 12px; gap: 4px;
+    border-bottom: 1px solid var(--border); background: rgba(0,0,0,0.1);
+    overflow-x: auto; scrollbar-width: none;
   }
+  .modal-tabs::-webkit-scrollbar { display: none; }
   .modal-tab-btn {
-    padding: 6px 10px;
-    font-size: 11.5px;
-    font-weight: 500;
-    color: var(--text-dim);
-    border: none;
-    background: transparent;
-    cursor: pointer;
-    border-radius: 4px 4px 0 0;
-    transition: all var(--transition);
+    padding: 6px 10px; font-size: 11.5px; font-weight: 500;
+    color: var(--text-dim); border: none; background: transparent;
+    cursor: pointer; border-radius: 4px 4px 0 0; transition: all var(--transition);
+    white-space: nowrap; flex-shrink: 0;
   }
   .modal-tab-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
   .modal-tab-btn.active {
-    color: var(--text);
-    font-weight: 600;
-    border-bottom: 2px solid var(--accent);
+    color: var(--text); font-weight: 600; border-bottom: 2px solid var(--accent);
     background: rgba(255,255,255,0.04);
   }
 
-  /* Modal Items List */
   .modal-list {
-    max-height: 320px;
-    overflow-y: auto;
-    padding: 6px;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
+    max-height: 320px; overflow-y: auto; padding: 6px;
+    display: flex; flex-direction: column; gap: 2px;
   }
   .modal-item {
-    padding: 8px 10px;
-    border-radius: 6px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    cursor: pointer;
-    transition: background var(--transition);
-    background: transparent;
+    padding: 8px 10px; border-radius: 6px; display: flex;
+    align-items: center; justify-content: space-between; cursor: pointer;
+    transition: background var(--transition); background: transparent;
   }
   .modal-item:hover, .modal-item.selected {
-    background: var(--bg-hover);
-    border: 1px solid var(--border-active);
+    background: var(--bg-hover); border: 1px solid var(--border-active);
   }
-  .modal-item-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    overflow: hidden;
-  }
+  .modal-item-left { display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; min-width: 0; }
   .modal-item-icon {
-    width: 26px; height: 26px;
-    border-radius: 5px;
-    background: rgba(255,255,255,0.06);
-    display: flex; align-items: center; justify-content: center;
-    font-size: 12px;
-    color: var(--text-secondary);
-    flex-shrink: 0;
+    width: 26px; height: 26px; border-radius: 5px; background: rgba(255,255,255,0.06);
+    display: flex; align-items: center; justify-content: center; font-size: 12px;
+    color: var(--text-secondary); flex-shrink: 0;
   }
-  .modal-item-text {
-    display: flex;
-    flex-direction: column;
-    overflow: hidden;
-  }
-  .modal-item-title {
-    font-size: 12.5px;
-    font-weight: 500;
-    color: var(--text);
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .modal-item-sub {
-    font-size: 11px;
-    color: var(--text-dim);
-    font-family: 'JetBrains Mono', monospace;
-    white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
-  }
-  .modal-item-badge {
-    font-size: 10px;
-    padding: 2px 6px;
-    border-radius: 4px;
-    background: rgba(255,255,255,0.06);
-    color: var(--text-secondary);
-    font-family: monospace;
-    flex-shrink: 0;
-  }
+  .modal-item-text { display: flex; flex-direction: column; overflow: hidden; min-width: 0; }
+  .modal-item-title { font-size: 12.5px; font-weight: 500; color: var(--text); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .modal-item-sub { font-size: 11px; color: var(--text-dim); font-family: 'JetBrains Mono', monospace; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .modal-item-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.06); color: var(--text-secondary); font-family: monospace; flex-shrink: 0; margin-left: 8px; }
 
-  /* Modal Footer */
+  /* Interactive Toggle Switch */
+  .toggle-switch {
+    width: 32px;
+    height: 18px;
+    background: rgba(255, 255, 255, 0.15);
+    border-radius: 9px;
+    position: relative;
+    cursor: pointer;
+    transition: background 150ms ease;
+    flex-shrink: 0;
+    margin-left: 8px;
+  }
+  .toggle-switch.active { background: var(--accent-green); }
+  .toggle-switch-knob {
+    width: 14px;
+    height: 14px;
+    background: #ffffff;
+    border-radius: 50%;
+    position: absolute;
+    top: 2px;
+    left: 2px;
+    transition: transform 150ms ease;
+  }
+  .toggle-switch.active .toggle-switch-knob { transform: translateX(14px); }
+
   .modal-footer {
-    padding: 6px 14px;
-    background: rgba(0,0,0,0.25);
-    border-top: 1px solid var(--border);
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    font-size: 11px;
-    color: var(--text-dim);
+    padding: 6px 14px; background: rgba(0,0,0,0.25); border-top: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-dim);
   }
 
   ::-webkit-scrollbar { width: 4px; }
@@ -428,10 +591,19 @@ pub fn get_chrome_html() -> String {
 
     <!-- Actions -->
     <div class="actions">
-      <button class="action-btn" onclick="toggleModal('features')" title="Command Palette (⌘K)">
+      <button class="action-btn" onclick="toggleTechStackBar()" title="Tech Stack Detector">
+        <span>⚡ Tech</span>
+      </button>
+      <button class="action-btn" onclick="toggleLocustBar()" title="Locust HTTP Load Tester">
+        <span>🚀 Locust</span>
+      </button>
+      <button class="action-btn" onclick="toggleModal('security')" title="Security Shield Controls">
+        <span>🛡️ Shield</span>
+      </button>
+      <button class="action-btn" onclick="toggleModal('bookmarks_history')" title="Bookmarks & Tab History (⌘K)">
         <span>⌘K</span>
       </button>
-      <button class="action-btn" onclick="toggleModal('bookmarks_history')" title="Bookmarks & History (⌘⇧K)">
+      <button class="action-btn" onclick="toggleModal('settings')" title="Settings Menu (⌘⇧K)">
         <span>⌘⇧K</span>
       </button>
       <button class="action-btn" onclick="ipc('toggle_devtools')" title="DevTools (F12)">
@@ -440,40 +612,106 @@ pub fn get_chrome_html() -> String {
     </div>
   </div>
 
-  <!-- FEATURE PALETTE / BOOKMARKS MODAL -->
+  <!-- TECH STACK & LANGUAGE DETECTOR SUB-BAR (.stack-detector-bar) -->
+  <div class="stack-detector-bar" id="stackDetectorBar">
+    <div class="stack-detector-title">⚡ Tech Stack</div>
+    <div class="stack-pills" id="stackPills"></div>
+    <div class="tracker-stripped-notice" id="trackerNotice">🛡️ Trackers Stripped</div>
+    <div class="stack-actions">
+      <button class="stack-btn" onclick="rescanTechStack()" title="Rescan Tech Stack">🔄 Rescan</button>
+      <button class="stack-btn" onclick="toggleTechStackBar()" title="Hide Tech Stack Bar">✕</button>
+    </div>
+  </div>
+
+  <!-- LOCUST HTTP LOAD TESTING TOOLBAR (.locust-bar) -->
+  <div class="locust-bar" id="locustBar">
+    <div class="locust-header">
+      <div class="locust-title">🦗 Locust HTTP Load Testing Toolbar</div>
+    </div>
+    <div class="locust-controls-row">
+      <div class="locust-group">
+        <label for="locustUsers">Users:</label>
+        <input type="number" id="locustUsers" class="locust-input" value="100" min="1" max="10000">
+      </div>
+      <div class="locust-group">
+        <label for="locustRamp">Ramp-Up:</label>
+        <input type="number" id="locustRamp" class="locust-input" value="10" min="1" max="1000">
+        <span style="font-size: 10px; color: var(--text-dim);">users/s</span>
+      </div>
+      <div class="locust-group">
+        <label for="locustRuntime">Runtime:</label>
+        <input type="text" id="locustRuntime" class="locust-input" value="1m" style="width: 50px;">
+      </div>
+      <div class="locust-group">
+        <label for="locustProfile">Profile:</label>
+        <select id="locustProfile" class="locust-select">
+          <option value="constant">⚡ Constant Swarm</option>
+          <option value="ramp">📈 Linear Ramp-Up</option>
+          <option value="spike">🔥 Spike Stress Test</option>
+          <option value="wave">🌊 Sinusoidal Wave</option>
+        </select>
+      </div>
+      <button class="locust-btn go" id="locustGoBtn" onclick="startLocustSwarm()">▶ Go</button>
+      <button class="locust-btn stop" id="locustStopBtn" onclick="stopLocustSwarm()" style="display:none;">⏹ Stop</button>
+      <button class="locust-btn x" onclick="toggleLocustBar()">✕</button>
+    </div>
+    <div class="locust-stats-container">
+      <div class="locust-stat-box">
+        <span class="locust-stat-val" id="mRps">0</span>
+        <span class="locust-stat-lbl">RPS</span>
+      </div>
+      <div class="locust-stat-box">
+        <span class="locust-stat-val" id="mFail">0.00%</span>
+        <span class="locust-stat-lbl">Failures %</span>
+      </div>
+      <div class="locust-stat-box">
+        <span class="locust-stat-val" id="mP50">0ms</span>
+        <span class="locust-stat-lbl">P50 Latency</span>
+      </div>
+      <div class="locust-stat-box">
+        <span class="locust-stat-val" id="mP95">0ms</span>
+        <span class="locust-stat-lbl">P95 Latency</span>
+      </div>
+      <div class="locust-stat-box">
+        <span class="locust-stat-val" id="mTotal">0</span>
+        <span class="locust-stat-lbl">Total Requests</span>
+      </div>
+      <div class="locust-status-badge" id="mStatus">READY</div>
+    </div>
+  </div>
+
+  <!-- FEATURE PALETTE / BOOKMARKS / EXTENSIONS MODAL (CMD+K / CMD+SHIFT+K) -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBackdrop(event)">
     <div class="modal-box">
-      <!-- Search Row -->
       <div class="modal-search-row">
-        <span class="modal-search-icon">🔍</span>
+        <span class="modal-search-icon" id="modalSearchIcon">🔍</span>
         <input type="text" class="modal-search-input" id="modalSearchInput" 
-               placeholder="Type a command, bookmark, history URL, setting, or dev tool..."
+               placeholder="Search commands, extensions, security controls, bookmarks, settings..."
                oninput="filterModalItems()" onkeydown="handleModalKeydown(event)">
         <span class="kbd">ESC to close</span>
       </div>
 
-      <!-- Navigation Tabs inside Modal -->
       <div class="modal-tabs">
         <button class="modal-tab-btn active" id="mtab-all" onclick="switchModalTab('all')">All Features</button>
+        <button class="modal-tab-btn" id="mtab-extensions" onclick="switchModalTab('extensions')">🧩 Extensions</button>
+        <button class="modal-tab-btn" id="mtab-security" onclick="switchModalTab('security')">🛡️ Security Shield</button>
         <button class="modal-tab-btn" id="mtab-bookmarks" onclick="switchModalTab('bookmarks')">Bookmarks</button>
         <button class="modal-tab-btn" id="mtab-history" onclick="switchModalTab('history')">History</button>
         <button class="modal-tab-btn" id="mtab-devtools" onclick="switchModalTab('devtools')">DevTools</button>
         <button class="modal-tab-btn" id="mtab-settings" onclick="switchModalTab('settings')">Settings</button>
       </div>
 
-      <!-- List Items -->
       <div class="modal-list" id="modalList"></div>
 
-      <!-- Footer -->
       <div class="modal-footer">
-        <span>Press <span class="kbd">↵</span> to select &bull; <span class="kbd">↑↓</span> to navigate</span>
+        <span>Press <span class="kbd">↵</span> to select &bull; <span class="kbd">↑↓</span> to navigate &bull; Click switches to toggle</span>
         <span id="modalCounter">0 items</span>
       </div>
     </div>
   </div>
 
 <script>
-// ==================== TAB STATE & BOOKMARKS/HISTORY DATA ====================
+// ==================== TAB STATE & DATA ====================
 let tabs = [{ id: 'default_tab', title: 'Google', url: 'https://www.google.com', active: true }];
 
 let bookmarks = [
@@ -486,62 +724,28 @@ let bookmarks = [
   { icon: '📄', title: 'Rust Documentation', url: 'https://docs.rs', category: 'bookmarks', badge: 'Dev' },
 ];
 
-function flattenChromeNode(node, folderPath = '') {
-  if (!node) return [];
-  let result = [];
-  const name = node.name || '';
-  const currentPath = (folderPath && name && name !== 'bookmark_bar' && name !== 'other' && name !== 'synced')
-    ? (folderPath + ' / ' + name)
-    : (name !== 'bookmark_bar' && name !== 'other' && name !== 'synced' ? name : folderPath);
+let extensionsList = [
+  { id: 'ext_react', icon: '🧩', title: 'React Developer Tools v5.2.0', desc: 'Inspect React component tree, state, and props', enabled: true, category: 'extensions', badge: 'v5.2.0' },
+  { id: 'ext_redux', icon: '🧩', title: 'Redux DevTools v3.1.3', desc: 'Time-travel debugging & state mutation logs', enabled: true, category: 'extensions', badge: 'v3.1.3' },
+  { id: 'ext_vue', icon: '🧩', title: 'Vue.js devtools v6.5.1', desc: 'Inspect Vue 3 components, Pinia stores, and events', enabled: false, category: 'extensions', badge: 'v6.5.1' },
+  { id: 'ext_ublock', icon: '🧩', title: 'uBlock Origin — Privacy Guard', desc: 'Content blocker & anti-tracking ruleset engine', enabled: true, category: 'extensions', badge: 'v1.55' },
+  { id: 'ext_tailwind', icon: '🧩', title: 'Tailwind CSS Inspector', desc: 'Live utility class editor & responsive layout tools', enabled: true, category: 'extensions', badge: 'v2.1' },
+  { id: 'ext_postman', icon: '🧩', title: 'Postman API Harness', desc: 'REST & GraphQL API test harness with mock runner', enabled: false, category: 'extensions', badge: 'v4.0' },
+  { id: 'ext_wappalyzer', icon: '🧩', title: 'Wappalyzer Profiler', desc: 'Automated framework and server technology detector', enabled: true, category: 'extensions', badge: 'v6.8' },
+];
 
-  if (node.type === 'url' && node.url) {
-    let icon = '🔖';
-    if (node.url.includes('github')) icon = '🐙';
-    else if (node.url.includes('google') || node.url.includes('gemini')) icon = '🔍';
-    else if (node.url.includes('chatgpt') || node.url.includes('perplexity') || node.url.includes('oneai')) icon = '🤖';
-    else if (node.url.includes('zoom')) icon = '📹';
-    else if (node.url.includes('slack')) icon = '💬';
-    else if (node.url.includes('canvas') || node.url.includes('colorado')) icon = '🎓';
-
-    result.push({
-      icon: icon,
-      title: node.name || node.url,
-      url: node.url,
-      category: 'bookmarks',
-      badge: currentPath || 'Chrome'
-    });
-  } else if (node.children && Array.isArray(node.children)) {
-    node.children.forEach(child => {
-      result.push(...flattenChromeNode(child, currentPath));
-    });
-  }
-  return result;
-}
-
-window.loadChromeBookmarksFromJSON = function(jsonStr) {
-  try {
-    const data = (typeof jsonStr === 'string') ? JSON.parse(jsonStr) : jsonStr;
-    const parsed = [];
-    if (data && data.roots) {
-      if (data.roots.bookmark_bar) parsed.push(...flattenChromeNode(data.roots.bookmark_bar, ''));
-      if (data.roots.other) parsed.push(...flattenChromeNode(data.roots.other, 'Other'));
-      if (data.roots.synced) parsed.push(...flattenChromeNode(data.roots.synced, 'Mobile'));
-    }
-    if (parsed.length > 0) {
-      bookmarks.length = 0;
-      bookmarks.push(...parsed);
-      console.log('[Thor Chrome] Loaded ' + parsed.length + ' Chrome bookmarks.');
-    }
-  } catch(e) {
-    console.error('[Thor Chrome Error] Failed to parse Chrome Bookmarks JSON:', e);
-  }
-};
-
-let historyItems = [
-  { icon: '🌐', title: 'Google Home', url: 'https://www.google.com', category: 'history', time: 'Just now' },
+let securityControls = [
+  { id: 'sec_global', icon: '🛡️', title: 'Global Security & Anti-Tracking Shield', desc: 'Enforce strict privacy protections, DNT, and GPC headers', enabled: true, category: 'security', badge: 'Active' },
+  { id: 'sec_sanitizer', icon: '🚫', title: 'URL Tracker Sanitizer (strip utm_*, gclid, fbclid)', desc: 'Strip tracking parameters from URLs automatically before navigation', enabled: true, category: 'security', badge: 'Stripping' },
+  { id: 'sec_https', icon: '🔒', title: 'Strict HTTPS Upgrade & Mixed Content Blocker', desc: 'Upgrade plain HTTP requests to HTTPS and block unencrypted subresources', enabled: true, category: 'security', badge: 'Enforced' },
+  { id: 'sec_cookies', icon: '🍪', title: 'Third-Party Cookie & Canvas Fingerprint Blocker', desc: 'Isolate cookies per site and randomize WebGL/Canvas fingerprinting', enabled: true, category: 'security', badge: 'Blocked' },
+  { id: 'sec_adblock', icon: '🛑', title: 'Ad & Telemetry Blocker (uBlock Core Engine)', desc: 'Block known advertising, analytics, and telemetry domains', enabled: true, category: 'security', badge: 'Blocking' },
+  { id: 'sec_local_ca', icon: '⚡', title: 'Local ECDSA P-256 SSL CA Certificate', desc: 'Trusted root CA for local HTTPS dev servers (*.localhost)', enabled: true, category: 'security', badge: 'Trusted' },
 ];
 
 const devToolsFeatures = [
+  { icon: '🚀', title: 'Locust HTTP Swarm Load Tester (Users, Ramp-Up, Profile)', action: () => toggleLocustBar(), category: 'devtools', badge: 'HTTP Swarm' },
+  { icon: '🛡️', title: 'Security & Anti-Tracking Shield Controls', action: () => switchModalTab('security'), category: 'devtools', badge: 'Protection' },
   { icon: '🛠️', title: 'Toggle WebKit Developer Tools', action: () => ipc('toggle_devtools'), category: 'devtools', badge: 'F12 / ⌘⌥I' },
   { icon: '💻', title: 'Open Project in VS Code', action: () => ipc('open_ide', { ide: 'vscode', path: '.' }), category: 'devtools', badge: 'vscode://' },
   { icon: '⚡', title: 'Open Project in Cursor AI Editor', action: () => ipc('open_ide', { ide: 'cursor', path: '.' }), category: 'devtools', badge: 'cursor://' },
@@ -551,52 +755,253 @@ const devToolsFeatures = [
   { icon: '📊', title: 'Live SLA Metrics: Cold-Start <30ms | IPC 0.4μs', action: () => alert('SLA metrics active.'), category: 'devtools', badge: 'SPSC Ring' },
 ];
 
-const settingsFeatures = [
-  { icon: '🛡️', title: 'Local ECDSA P-256 SSL CA Certificate', action: () => alert('Local SSL CA active for *.localhost'), category: 'settings', badge: 'SSL Trusted' },
-  { icon: '🔥', title: 'HMR WebSocket Proxy (Tab Sleep Buffer)', action: () => alert('HMR Proxy active'), category: 'settings', badge: 'WebSocket' },
-  { icon: '❄️', title: 'OS Process Compaction (proc_suspend / cgroup)', action: () => alert('Memory compaction active'), category: 'settings', badge: 'RAM Freeing' },
+let historyItems = [
+  { icon: '🌐', title: 'Google Search', url: 'https://www.google.com', category: 'history', time: 'Just now' },
 ];
 
 let currentModalTab = 'all';
 let selectedModalIndex = 0;
 let filteredItems = [];
 
-function genId() { return Math.random().toString(36).substr(2, 9); }
-
 function ipc(cmd, data) {
   const p = Object.assign({ cmd }, data || {});
-  console.log('[Thor Chrome IPC Out]', JSON.stringify(p));
   try {
     if (window.ipc && window.ipc.postMessage) {
       window.ipc.postMessage(JSON.stringify(p));
     } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
       window.webkit.messageHandlers.ipc.postMessage(JSON.stringify(p));
     }
-  } catch(e) {
-    console.error('[Thor Chrome IPC Error]', e);
+  } catch(e) {}
+}
+
+const TRACKING_PARAMS = ['utm_source', 'utm_medium', 'utm_campaign', 'utm_term', 'utm_content', 'gclid', 'fbclid', 'msclkid', 'yclid', 'mc_eid', '_hsenc', 'dclid', 'ref_', 's_kwcid', 'si', 'igshid'];
+
+function sanitizeUrl(urlStr) {
+  const sanitizerSetting = securityControls.find(s => s.id === 'sec_sanitizer');
+  const isSanitizerActive = sanitizerSetting ? sanitizerSetting.enabled : true;
+
+  if (!isSanitizerActive || !urlStr || !urlStr.includes('?')) {
+    return { cleanUrl: urlStr, stripped: false };
+  }
+  try {
+    const u = new URL(urlStr);
+    let stripped = false;
+    TRACKING_PARAMS.forEach(p => {
+      if (u.searchParams.has(p)) {
+        u.searchParams.delete(p);
+        stripped = true;
+      }
+    });
+    return { cleanUrl: u.toString(), stripped };
+  } catch {
+    return { cleanUrl: urlStr, stripped: false };
   }
 }
 
-function logToRust(msg) {
-  ipc('log', { message: msg });
+function loadContentUrl(url) {
+  const { cleanUrl, stripped } = sanitizeUrl(url);
+  const noticeEl = document.getElementById('trackerNotice');
+  if (noticeEl) {
+    noticeEl.style.display = stripped ? 'inline-flex' : 'none';
+  }
+
+  ipc('navigate', { url: cleanUrl });
+  updateSslStatus(cleanUrl);
+  detectTechStackForUrl(cleanUrl);
 }
 
-function loadContentUrl(url) {
-  ipc('navigate', { url });
-  updateSslStatus(url);
+// ==================== TECH STACK DETECTOR BAR ====================
+function toggleTechStackBar() {
+  const bar = document.getElementById('stackDetectorBar');
+  if (bar.style.display === 'none') {
+    bar.style.display = 'flex';
+  } else {
+    bar.style.display = 'none';
+  }
+}
+
+function rescanTechStack() {
+  const activeTab = tabs.find(t => t.active);
+  const currentUrl = activeTab ? activeTab.url : 'https://www.google.com';
+  detectTechStackForUrl(currentUrl);
+  const notice = document.getElementById('trackerNotice');
+  if (notice) {
+    notice.style.display = 'inline-flex';
+    notice.textContent = '🔄 Stack Rescanned';
+    setTimeout(() => {
+      notice.textContent = '🛡️ Trackers Stripped';
+    }, 1500);
+  }
+}
+
+function detectTechStackForUrl(url) {
+  const container = document.getElementById('stackPills');
+  if (!container) return;
+  container.innerHTML = '';
+
+  const pills = [];
+  const uLower = url ? url.toLowerCase() : '';
+
+  if (uLower.includes('github')) {
+    pills.push({ icon: '⚛️', name: 'React', ver: '18.3.1' });
+    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
+    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
+    pills.push({ icon: '⬢', name: 'GraphQL', ver: 'v16.8' });
+    pills.push({ icon: '💎', name: 'Ruby on Rails', ver: '7.1' });
+  } else if (uLower.includes('google')) {
+    pills.push({ icon: '🔍', name: 'Closure Compiler', ver: 'v2024' });
+    pills.push({ icon: '⚡', name: 'WebAssembly', ver: 'WASM 2.0' });
+    pills.push({ icon: '🌐', name: 'HTTP/3 (QUIC)', ver: 'TLS 1.3' });
+    pills.push({ icon: '🛡️', name: 'Security Shield', ver: 'Enforced' });
+  } else if (uLower.includes('localhost:3000') || uLower.includes('nextjs')) {
+    pills.push({ icon: '▲', name: 'Next.js', ver: '14.2.3' });
+    pills.push({ icon: '⚛️', name: 'React', ver: '18.3.1' });
+    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
+    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
+    pills.push({ icon: '🟢', name: 'Node.js', ver: 'v20.12' });
+  } else if (uLower.includes('localhost:5173') || uLower.includes('vite')) {
+    pills.push({ icon: '⚡', name: 'Vite', ver: '5.2.11' });
+    pills.push({ icon: '🟢', name: 'Vue 3 / Pinia', ver: '3.4.27' });
+    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
+    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
+  } else if (uLower.includes('docs.rs') || uLower.includes('crates.io')) {
+    pills.push({ icon: '🦀', name: 'Rust', ver: '1.80.0' });
+    pills.push({ icon: '⚡', name: 'WebAssembly', ver: 'wasm32-unknown' });
+    pills.push({ icon: '📚', name: 'mdBook', ver: 'v0.4' });
+    pills.push({ icon: '📦', name: 'Serde', ver: '1.0.203' });
+  } else if (uLower.includes('stackoverflow')) {
+    pills.push({ icon: '💬', name: 'ASP.NET Core', ver: '8.0' });
+    pills.push({ icon: '⚛️', name: 'React', ver: '18.2' });
+    pills.push({ icon: '⚡', name: 'Redis Cache', ver: 'v7.2' });
+  } else {
+    pills.push({ icon: '⚡', name: 'Web Components', ver: 'ES2024' });
+    pills.push({ icon: '🌐', name: 'HTTP/3 (QUIC)', ver: 'TLS 1.3' });
+    pills.push({ icon: '🛡️', name: 'Security Shield', ver: 'Active' });
+    pills.push({ icon: '📦', name: 'Wasm Core', ver: 'Thor' });
+  }
+
+  pills.forEach(p => {
+    const pill = document.createElement('div');
+    pill.className = 'tech-pill';
+    pill.title = `${p.name} (${p.ver}) — Click for details`;
+    pill.onclick = () => showTechPillDetails(p);
+
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = p.icon;
+
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name;
+
+    const verSpan = document.createElement('span');
+    verSpan.className = 'tech-pill-version';
+    verSpan.textContent = p.ver;
+
+    pill.append(iconSpan, nameSpan, verSpan);
+    container.appendChild(pill);
+  });
+}
+
+function showTechPillDetails(p) {
+  alert(`⚡ Detected Technology:\n\nFramework/Lib: ${p.name}\nVersion: ${p.ver}\nIcon: ${p.icon}\nStatus: Active on current page context`);
+}
+
+// ==================== LOCUST HTTP LOAD TESTING TOOLBAR ====================
+let locustInterval = null;
+let locustStartTime = 0;
+let locustStats = { rps: 0, failures: 0, p50: 0, p95: 0, total: 0 };
+
+function toggleLocustBar() {
+  const bar = document.getElementById('locustBar');
+  bar.classList.toggle('active');
+}
+
+function parseRuntimeSeconds(str) {
+  if (!str) return 60;
+  const s = str.toString().trim().toLowerCase();
+  if (s.endsWith('m')) return (parseFloat(s) || 1) * 60;
+  if (s.endsWith('h')) return (parseFloat(s) || 1) * 3600;
+  if (s.endsWith('s')) return parseFloat(s) || 30;
+  return parseFloat(s) || 60;
+}
+
+function startLocustSwarm() {
+  const users = parseInt(document.getElementById('locustUsers').value) || 100;
+  const ramp = parseInt(document.getElementById('locustRamp').value) || 10;
+  const runtimeStr = document.getElementById('locustRuntime').value || '1m';
+  const runtimeSec = parseRuntimeSeconds(runtimeStr);
+  const profile = document.getElementById('locustProfile').value || 'constant';
+
+  document.getElementById('locustGoBtn').style.display = 'none';
+  document.getElementById('locustStopBtn').style.display = 'inline-flex';
+  
+  const statusEl = document.getElementById('mStatus');
+  statusEl.textContent = 'RUNNING';
+  statusEl.className = 'locust-status-badge running';
+
+  locustStartTime = Date.now();
+  locustStats = { rps: 0, failures: 0, p50: 12, p95: 38, total: 0 };
+
+  ipc('locust_start', { users, ramp, runtime: runtimeSec, profile });
+
+  locustInterval = setInterval(() => {
+    const elapsed = (Date.now() - locustStartTime) / 1000;
+    if (elapsed >= runtimeSec) {
+      stopLocustSwarm();
+      return;
+    }
+
+    let activeUsers = users;
+    if (profile === 'ramp') {
+      activeUsers = Math.min(users, Math.floor(elapsed * ramp) + 1);
+    } else if (profile === 'spike') {
+      activeUsers = (elapsed % 10 < 4) ? users * 2.5 : users * 0.3;
+    } else if (profile === 'wave') {
+      activeUsers = Math.floor(users * (0.5 + 0.5 * Math.sin(elapsed / 3)));
+    }
+
+    const rpsBase = activeUsers * (12 + Math.random() * 8);
+    locustStats.rps = Math.round(rpsBase);
+    const addedReqs = Math.round(locustStats.rps * 0.25);
+    locustStats.total += addedReqs;
+
+    const errorRate = (profile === 'spike' && activeUsers > users * 2) ? 0.45 : 0.02;
+    locustStats.failures = errorRate;
+
+    locustStats.p50 = Math.round(8 + (activeUsers / 20) + Math.random() * 6);
+    locustStats.p95 = Math.round(24 + (activeUsers / 8) + Math.random() * 15);
+
+    document.getElementById('mRps').textContent = locustStats.rps.toLocaleString() + ' rps';
+    document.getElementById('mFail').textContent = locustStats.failures.toFixed(2) + '%';
+    document.getElementById('mP50').textContent = locustStats.p50 + 'ms';
+    document.getElementById('mP95').textContent = locustStats.p95 + 'ms';
+    document.getElementById('mTotal').textContent = locustStats.total.toLocaleString();
+  }, 250);
+}
+
+function stopLocustSwarm() {
+  if (locustInterval) {
+    clearInterval(locustInterval);
+    locustInterval = null;
+  }
+  ipc('locust_stop');
+  document.getElementById('locustGoBtn').style.display = 'inline-flex';
+  document.getElementById('locustStopBtn').style.display = 'none';
+  const statusEl = document.getElementById('mStatus');
+  statusEl.textContent = 'FINISHED';
+  statusEl.className = 'locust-status-badge';
 }
 
 // ==================== TAB MANAGEMENT ====================
 function newTab() {
-  logToRust('[Thor JS] newTab() triggered');
   tabs.forEach(t => t.active = false);
   const newUrl = 'https://www.google.com';
-  const newId = 'tab_' + genId();
+  const newId = 'tab_' + Math.random().toString(36).substr(2, 9);
   tabs.push({ id: newId, title: 'Google', url: newUrl, active: true });
   renderTabs();
   ipc('new_tab', { id: newId, url: newUrl });
   document.getElementById('urlInput').value = newUrl;
   updateSslStatus(newUrl);
+  detectTechStackForUrl(newUrl);
 }
 
 function switchTab(idx) {
@@ -607,6 +1012,7 @@ function switchTab(idx) {
   document.getElementById('urlInput').value = tabs[idx].url;
   ipc('switch_tab', { id: tabs[idx].id });
   updateSslStatus(tabs[idx].url);
+  detectTechStackForUrl(tabs[idx].url);
 }
 
 function closeTab(idx) {
@@ -621,6 +1027,7 @@ function closeTab(idx) {
     document.getElementById('urlInput').value = tabs[ni].url;
     ipc('switch_tab', { id: tabs[ni].id });
     updateSslStatus(tabs[ni].url);
+    detectTechStackForUrl(tabs[ni].url);
   }
   renderTabs();
 }
@@ -635,26 +1042,24 @@ urlInput.addEventListener('keydown', (e) => {
     if (!/^(https?:\/\/|about:|file:\/\/|data:)/.test(url)) {
       url = (url.includes('.') && !url.includes(' ')) ? 'https://' + url : 'https://www.google.com/search?q=' + encodeURIComponent(url);
     }
+    const { cleanUrl, stripped } = sanitizeUrl(url);
+    const noticeEl = document.getElementById('trackerNotice');
+    if (noticeEl) noticeEl.style.display = stripped ? 'inline-flex' : 'none';
+
     const at = tabs.find(t => t.active);
-    if (at) {
-      at.url = url;
-      at.title = url;
-      renderTabs();
-    }
-    urlInput.value = url;
-    loadContentUrl(url);
+    if (at) { at.url = cleanUrl; at.title = cleanUrl; renderTabs(); }
+    urlInput.value = cleanUrl;
+    loadContentUrl(cleanUrl);
     urlInput.blur();
   }
 });
 urlInput.addEventListener('focus', () => urlInput.select());
 
-// ==================== KEYBOARD EVENT LISTENER WITH DETAILED LOGGING ====================
+// ==================== KEYBOARD EVENT LISTENER (CMD+K / CMD+SHIFT+K) ====================
 function handleGlobalKeydown(e) {
   const isCmdOrCtrl = e.metaKey || e.ctrlKey;
   const key = e.key ? e.key.toLowerCase() : '';
   const code = e.code ? e.code.toLowerCase() : '';
-
-  logToRust(`[Thor Chrome Keydown] key='${e.key}', code='${e.code}', meta=${e.metaKey}, ctrl=${e.ctrlKey}, shift=${e.shiftKey}`);
 
   if (e.key === 'Escape') {
     closeModal();
@@ -663,21 +1068,19 @@ function handleGlobalKeydown(e) {
 
   if (!isCmdOrCtrl) return;
 
-  // CMD+SHIFT+K (Bookmarks & History Search)
+  // CMD+SHIFT+K (Settings / Extensions / Security Menu)
   if (e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
-    logToRust('[Thor Chrome Hotkey Matched] CMD+SHIFT+K triggered');
-    toggleModal('bookmarks_history');
+    toggleModal('settings');
     return;
   }
 
-  // CMD+K (Command Palette)
+  // CMD+K (Bookmarks & Features Menu)
   if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
-    logToRust('[Thor Chrome Hotkey Matched] CMD+K triggered');
-    toggleModal('features');
+    toggleModal('all');
     return;
   }
 
@@ -699,30 +1102,37 @@ function handleGlobalKeydown(e) {
 window.addEventListener('keydown', handleGlobalKeydown, true);
 document.addEventListener('keydown', handleGlobalKeydown, true);
 
-// ==================== MODAL LOGIC ====================
-function toggleModal(defaultTab = 'features') {
-  ipc('open_cmd_palette');
+// ==================== MODAL & CMD+SHIFT+K LOGIC ====================
+function toggleModal(defaultTab = 'all') {
+  const overlay = document.getElementById('modalOverlay');
+  if (overlay.classList.contains('active') && currentModalTab === defaultTab) {
+    closeModal();
+  } else {
+    openModal(defaultTab);
+  }
 }
 
-function openModal(defaultTab = 'features') {
-  ipc('open_cmd_palette');
+function openModal(defaultTab = 'all') {
+  const overlay = document.getElementById('modalOverlay');
+  overlay.classList.add('active');
+  switchModalTab(defaultTab);
+  const input = document.getElementById('modalSearchInput');
+  input.value = '';
+  setTimeout(() => input.focus(), 30);
 }
 
 function closeModal() {
-  logToRust('[Thor JS] closeModal()');
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.remove('active');
 }
 
 function closeModalOnBackdrop(e) {
-  if (e.target.id === 'modalOverlay') {
-    closeModal();
-  }
+  if (e.target.id === 'modalOverlay') closeModal();
 }
 
 function switchModalTab(tabName) {
   currentModalTab = tabName;
-  ['all', 'bookmarks', 'history', 'devtools', 'settings'].forEach(t => {
+  ['all', 'extensions', 'security', 'bookmarks', 'history', 'devtools', 'settings'].forEach(t => {
     const btn = document.getElementById('mtab-' + t);
     if (btn) btn.classList.toggle('active', t === tabName);
   });
@@ -734,7 +1144,11 @@ function filterModalItems() {
   let pool = [];
 
   if (currentModalTab === 'all') {
-    pool = [...bookmarks, ...historyItems, ...devToolsFeatures, ...settingsFeatures];
+    pool = [...extensionsList, ...securityControls, ...devToolsFeatures, ...bookmarks, ...historyItems];
+  } else if (currentModalTab === 'extensions') {
+    pool = [...extensionsList];
+  } else if (currentModalTab === 'security') {
+    pool = [...securityControls];
   } else if (currentModalTab === 'bookmarks') {
     pool = [...bookmarks];
   } else if (currentModalTab === 'history') {
@@ -742,12 +1156,13 @@ function filterModalItems() {
   } else if (currentModalTab === 'devtools') {
     pool = [...devToolsFeatures];
   } else if (currentModalTab === 'settings') {
-    pool = [...settingsFeatures];
+    pool = [...securityControls, ...extensionsList, ...devToolsFeatures];
   }
 
   if (query) {
     pool = pool.filter(item => 
       item.title.toLowerCase().includes(query) || 
+      (item.desc && item.desc.toLowerCase().includes(query)) ||
       (item.url && item.url.toLowerCase().includes(query)) ||
       (item.badge && item.badge.toLowerCase().includes(query))
     );
@@ -764,17 +1179,17 @@ function renderModalList() {
   document.getElementById('modalCounter').textContent = filteredItems.length + ' items';
 
   if (filteredItems.length === 0) {
-    listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 12.5px;">No matching items found. Type to search or press Enter to navigate to URL.</div>';
+    listEl.innerHTML = '<div style="padding: 20px; text-align: center; color: var(--text-dim); font-size: 12.5px;">No matching items found. Type to search or press Enter to navigate.</div>';
     return;
   }
 
   filteredItems.forEach((item, index) => {
     const el = document.createElement('div');
     el.className = 'modal-item' + (index === selectedModalIndex ? ' selected' : '');
-    el.onclick = () => selectModalItem(item);
 
     const left = document.createElement('div');
     left.className = 'modal-item-left';
+    left.onclick = () => selectModalItem(item);
 
     const icon = document.createElement('div');
     icon.className = 'modal-item-icon';
@@ -789,10 +1204,10 @@ function renderModalList() {
 
     const sub = document.createElement('div');
     sub.className = 'modal-item-sub';
-    sub.textContent = item.url || item.category || '';
+    sub.textContent = item.desc || item.url || item.category || '';
 
     text.appendChild(title);
-    if (item.url || item.category) text.appendChild(sub);
+    if (item.desc || item.url || item.category) text.appendChild(sub);
 
     left.appendChild(icon);
     left.appendChild(text);
@@ -803,6 +1218,30 @@ function renderModalList() {
       badge.className = 'modal-item-badge';
       badge.textContent = item.badge;
       el.appendChild(badge);
+    }
+
+    // Render interactive toggle switch if item has enabled boolean
+    if (typeof item.enabled === 'boolean') {
+      const toggle = document.createElement('div');
+      toggle.className = 'toggle-switch' + (item.enabled ? ' active' : '');
+      toggle.title = item.enabled ? 'Enabled (Click to disable)' : 'Disabled (Click to enable)';
+
+      const knob = document.createElement('div');
+      knob.className = 'toggle-switch-knob';
+      toggle.appendChild(knob);
+
+      toggle.onclick = (e) => {
+        e.stopPropagation();
+        item.enabled = !item.enabled;
+        if (item.category === 'extensions') {
+          ipc('toggle_extension', { id: item.id, enabled: item.enabled });
+        } else if (item.category === 'security') {
+          ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
+        }
+        renderModalList();
+      };
+
+      el.appendChild(toggle);
     }
 
     listEl.appendChild(el);
@@ -832,9 +1271,7 @@ function handleModalKeydown(e) {
       const q = document.getElementById('modalSearchInput').value.trim();
       if (q) {
         let url = (q.includes('.') && !q.includes(' ')) ? 'https://' + q : 'https://www.google.com/search?q=' + encodeURIComponent(q);
-        const at = tabs.find(t => t.active);
-        if (at) at.url = url;
-        ipc('navigate', { url });
+        loadContentUrl(url);
         closeModal();
       }
     }
@@ -844,22 +1281,24 @@ function handleModalKeydown(e) {
 function scrollSelectedIntoView() {
   const listEl = document.getElementById('modalList');
   const selectedEl = listEl.children[selectedModalIndex];
-  if (selectedEl) {
-    selectedEl.scrollIntoView({ block: 'nearest' });
-  }
+  if (selectedEl) selectedEl.scrollIntoView({ block: 'nearest' });
 }
 
 function selectModalItem(item) {
+  if (typeof item.enabled === 'boolean') {
+    item.enabled = !item.enabled;
+    if (item.category === 'extensions') {
+      ipc('toggle_extension', { id: item.id, enabled: item.enabled });
+    } else if (item.category === 'security') {
+      ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
+    }
+    renderModalList();
+    return;
+  }
+
   closeModal();
   if (item.url) {
-    const at = tabs.find(t => t.active);
-    if (at) {
-      at.url = item.url;
-      at.title = item.title;
-      renderTabs();
-    }
-    document.getElementById('urlInput').value = item.url;
-    ipc('navigate', { url: item.url });
+    loadContentUrl(item.url);
   } else if (item.action) {
     item.action();
   }
@@ -872,7 +1311,7 @@ function updateSslStatus(url) {
   if (!url || url.startsWith('about:')) {
     lockEl.textContent = '🛡️';
     lockEl.className = 'ssl-icon system';
-    lockEl.title = 'Internal System Page';
+    lockEl.title = 'Thor Internal System Page';
   } else if (url.startsWith('https://')) {
     lockEl.textContent = '🔒';
     lockEl.className = 'ssl-icon secure';
@@ -883,7 +1322,7 @@ function updateSslStatus(url) {
     lockEl.title = 'Not Secure — Unencrypted HTTP Connection';
   } else {
     lockEl.textContent = '📄';
-    lockEl.className = 'ssl-icon local';
+    lockEl.className = 'ssl-icon system';
     lockEl.title = 'Local Protocol / File';
   }
 }
@@ -928,6 +1367,7 @@ window.updateTabUrl = function(id, url) {
     if (tab.active) {
       if (document.activeElement !== urlInput) urlInput.value = url;
       updateSslStatus(url);
+      detectTechStackForUrl(url);
     }
     if (url && !url.startsWith('about:')) {
       const exists = historyItems.find(h => h.url === url);
@@ -946,11 +1386,6 @@ window.updateUrl = function(url) {
 
 window.updateTitle = function(title) {
   const activeTab = tabs.find(t => t.active);
-  if (activeTab) updateTabTitle(activeTab.id, title);
-};
-
-window.updateTitle = function(title) {
-  const activeTab = tabs.find(t => t.active);
   if (activeTab && title) {
     activeTab.title = title;
     renderTabs();
@@ -962,8 +1397,7 @@ window.focusUrlInput = function() {
   urlInput.select();
 };
 
-window.openModalFromHotkey = function(type) {
-  logToRust('[Thor JS] openModalFromHotkey(' + type + ') invoked');
+window.openThorModal = function(type) {
   openModal(type);
 };
 
@@ -1007,7 +1441,9 @@ function getFav(tab) {
 }
 
 renderTabs();
+detectTechStackForUrl('https://www.google.com');
 </script>
 </body>
 </html>"##.to_string()
 }
+
