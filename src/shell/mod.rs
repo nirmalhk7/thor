@@ -255,25 +255,34 @@ pub fn run() -> anyhow::Result<()> {
                 const style = document.createElement('style');
                 style.textContent = `
                   .thor-modal-overlay {{
-                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
-                    background: rgba(0, 0, 0, 0.75); z-index: 999999999;
-                    display: none; align-items: flex-start; justify-content: center;
-                    padding-top: 50px; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+                    position: fixed !important; top: 0 !important; left: 0 !important; right: 0 !important; bottom: 0 !important;
+                    background: rgba(0, 0, 0, 0.75) !important;
+                    z-index: 2147483647 !important;
+                    isolation: isolate !important;
+                    display: none !important; align-items: flex-start !important; justify-content: center !important;
+                    padding-top: 50px !important;
+                    font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif !important;
+                    pointer-events: auto !important;
+                    transform: none !important; filter: none !important; opacity: 1 !important;
                   }}
-                  .thor-modal-overlay.active {{ display: flex; }}
+                  .thor-modal-overlay.active {{ display: flex !important; }}
                   .thor-modal-box {{
+                    all: initial;
                     width: 660px; max-width: 90vw; background: #161820;
                     border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
                     box-shadow: 0 16px 48px rgba(0,0,0,0.8); overflow: hidden; display: flex; flex-direction: column;
-                    color: #f1f5f9;
+                    color: #f1f5f9; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+                    pointer-events: auto; position: relative; z-index: 2147483647;
                   }}
                   .thor-modal-search {{
                     padding: 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.1);
                     display: flex; align-items: center; gap: 10px;
                   }}
                   .thor-modal-input {{
+                    all: initial;
                     flex: 1; background: transparent; border: none; outline: none;
-                    color: #fff; font-size: 14px; font-family: sans-serif;
+                    color: #fff; font-size: 14px; font-family: -apple-system, BlinkMacSystemFont, sans-serif;
+                    caret-color: #3b82f6;
                   }}
                   .thor-modal-list {{ max-height: 340px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }}
                   .thor-modal-item {{
