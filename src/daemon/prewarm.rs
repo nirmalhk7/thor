@@ -175,7 +175,7 @@ mod tests {
     #[test]
     fn test_acquire_tab_uninitialized() {
         let d = PrewarmDaemon::new(1);
-        let err = d.acquire_tab().unwrap_err();
+        let err = d.acquire_tab().err().unwrap();
         assert!(err.to_string().contains("prewarm runtime not started"));
     }
 }
