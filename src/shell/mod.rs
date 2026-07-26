@@ -1,3 +1,5 @@
+#![allow(dead_code)]
+
 pub mod engine_status;
 pub mod gui;
 pub mod ipc_dispatch;
@@ -91,6 +93,7 @@ pub(crate) struct TabMeta {
 /// plus one content WebView per tab below `CHROME_HEIGHT`. ChromiumRuntime /
 /// CEF stay in-tree for later CDP embed — shell does not launch a visible
 /// Chromium window.
+#[allow(dead_code)]
 struct ShellTabs {
     webviews: HashMap<String, WebView>,
     meta: HashMap<String, TabMeta>,
@@ -182,6 +185,7 @@ impl ShellTabs {
     }
 }
 
+#[allow(dead_code)]
 fn chrome_eval(chrome: &Option<WebView>, script: &str) {
     if let Some(wv) = chrome.as_ref() {
         let _ = wv.evaluate_script(script);
@@ -771,11 +775,11 @@ fn create_content_tab(
                         .to_string();
                     let _ = proxy_for_ipc.send_event(UserEvent::WebVitalsResult(summary));
                 }
-                "open_ide" => {
-                    // Prefer Rust gate (DevHost only). Still allowlisted carefully.
-                    let result = ipc_dispatch::dispatch_privileged("open_ide", &payload);
+                "open_ide" | "add_bookmark" | "remove_bookmark" => {
+                    // Prefer Rust gate. Allowlisted carefully.
+                    let result = ipc_dispatch::dispatch_privileged(cmd, &payload);
                     if let ipc_dispatch::DispatchResult::Err(e) = result {
-                        eprintln!("⚡ [Thor IDE] {e}");
+                        eprintln!("⚡ [Thor IPC] {cmd} error: {e}");
                     }
                 }
                 "back" => {
@@ -1045,8 +1049,10 @@ fn open_cmd_k_in_active_tab(tabs: &ShellTabs) {
         Err(_) => "window.__thorCmdKPayload = [];".to_string(),
     };
     let status_js = engine_status::engine_status_script();
+    let hotkey_script = content_hotkey_script();
     let script = format!(
         r#"(function(){{
+          {hotkey_script}
           {payload_js}
           {status_js}
           if (window.__thorEnsureCmdPalette) window.__thorEnsureCmdPalette();
@@ -1069,8 +1075,10 @@ fn open_cmd_shift_k_in_active_tab(tabs: &ShellTabs) {
         Err(_) => "window.__thorSettingsPayload = [];".to_string(),
     };
     let status_js = engine_status::engine_status_script();
+    let hotkey_script = content_hotkey_script();
     let script = format!(
         r#"(function(){{
+          {hotkey_script}
           {payload_js}
           {status_js}
           if (window.__thorEnsureCmdPalette) window.__thorEnsureCmdPalette();
@@ -1431,6 +1439,32 @@ fn handle_decode_payload(chrome: &Option<WebView>, input: &str) {
         PayloadType::Json => {
             push_decode_result(chrome, "JSON", None, Some(input));
         }
+        PayloadType::LlmStream => {
+            let metrics = DecoderStudio::decode_llm_stream(input, 0);
+            let html = format!(
+                "<strong>LLM STREAM DETECTED:</strong><br>TTFT: {}ms | Tokens: {} | Chunks: {}<br><pre style=\"white-space:pre-wrap;background:rgba(0,0,0,0.3);padding:6px;border-radius:4px;\">{}</pre>",
+                metrics.ttft_ms.unwrap_or(0),
+                metrics.total_tokens,
+                metrics.total_chunks,
+                html_escape(&metrics.accumulated_text)
+            );
+            push_decode_result(chrome, "LLM SSE STREAM", Some(&html), None);
+        }
+        PayloadType::Web3Rpc => {
+            if let Some(abi_match) = DecoderStudio::decode_web3_rpc(input) {
+                let html = format!(
+                    "<strong>WEB3 ABI SELECTOR:</strong> {} ({})<br>Function: <code>{}</code>",
+                    abi_match.selector,
+                    abi_match.signature,
+                    abi_match.function_name
+                );
+                push_decode_result(chrome, "WEB3 RPC / CALLED", Some(&html), None);
+            } else if crate::dx::web3_inspector::Web3Inspector::is_web3_rpc(input) {
+                push_decode_result(chrome, "WEB3 JSON-RPC", None, Some(input));
+            } else {
+                push_decode_result(chrome, "WEB3 PAYLOAD", None, Some(input));
+            }
+        }
         PayloadType::Unknown => {
             push_decode_result(chrome, "RAW STRING", None, Some(input));
         }
@@ -1527,6 +1561,7 @@ pub fn run() -> anyhow::Result<()> {
 
 /// Wry-based in-window shell: AppKit native toolbar on top, WKWebView content
 /// fills the area below CHROME_HEIGHT. No external Chromium process is spawned.
+#[allow(dead_code)]
 fn run_wry_shell() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing wry in-window shell...");
 
@@ -1551,7 +1586,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                 .with_fullsize_content_view(true)
                 .with_titlebar_transparent(true)
                 .with_title_hidden(true)
-                .with_traffic_light_inset(LogicalPosition::new(14.0, (52.0 - 12.0) / 2.0))
+                .with_traffic_light_inset(LogicalPosition::new(14.0, 18.0))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -1866,9 +1901,6 @@ fn run_wry_shell() -> anyhow::Result<()> {
                     }
                 }
             }
-
-            // Catch-all for remaining Toolbar variants.
-            Event::UserEvent(UserEvent::Toolbar(_)) => {}
 
             Event::NewEvents(StartCause::ResumeTimeReached { .. })
             | Event::NewEvents(StartCause::Init) => {
