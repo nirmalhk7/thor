@@ -455,6 +455,64 @@ pub fn run() -> anyhow::Result<()> {
             window.addEventListener('keydown', handleKey, true);
             document.addEventListener('keydown', handleKey, true);
 
+            // Option-click (altKey) element jump — extract source location from
+            // data-source-file attributes, React __source props, or sourceMappingURL,
+            // and send open_ide IPC to jump to the element's source in the IDE.
+            document.addEventListener('click', function(e) {{
+                if (!e.altKey) return;
+                e.preventDefault();
+                e.stopPropagation();
+
+                const el = e.target;
+                let path = null;
+                let line = null;
+                let col = null;
+
+                // 1. Check for data-source-file / data-source-line / data-source-col attributes
+                let node = el;
+                while (node && node !== document.documentElement) {{
+                    if (node.dataset && node.dataset.sourceFile) {{
+                        path = node.dataset.sourceFile;
+                        line = parseInt(node.dataset.sourceLine, 10) || null;
+                        col = parseInt(node.dataset.sourceCol, 10) || null;
+                        break;
+                    }}
+                    // 2. Check React fiber __source (react-refresh / babel plugin)
+                    if (node._reactInternals || node._reactInternalInstance) {{
+                        const fiber = node._reactInternals || node._reactInternalInstance;
+                        if (fiber && fiber._debugSource) {{
+                            path = fiber._debugSource.fileName;
+                            line = fiber._debugSource.lineNumber;
+                            col = fiber._debugSource.columnNumber || null;
+                            break;
+                        }}
+                    }}
+                    node = node.parentElement;
+                }}
+
+                // 3. Fallback: inspect computed sourceURL from inline styles or scripts
+                if (!path) {{
+                    const id = el.id || el.className;
+                    const tag = el.tagName.toLowerCase();
+                    // Send best-effort element identification to the IDE bridge
+                    path = document.location.pathname || '.';
+                    sendIpc(JSON.stringify({{
+                        cmd: 'log',
+                        message: 'Option-click on <' + tag + '> id=' + (el.id || '') + ' class=' + (el.className || '') + ' — no source mapping found, opening page path'
+                    }}));
+                }}
+
+                if (path) {{
+                    sendIpc(JSON.stringify({{
+                        cmd: 'open_ide',
+                        ide: window.__thorPreferredIde || 'vscode',
+                        path: path,
+                        line: line,
+                        col: col
+                    }}));
+                }}
+            }}, true);
+
             let swipeCooling = false;
             window.addEventListener('wheel', function(e) {{
                 if (swipeCooling) return;
@@ -657,6 +715,40 @@ pub fn run() -> anyhow::Result<()> {
                             _ => crate::dx::ide_bridge::Ide::VSCode,
                         };
                         let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
+                    }
+                    "toggle_profile" => {
+                        let mode = payload["mode"].as_str().unwrap_or("DevHost");
+                        println!("⚡ [Thor Rust Engine] Profile switched to: {}", mode);
+                        let profile_mode = match mode {
+                            "StealthTarget" => crate::engine::profiles::ProfileMode::StealthTarget,
+                            _ => crate::engine::profiles::ProfileMode::DevHost,
+                        };
+                        let mgr = crate::engine::profiles::ProfileManager::new();
+                        mgr.set_mode(profile_mode);
+                    }
+                    "set_interception_enabled" => {
+                        let enabled = payload["enabled"].as_bool().unwrap_or(false);
+                        println!("⚡ [Thor Rust Engine] Traffic Interception: {}", if enabled { "ENABLED" } else { "DISABLED" });
+                        let engine = crate::net::tamper::TrafficTamperEngine::new();
+                        engine.set_interception_enabled(enabled);
+                    }
+                    "add_tamper_rule" => {
+                        let pattern = payload["target_url_pattern"].as_str().unwrap_or("").to_string();
+                        let key = payload["replace_header_key"].as_str().unwrap_or("").to_string();
+                        let val = payload["replace_header_value"].as_str().unwrap_or("").to_string();
+                        println!("⚡ [Thor Rust Engine] Tamper rule added: {} → {}={}", pattern, key, val);
+                        let engine = crate::net::tamper::TrafficTamperEngine::new();
+                        engine.add_rule(crate::net::tamper::TamperRule {
+                            id: format!("rule_{}", std::time::SystemTime::now()
+                                .duration_since(std::time::UNIX_EPOCH)
+                                .unwrap_or_default()
+                                .as_millis()),
+                            enabled: true,
+                            target_url_pattern: pattern,
+                            match_header_key: None,
+                            replace_header_key: key,
+                            replace_header_value: val,
+                        });
                     }
                     _ => {}
                 }
