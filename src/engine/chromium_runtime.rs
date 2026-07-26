@@ -412,8 +412,7 @@ impl ChromiumRuntime {
     }
 
     pub fn close_tab_blocking(self: &Arc<Self>, tab: TabSession) -> ChromiumResult<()> {
-        let this = Arc::clone(self);
-        self.block_on(async move { this.close_tab(tab).await })
+        tab.close_blocking()
     }
 
     async fn replenish_prewarm(self: &Arc<Self>) -> ChromiumResult<()> {
