@@ -33,8 +33,9 @@ fn create_content_tab(
     let wv = WebViewBuilder::new()
         .with_url(url)
         .with_user_agent(crate::net::security_shield::CHROMIUM_USER_AGENT)
+        .with_back_forward_navigation_gestures(true)
         .with_bounds(Rect {
-            position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
+            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
             size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
         })
         .with_devtools(true)
@@ -109,8 +110,39 @@ fn create_content_tab(
     Ok(wv)
 }
 
+#[cfg(target_os = "macos")]
+#[allow(deprecated)]
+fn setup_macos_app_menu() {
+    use icrate::AppKit::{NSApplication, NSMenu, NSMenuItem};
+    use icrate::Foundation::{MainThreadMarker, NSString};
+
+    unsafe {
+        let mtm = MainThreadMarker::new_unchecked();
+        let app = NSApplication::sharedApplication(mtm);
+        let main_menu = NSMenu::new(mtm);
+        let app_menu_item = NSMenuItem::new(mtm);
+        let app_menu = NSMenu::new(mtm);
+
+        let quit_item = NSMenuItem::new(mtm);
+        let quit_title = NSString::from_str("Quit Thor");
+        let quit_key = NSString::from_str("q");
+
+        quit_item.setTitle(&quit_title);
+        quit_item.setAction(Some(objc2::sel!(terminate:)));
+        quit_item.setKeyEquivalent(&quit_key);
+
+        app_menu.addItem(&quit_item);
+        app_menu_item.setSubmenu(Some(&app_menu));
+        main_menu.addItem(&app_menu_item);
+        app.setMainMenu(Some(&main_menu));
+    }
+}
+
 pub fn run() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing native OS window event loop on main thread...");
+
+    #[cfg(target_os = "macos")]
+    setup_macos_app_menu();
 
     let event_loop = EventLoop::new();
     let mut builder = WindowBuilder::new()
@@ -130,7 +162,10 @@ pub fn run() -> anyhow::Result<()> {
     let chrome_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
     let tab_pool: Rc<RefCell<HashMap<String, WebView>>> = Rc::new(RefCell::new(HashMap::new()));
     let active_tab_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-    let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((1440.0, 900.0)));
+
+    let scale_factor = window.scale_factor();
+    let initial_logical = window.inner_size().to_logical::<f64>(scale_factor);
+    let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((initial_logical.width, initial_logical.height)));
 
     let raw_chrome_bookmarks = crate::dx::cmd_palette::read_chrome_bookmarks_json().unwrap_or_default();
     let escaped_chrome_bookmarks = serde_json::to_string(&raw_chrome_bookmarks).unwrap_or_default();
@@ -416,6 +451,22 @@ pub fn run() -> anyhow::Result<()> {
 
             window.addEventListener('keydown', handleKey, true);
             document.addEventListener('keydown', handleKey, true);
+
+            let swipeCooling = false;
+            window.addEventListener('wheel', function(e) {{
+                if (swipeCooling) return;
+                if (Math.abs(e.deltaX) > 40 && Math.abs(e.deltaX) > Math.abs(e.deltaY) * 1.5) {{
+                    if (e.deltaX < -40) {{
+                        swipeCooling = true;
+                        sendIpc(JSON.stringify({{ cmd: 'back' }}));
+                        setTimeout(() => {{ swipeCooling = false; }}, 350);
+                    }} else if (e.deltaX > 40) {{
+                        swipeCooling = true;
+                        sendIpc(JSON.stringify({{ cmd: 'forward' }}));
+                        setTimeout(() => {{ swipeCooling = false; }}, 350);
+                    }}
+                }}
+            }}, {{ passive: true }});
         }})();
     "#, escaped_chrome_bookmarks);
 
@@ -446,8 +497,8 @@ pub fn run() -> anyhow::Result<()> {
     let chrome = WebViewBuilder::new()
         .with_html(gui::get_chrome_html())
         .with_bounds(Rect {
-            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
-            size: dpi::LogicalSize::new(1440.0, CHROME_HEIGHT).into(),
+            position: dpi::LogicalPosition::new(0.0, initial_logical.height - CHROME_HEIGHT).into(),
+            size: dpi::LogicalSize::new(initial_logical.width, CHROME_HEIGHT).into(),
         })
         .with_transparent(true)
         .with_ipc_handler(move |request: http::Request<String>| {
@@ -456,6 +507,9 @@ pub fn run() -> anyhow::Result<()> {
             let payload: serde_json::Value = serde_json::from_str(msg).unwrap_or_default();
             if let Some(cmd) = payload["cmd"].as_str() {
                 match cmd {
+                    "drag_window" => {
+                        let _ = window_for_ipc.drag_window();
+                    }
                     "log" => {
                         if let Some(log_msg) = payload["message"].as_str() {
                             println!("⚡ [Thor Chrome Log] {}", log_msg);
@@ -527,7 +581,7 @@ pub fn run() -> anyhow::Result<()> {
                             for (id, wv) in pool.iter() {
                                 if id == target_id {
                                     let _ = wv.set_bounds(Rect {
-                                        position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
+                                        position: dpi::LogicalPosition::new(0.0, 0.0).into(),
                                         size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
                                     });
                                     let _ = wv.focus();
@@ -634,13 +688,15 @@ pub fn run() -> anyhow::Result<()> {
                     *control_flow = ControlFlow::Exit;
                 }
                 WindowEvent::Resized(new_size) => {
-                    let w = new_size.width as f64;
-                    let h = new_size.height as f64;
+                    let scale_factor = window.scale_factor();
+                    let logical_size = new_size.to_logical::<f64>(scale_factor);
+                    let w = logical_size.width;
+                    let h = logical_size.height;
                     *win_size_for_resize.borrow_mut() = (w, h);
 
                     if let Some(ref wv) = *chrome_for_resize.borrow() {
                         let _ = wv.set_bounds(Rect {
-                            position: dpi::LogicalPosition::new(0.0, 0.0).into(),
+                            position: dpi::LogicalPosition::new(0.0, h - CHROME_HEIGHT).into(),
                             size: dpi::LogicalSize::new(w, CHROME_HEIGHT).into(),
                         });
                     }
@@ -650,7 +706,7 @@ pub fn run() -> anyhow::Result<()> {
                     for (id, wv) in pool.iter() {
                         if id == &cur_active {
                             let _ = wv.set_bounds(Rect {
-                                position: dpi::LogicalPosition::new(0.0, CHROME_HEIGHT).into(),
+                                position: dpi::LogicalPosition::new(0.0, 0.0).into(),
                                 size: dpi::LogicalSize::new(w, h - CHROME_HEIGHT).into(),
                             });
                         } else {

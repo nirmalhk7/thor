@@ -1,5 +1,3 @@
-use std::collections::HashMap;
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum Breakpoint {
     Mobile,
@@ -42,7 +40,7 @@ impl CanvasEventBus {
     }
 
     /// Dispatches an event from a source breakpoint to all other active breakpoints
-    pub fn dispatch_event(&self, source: Breakpoint, event: ViewportEvent) {
+    pub fn dispatch_event(&self, source: Breakpoint, _event: ViewportEvent) {
         if !self.sync_enabled {
             return;
         }

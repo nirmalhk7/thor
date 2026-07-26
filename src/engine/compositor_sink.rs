@@ -1,12 +1,12 @@
 use wgpu;
 
 pub struct CompositorSink {
-    device: wgpu::Device,
+    _device: wgpu::Device,
 }
 
 impl CompositorSink {
     pub fn new(device: wgpu::Device) -> Self {
-        Self { device }
+        Self { _device: device }
     }
 
     #[cfg(target_os = "macos")]

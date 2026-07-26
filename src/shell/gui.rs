@@ -43,7 +43,7 @@ pub fn get_chrome_html() -> String {
 
   /* Single-row header chrome - Clean Matte Dark Slate */
   .chrome-row {
-    height: 46px;
+    height: 48px;
     background: var(--bg-chrome);
     display: flex;
     align-items: center;
@@ -109,6 +109,11 @@ pub fn get_chrome_html() -> String {
   .tab.active .tab-title { color: var(--text); font-weight: 600; }
   .tab:hover .tab-title { color: var(--text); }
 
+  input, select, textarea {
+    user-select: text !important;
+    -webkit-user-select: text !important;
+  }
+
   .tab-x {
     opacity: 0;
     width: 15px; height: 15px;
@@ -122,7 +127,6 @@ pub fn get_chrome_html() -> String {
   .tab-x:hover { opacity: 1 !important; background: rgba(255,255,255,0.12); color: var(--text); }
 
   .new-tab {
-    -webkit-app-region: no-drag;
     width: 28px; height: 28px;
     border-radius: 6px;
     display: flex; align-items: center; justify-content: center;
@@ -143,7 +147,6 @@ pub fn get_chrome_html() -> String {
 
   /* Nav Buttons */
   .nav-btn {
-    -webkit-app-region: no-drag;
     width: 28px; height: 28px;
     border-radius: 6px;
     border: none; background: transparent;
@@ -158,7 +161,6 @@ pub fn get_chrome_html() -> String {
 
   /* Omnibox Search Bar */
   .omnibox {
-    -webkit-app-region: no-drag;
     flex: 1;
     min-width: 180px;
     height: 30px;
@@ -564,7 +566,7 @@ pub fn get_chrome_html() -> String {
 </style>
 </head>
 <body>
-  <div class="chrome-row">
+  <div class="chrome-row" id="chromeRow">
     <!-- Tabs -->
     <div class="tabs" id="tabBar"></div>
     <div class="new-tab" onclick="newTab()" title="New Tab (⌘T)">+</div>
@@ -1101,6 +1103,40 @@ function handleGlobalKeydown(e) {
 
 window.addEventListener('keydown', handleGlobalKeydown, true);
 document.addEventListener('keydown', handleGlobalKeydown, true);
+
+// Instant mousedown & pointerdown handler for macOS activation clicks
+function handleHeaderClick(e) {
+  window.focus();
+
+  const urlInput = document.getElementById('urlInput');
+  if (e.target === urlInput || e.target.closest('#urlInput')) {
+    urlInput.focus();
+    return;
+  }
+
+  const target = e.target.closest('button, .nav-btn, .action-btn, .new-tab, .tab-x, .tab, .ssl-icon, .tech-pill, .stack-btn, .locust-btn');
+  if (!target) return;
+
+  if (target.onclick) {
+    target.onclick(e);
+  }
+}
+
+document.addEventListener('mousedown', handleHeaderClick, true);
+document.addEventListener('pointerdown', handleHeaderClick, true);
+
+// Native window drag handler on header bar background
+const chromeRow = document.getElementById('chromeRow');
+if (chromeRow) {
+  chromeRow.addEventListener('mousedown', (e) => {
+    if (e.target.closest('button, input, select, .new-tab, .tab, .ssl-icon, .nav-btn, .action-btn, .omnibox')) {
+      return;
+    }
+    if (e.button === 0) {
+      ipc('drag_window');
+    }
+  });
+}
 
 // ==================== MODAL & CMD+SHIFT+K LOGIC ====================
 function toggleModal(defaultTab = 'all') {

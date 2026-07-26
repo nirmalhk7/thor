@@ -472,4 +472,76 @@ mod tests {
         assert_eq!(scored.error_rate, 1.0);
         assert!(scored.rps > 166.0 && scored.rps < 167.0);
     }
+
+    #[test]
+    fn test_decoder_studio_integration() {
+        use thor::dx::decoder::{DecoderStudio, PayloadType};
+        let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjo0Miwicm9sZSI6ImFkbWluIn0.signature";
+        assert_eq!(DecoderStudio::detect_type(jwt), PayloadType::Jwt);
+
+        let decoded = DecoderStudio::decode_jwt(jwt).unwrap();
+        assert_eq!(decoded.algorithm, "HS256");
+        assert!(decoded.payload_json.unwrap().contains("admin"));
+    }
+
+    #[test]
+    fn test_traffic_tamper_engine_integration() {
+        use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
+        use std::collections::HashMap;
+
+        let engine = TrafficTamperEngine::new();
+        engine.add_rule(TamperRule {
+            id: "rule_1".to_string(),
+            enabled: true,
+            target_url_pattern: "api.internal".to_string(),
+            match_header_key: None,
+            replace_header_key: "Authorization".to_string(),
+            replace_header_value: "Bearer test_token_123".to_string(),
+        });
+
+        let req = InterceptedRequest {
+            id: "req_100".to_string(),
+            timestamp: 5000,
+            method: "GET".to_string(),
+            url: "https://api.internal/v1/resource".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            is_modified: false,
+        };
+
+        let processed = engine.process_outgoing_request(req).unwrap();
+        assert!(processed.is_modified);
+        assert_eq!(processed.headers.get("Authorization").map(|s| s.as_str()), Some("Bearer test_token_123"));
+    }
+
+    #[test]
+    fn test_profile_manager_integration() {
+        use thor::engine::profiles::{ProfileManager, ProfileMode};
+        let manager = ProfileManager::new();
+        assert_eq!(manager.get_profile().mode, ProfileMode::DevHost);
+        assert!(manager.get_profile().enable_ide_bridge);
+
+        manager.set_mode(ProfileMode::StealthTarget);
+        assert_eq!(manager.get_profile().mode, ProfileMode::StealthTarget);
+        assert!(manager.get_profile().strip_tracking_params);
+    }
+
+    #[test]
+    fn test_wasm_plugin_microkernel_integration() {
+        use thor::dx::wasm_plugin::{WasmPluginManifest, WasmPluginMicrokernel};
+        let kernel = WasmPluginMicrokernel::new();
+        let manifest = WasmPluginManifest {
+            id: "custom_fuzzer".to_string(),
+            name: "Custom Fuzzer".to_string(),
+            version: "0.1.0".to_string(),
+            description: "Custom fuzzer plugin".to_string(),
+            author: "Tester".to_string(),
+            capabilities: vec!["fuzzing".to_string()],
+        };
+
+        assert!(kernel.register_plugin(manifest).is_ok());
+        assert_eq!(kernel.get_active_plugins().len(), 1);
+    }
 }
+
+
