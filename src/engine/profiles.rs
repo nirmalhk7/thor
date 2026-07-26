@@ -44,7 +44,10 @@ impl ProfileConfig {
     }
 }
 
-/// Central Profile Manager for Thor tabs and engine contexts
+/// Central Profile Manager for Thor tabs and engine contexts.
+///
+/// Internally Arc-backed so a single process-wide instance (via `AppState::global().profiles()`)
+/// can be shared across IPC handlers. Prefer the singleton over `ProfileManager::new()` per call.
 #[derive(Debug, Clone)]
 pub struct ProfileManager {
     active_profile: Arc<RwLock<ProfileConfig>>,

@@ -21,16 +21,18 @@ tao = "0.30"
 wry = "0.47"
 serde_json = "1.0"
 http = "1.1"
-
-
-
+chromiumoxide = "0.9"
+futures = "0.3"
+thiserror = "2"
+rcgen = "0.13"
+reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
 
 [lib]
 name = "thor"
 path = "src/lib.rs"
 
 [[bin]]
-name = "thor"
+name = "Thor"
 path = "src/main.rs"
 
 [dev-dependencies]
@@ -54,6 +56,9 @@ harness = false
 
 [target.'cfg(target_os = "macos")'.dependencies]
 objc2 = "0.5"
+objc = "0.2"
+cocoa = "0.26"
+block = "0.1"
 icrate = { version = "0.1", features = ["Foundation", "AppKit", "AppKit_NSMenu", "AppKit_NSMenuItem", "AppKit_NSApplication"] }
 
 [target.'cfg(target_os = "windows")'.dependencies]

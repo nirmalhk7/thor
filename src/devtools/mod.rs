@@ -1,3 +1,3 @@
 pub mod cdp_integration;
 
-pub use cdp_integration::CdpIntegration;
+pub use cdp_integration::{CdpIntegration, ConsoleLogEvent};

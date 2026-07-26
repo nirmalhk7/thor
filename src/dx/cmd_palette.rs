@@ -61,7 +61,12 @@ pub struct TabHistoryEntry {
     pub timestamp: u64,
 }
 
-/// Tracks visited pages per tab
+/// Tracks visited pages per tab.
+///
+/// **Privacy model:** history is in-memory and scoped per tab. Call
+/// [`TabHistoryTracker::clear_tab_history`] when a tab closes so visit data
+/// does not outlive the tab. Use [`TabHistoryTracker::clear_all_history`] for
+/// an explicit privacy wipe (also exposed via Cmd+Shift+K).
 #[derive(Debug, Clone, Default)]
 pub struct TabHistoryTracker {
     history_by_tab: HashMap<String, Vec<TabHistoryEntry>>,
@@ -116,6 +121,7 @@ impl TabHistoryTracker {
             .collect()
     }
 
+    /// Drop all visit history for a tab. Intended to run on tab close (privacy).
     pub fn clear_tab_history(&mut self, tab_id: &str) {
         self.history_by_tab.remove(tab_id);
     }
@@ -123,27 +129,186 @@ impl TabHistoryTracker {
     pub fn clear_all_history(&mut self) {
         self.history_by_tab.clear();
     }
+
+    /// Build [`PaletteItem`]s for one tab's visit history (most recent first).
+    pub fn palette_items_for_tab(&self, tab_id: &str) -> Vec<PaletteItem> {
+        tab_history_entries_to_palette_items(&self.get_history_for_tab(tab_id), tab_id)
+    }
+
+    /// Build [`PaletteItem`]s for every tab's visit history (most recent first).
+    pub fn all_palette_items(&self) -> Vec<PaletteItem> {
+        let mut keyed: Vec<(u64, PaletteItem)> = Vec::new();
+        for (tab_id, entries) in &self.history_by_tab {
+            for (i, e) in entries.iter().rev().enumerate() {
+                keyed.push((
+                    e.timestamp,
+                    PaletteItem::new(
+                        format!("hist_{}_{}_{}", tab_id, e.timestamp, i),
+                        e.title.clone(),
+                        PaletteItemType::TabHistory,
+                        e.url.clone(),
+                        Some("Tab History".into()),
+                        Some("🌐".into()),
+                        "Tab History",
+                        Some(format!("navigate_history_{}", tab_id)),
+                    ),
+                ));
+            }
+        }
+        keyed.sort_by(|a, b| b.0.cmp(&a.0));
+        keyed.into_iter().map(|(_, item)| item).collect()
+    }
 }
 
-/// Registry providing all browser and DX settings menu items
+/// Convert tab history entries into Cmd+K palette items.
+pub fn tab_history_entries_to_palette_items(
+    entries: &[TabHistoryEntry],
+    tab_id: &str,
+) -> Vec<PaletteItem> {
+    entries
+        .iter()
+        .enumerate()
+        .map(|(i, e)| {
+            PaletteItem::new(
+                format!("hist_{}_{}_{}", tab_id, e.timestamp, i),
+                e.title.clone(),
+                PaletteItemType::TabHistory,
+                e.url.clone(),
+                Some("Tab History".into()),
+                Some("🌐".into()),
+                "Tab History",
+                Some(format!("navigate_history_{}", tab_id)),
+            )
+        })
+        .collect()
+}
+
+/// Convert currently open tabs `(id, title, url)` into Cmd+K palette items.
+///
+/// Uses [`PaletteItemType::Tab`]. Intended for the Cmd+K
+/// [`CmdPaletteMode::BookmarksAndTabHistory`] pool (open tabs + history + bookmarks).
+pub fn open_tabs_to_palette_items(tabs: &[(&str, &str, &str)]) -> Vec<PaletteItem> {
+    tabs.iter()
+        .map(|(id, title, url)| {
+            let display = if title.is_empty() { *url } else { *title };
+            PaletteItem::new(
+                format!("tab_{}", id),
+                display,
+                PaletteItemType::Tab,
+                *url,
+                Some("Open Tab".into()),
+                Some("📑".into()),
+                "Open Tabs",
+                Some(format!("focus_tab_{}", id)),
+            )
+        })
+        .collect()
+}
+
+/// Build the full Cmd+K item list for [`CmdPaletteMode::BookmarksAndTabHistory`].
+///
+/// Order (ranking before fuzzy filter):
+/// 1. Open tabs
+/// 2. In-tab visit history
+/// 3. Thor bookmarks
+///
+/// Bookmarks must **not** appear in [`SettingsRegistry`] (Cmd+Shift+K).
+pub fn build_cmd_k_items(
+    bookmarks: &[PaletteItem],
+    tab_history: &[PaletteItem],
+    open_tabs: &[PaletteItem],
+) -> Vec<PaletteItem> {
+    let mut items = Vec::with_capacity(open_tabs.len() + tab_history.len() + bookmarks.len());
+    items.extend(open_tabs.iter().cloned());
+    items.extend(tab_history.iter().cloned());
+    items.extend(bookmarks.iter().cloned());
+    items
+}
+
+/// Convenience: build Cmd+K items from raw open-tab tuples + history entries + bookmarks.
+pub fn build_cmd_k_items_from_sources(
+    bookmarks: &[PaletteItem],
+    tab_history: &[TabHistoryEntry],
+    history_tab_id: &str,
+    open_tabs: &[(&str, &str, &str)],
+) -> Vec<PaletteItem> {
+    let tabs = open_tabs_to_palette_items(open_tabs);
+    let history = tab_history_entries_to_palette_items(tab_history, history_tab_id);
+    build_cmd_k_items(bookmarks, &history, &tabs)
+}
+
+/// Serialize palette items to a JSON array string for chrome UI IPC.
+pub fn palette_items_to_json(items: &[PaletteItem]) -> Result<String, serde_json::Error> {
+    serde_json::to_string(items)
+}
+
+/// Serialize Cmd+K payload (open tabs + history + bookmarks) as JSON.
+pub fn cmd_k_payload_json(
+    bookmarks: &[PaletteItem],
+    tab_history: &[PaletteItem],
+    open_tabs: &[PaletteItem],
+) -> Result<String, serde_json::Error> {
+    palette_items_to_json(&build_cmd_k_items(bookmarks, tab_history, open_tabs))
+}
+
+/// Serialize Cmd+Shift+K settings registry as JSON (no bookmarks).
+pub fn settings_payload_json() -> Result<String, serde_json::Error> {
+    palette_items_to_json(&SettingsRegistry::get_all_settings())
+}
+
+/// Cmd+Shift+K only: settings, IDE bridge, security, performance, and extension actions.
+///
+/// Do **not** put bookmarks, open tabs, or tab history here — those belong to
+/// [`CmdPaletteMode::BookmarksAndTabHistory`] (Cmd+K) via [`build_cmd_k_items`].
 pub struct SettingsRegistry;
 
 impl SettingsRegistry {
+    /// Honest M2 tools — dual-window Chromium + AppKit chrome (no CEF theater).
     pub fn get_all_settings() -> Vec<PaletteItem> {
-        let mut settings = vec![
+        vec![
             PaletteItem::new(
                 "set_devtools",
-                "Toggle WebKit Developer Tools (F12)",
+                "Toggle Chromium Developer Tools",
                 PaletteItemType::Setting,
-                "thor://settings/devtools",
-                Some("F12 / ⌘⌥I".into()),
+                "Thor://settings/devtools",
+                Some("F12 / CDP".into()),
                 Some("🛠️".into()),
                 "Settings",
                 Some("toggle_devtools".into()),
             ),
             PaletteItem::new(
+                "set_engine",
+                "Engine status (honest Chromium M2)",
+                PaletteItemType::Setting,
+                "Thor://settings/engine",
+                Some("chromium · CDP · dual-window".into()),
+                Some("ℹ️".into()),
+                "Settings",
+                Some("engine_status".into()),
+            ),
+            PaletteItem::new(
+                "set_profile",
+                "Toggle DevHost ↔ Stealth profile",
+                PaletteItemType::Setting,
+                "Thor://settings/profile",
+                Some("⌘⇧P".into()),
+                Some("👤".into()),
+                "Security",
+                Some("toggle_profile".into()),
+            ),
+            PaletteItem::new(
+                "set_locust",
+                "Load-test active tab (local/private)",
+                PaletteItemType::Setting,
+                "Thor://load",
+                Some("⌘⇧L".into()),
+                Some("📊".into()),
+                "Performance",
+                Some("locust_active_origin".into()),
+            ),
+            PaletteItem::new(
                 "set_vscode",
-                "Open Project in VS Code",
+                "Open path in VS Code",
                 PaletteItemType::Setting,
                 "vscode://file/.",
                 Some("vscode://".into()),
@@ -153,7 +318,7 @@ impl SettingsRegistry {
             ),
             PaletteItem::new(
                 "set_cursor",
-                "Open Project in Cursor AI Editor",
+                "Open path in Cursor",
                 PaletteItemType::Setting,
                 "cursor://file/.",
                 Some("cursor://".into()),
@@ -163,7 +328,7 @@ impl SettingsRegistry {
             ),
             PaletteItem::new(
                 "set_webstorm",
-                "Open Project in WebStorm",
+                "Open path in WebStorm",
                 PaletteItemType::Setting,
                 "webstorm://file/.",
                 Some("webstorm://".into()),
@@ -173,128 +338,65 @@ impl SettingsRegistry {
             ),
             PaletteItem::new(
                 "set_ssl",
-                "Local ECDSA P-256 SSL CA Certificate",
+                "Local SSL CA (generate / install)",
                 PaletteItemType::Setting,
-                "thor://settings/ssl",
-                Some("SSL Trusted".into()),
+                "Thor://settings/ssl",
+                Some("ECDSA P-256".into()),
                 Some("🛡️".into()),
                 "Security",
                 Some("show_ssl_details".into()),
             ),
             PaletteItem::new(
-                "set_hmr",
-                "HMR WebSocket Proxy (Tab Sleep Buffer)",
-                PaletteItemType::Setting,
-                "thor://settings/hmr",
-                Some("WebSocket".into()),
-                Some("🔥".into()),
-                "Network",
-                Some("toggle_hmr_proxy".into()),
-            ),
-            PaletteItem::new(
-                "set_memory",
-                "OS Process Compaction & Memory Freeing",
-                PaletteItemType::Setting,
-                "thor://settings/memory",
-                Some("RAM Freeing".into()),
-                Some("❄️".into()),
-                "Performance",
-                Some("trigger_memory_compaction".into()),
-            ),
-            PaletteItem::new(
-                "set_clear_history",
-                "Clear Visited Tab History & Cache",
-                PaletteItemType::Setting,
-                "thor://settings/clear_history",
-                Some("Privacy".into()),
-                Some("🗑️".into()),
-                "Privacy",
-                Some("clear_history".into()),
-            ),
-            PaletteItem::new(
-                "set_3d_dom",
-                "Obsidian 3D DOM Snapshotter",
-                PaletteItemType::Setting,
-                "thor://settings/3d_dom",
-                Some("wgpu".into()),
-                Some("🧊".into()),
-                "DevTools",
-                Some("snapshot_3d_dom".into()),
-            ),
-            PaletteItem::new(
-                "set_canvas_sync",
-                "Multi-Viewport Sync Canvas (Mobile/Tablet/Desktop)",
-                PaletteItemType::Setting,
-                "thor://settings/canvas_sync",
-                Some("120Hz".into()),
-                Some("📐".into()),
-                "DevTools",
-                Some("toggle_canvas_sync".into()),
-            ),
-            PaletteItem::new(
-                "set_locust",
-                "🚀 Locust HTTP Swarm Load Tester (Users, Ramp-Up, Profile)",
-                PaletteItemType::Setting,
-                "thor://tools/locust_load_test",
-                Some("HTTP Swarm".into()),
-                Some("🚀".into()),
-                "Performance",
-                Some("toggle_locust_panel".into()),
-            ),
-            PaletteItem::new(
-                "set_chromium_engine",
-                "🌐 Chromium Engine (Chrome 126+ / Blink Runtime Compatibility)",
-                PaletteItemType::Setting,
-                "thor://settings/chromium_engine",
-                Some("Chrome 126".into()),
-                Some("🌐".into()),
-                "Engine",
-                Some("show_chromium_info".into()),
-            ),
-            PaletteItem::new(
-                "set_webgpu_accel",
-                "⚡ WebGPU & WebGL2 Hardware Acceleration (Metal / Vulkan API)",
-                PaletteItemType::Setting,
-                "thor://settings/webgpu_accel",
-                Some("Hardware Acceleration".into()),
-                Some("⚡".into()),
-                "Performance",
-                Some("toggle_webgpu_accel".into()),
-            ),
-            PaletteItem::new(
-                "set_web_vitals",
-                "📊 Core Web Vitals Monitor (LCP <2.5s, CLS <0.1, INP <200ms)",
-                PaletteItemType::Setting,
-                "thor://settings/web_vitals",
-                Some("CWV Observer".into()),
-                Some("📊".into()),
-                "Performance",
-                Some("show_web_vitals".into()),
-            ),
-            PaletteItem::new(
                 "set_security_shield",
-                "🛡️ Security & Anti-Tracking Shield (Strip utm_*, gclid, fbclid)",
+                "Tracker strip shield (utm_*, gclid, fbclid)",
                 PaletteItemType::Setting,
-                "thor://settings/security_shield",
+                "Thor://settings/security_shield",
                 Some("Protection".into()),
                 Some("🛡️".into()),
                 "Security",
                 Some("toggle_security_shield".into()),
             ),
             PaletteItem::new(
-                "set_sla_metrics",
-                "Live SLA Metrics: Cold-Start <30ms | IPC 0.4μs",
+                "set_clear_history",
+                "Clear visited tab history",
                 PaletteItemType::Setting,
-                "thor://settings/sla_metrics",
-                Some("SPSC Ring".into()),
+                "Thor://settings/clear_history",
+                Some("Privacy".into()),
+                Some("🗑️".into()),
+                "Privacy",
+                Some("clear_history".into()),
+            ),
+            PaletteItem::new(
+                "set_memory",
+                "Compact idle tabs (≥24h)",
+                PaletteItemType::Setting,
+                "Thor://settings/memory",
+                Some("GC".into()),
+                Some("❄️".into()),
+                "Performance",
+                Some("trigger_memory_compaction".into()),
+            ),
+            PaletteItem::new(
+                "set_web_vitals",
+                "Core Web Vitals snapshot (LCP / CLS / INP)",
+                PaletteItemType::Setting,
+                "Thor://settings/web_vitals",
+                Some("CWV".into()),
                 Some("📊".into()),
+                "Performance",
+                Some("show_web_vitals".into()),
+            ),
+            PaletteItem::new(
+                "set_sla_metrics",
+                "SLA / capability readout (honest M2)",
+                PaletteItemType::Setting,
+                "Thor://settings/sla_metrics",
+                Some("Chromium CDP".into()),
+                Some("📈".into()),
                 "Performance",
                 Some("show_sla_metrics".into()),
             ),
-        ];
-
-        settings.extend(read_chrome_extensions());
-        settings
+        ]
     }
 }
 
@@ -612,9 +714,17 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Vec<PaletteItem> {
     }
 }
 
+/// Command palette mode selected by hotkey.
+///
+/// - [`CmdPaletteMode::BookmarksAndTabHistory`] — **Cmd+K**: open tabs, per-tab
+///   visit history, and Thor bookmarks (see [`build_cmd_k_items`]).
+/// - [`CmdPaletteMode::SettingsMenu`] — **Cmd+Shift+K**: settings / devtools /
+///   security / extensions from [`SettingsRegistry`] only (no bookmarks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdPaletteMode {
+    /// Cmd+K: open tabs + tab history + bookmarks.
     BookmarksAndTabHistory,
+    /// Cmd+Shift+K: settings registry only.
     SettingsMenu,
 }
 
@@ -1106,6 +1216,91 @@ mod tests {
         assert_eq!(item.id, "ext_nhdogjmejiglipccpnnnhbfiladjaklb");
         assert_eq!(item.title, "Vue DevTools v6.5.1");
         assert_eq!(item.category, "Extensions");
+    }
+
+    #[test]
+    fn test_open_tabs_to_palette_items() {
+        let tabs = [
+            ("1", "GitHub", "https://github.com"),
+            ("2", "", "https://example.com"),
+        ];
+        let items = open_tabs_to_palette_items(&tabs);
+        assert_eq!(items.len(), 2);
+        assert_eq!(items[0].item_type, PaletteItemType::Tab);
+        assert_eq!(items[0].id, "tab_1");
+        assert_eq!(items[0].title, "GitHub");
+        assert_eq!(items[0].action_key.as_deref(), Some("focus_tab_1"));
+        assert_eq!(items[1].title, "https://example.com");
+        assert_eq!(items[1].category, "Open Tabs");
+    }
+
+    #[test]
+    fn test_build_cmd_k_items_ranking_and_filter() {
+        let bookmarks = vec![PaletteItem::new(
+            "bm_mdn",
+            "MDN Web Docs",
+            PaletteItemType::Bookmark,
+            "https://developer.mozilla.org",
+            Some("Thor".into()),
+            Some("📚".into()),
+            "Bookmarks",
+            None,
+        )];
+        let history = vec![PaletteItem::new(
+            "hist_1",
+            "Hacker News",
+            PaletteItemType::TabHistory,
+            "https://news.ycombinator.com",
+            Some("Tab History".into()),
+            Some("🌐".into()),
+            "Tab History",
+            None,
+        )];
+        let open_tabs = open_tabs_to_palette_items(&[("t1", "GitHub Open", "https://github.com")]);
+
+        let combined = build_cmd_k_items(&bookmarks, &history, &open_tabs);
+        assert_eq!(combined.len(), 3);
+        // Open tabs first, then history, then bookmarks
+        assert_eq!(combined[0].item_type, PaletteItemType::Tab);
+        assert_eq!(combined[1].item_type, PaletteItemType::TabHistory);
+        assert_eq!(combined[2].item_type, PaletteItemType::Bookmark);
+
+        let mut palette = CmdPalette::new(CmdPaletteMode::BookmarksAndTabHistory);
+        palette.set_items(combined);
+        palette.set_query("github".into());
+        let results = palette.search();
+        assert!(!results.is_empty());
+        assert_eq!(results[0].item_type, PaletteItemType::Tab);
+        assert_eq!(results[0].title, "GitHub Open");
+
+        palette.set_query("hacker".into());
+        let hist_results = palette.search();
+        assert_eq!(hist_results[0].item_type, PaletteItemType::TabHistory);
+
+        let json = cmd_k_payload_json(&bookmarks, &history, &open_tabs).unwrap();
+        assert!(json.contains("\"item_type\":\"Tab\"") || json.contains("\"Tab\""));
+        assert!(json.contains("GitHub Open"));
+    }
+
+    #[test]
+    fn test_clear_tab_history_privacy_on_close() {
+        let mut tracker = TabHistoryTracker::new();
+        tracker.record_visit("tab_a", "https://a.com", "A");
+        tracker.record_visit("tab_b", "https://b.com", "B");
+        assert_eq!(tracker.get_history_for_tab("tab_a").len(), 1);
+        tracker.clear_tab_history("tab_a");
+        assert!(tracker.get_history_for_tab("tab_a").is_empty());
+        assert_eq!(tracker.get_history_for_tab("tab_b").len(), 1);
+    }
+
+    #[test]
+    fn test_settings_registry_excludes_bookmarks() {
+        let settings = SettingsRegistry::get_all_settings();
+        assert!(settings
+            .iter()
+            .all(|s| s.item_type != PaletteItemType::Bookmark
+                && s.item_type != PaletteItemType::Tab
+                && s.item_type != PaletteItemType::TabHistory));
     }
 }
 

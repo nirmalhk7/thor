@@ -1,3 +1,24 @@
+//! Traffic interceptor & repeater engine (Fetch-ready).
+//!
+//! # CDP Fetch integration (future wiring)
+//!
+//! When Chromium Fetch domain interception is enabled (`Fetch.enable` with
+//! `requestPattern`), the runtime should call into this engine as follows:
+//!
+//! 1. On `Fetch.requestPaused` for a request stage, build an [`InterceptedRequest`]
+//!    from the CDP event (`requestId`, method, URL, headers, postData).
+//! 2. Call [`TrafficTamperEngine::process_outgoing_request`]:
+//!    - `Some(req)` → apply header edits and continue via `Fetch.continueRequest`
+//!      (or `Fetch.fulfillRequest` if fully mocked).
+//!    - `None` → request is parked in the pending queue; wait for UI
+//!      [`TrafficTamperEngine::forward_request`] / [`TrafficTamperEngine::drop_request`],
+//!      then issue the matching CDP continue / fail call.
+//! 3. On response completion, call [`TrafficTamperEngine::record_history`] for the
+//!    Repeater / Inspector pane.
+//!
+//! Prefer the process-wide instance from `AppState::global().tamper()` rather than
+//! constructing a new engine per IPC message.
+
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};

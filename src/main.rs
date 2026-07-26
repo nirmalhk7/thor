@@ -3,6 +3,7 @@ use mimalloc::MiMalloc;
 #[global_allocator]
 static GLOBAL: MiMalloc = MiMalloc;
 
+pub mod app_state;
 pub mod daemon;
 pub mod devtools;
 pub mod dx;
@@ -10,6 +11,7 @@ pub mod engine;
 pub mod ipc;
 pub mod net;
 pub mod network;
+pub mod paths;
 pub mod shell;
 
 fn main() -> anyhow::Result<()> {

@@ -1,81 +1,118 @@
-use std::thread;
-use std::time::Duration;
+//! Process / page freeze hooks for Thor (OS signals + CDP lifecycle).
 
+use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateParams;
+use chromiumoxide::Page;
+
+use super::chromium_runtime::ChromiumResult;
+
+/// OS-level suspend / resume of a Chromium process.
+///
+/// On Unix this uses `SIGSTOP` / `SIGCONT`. Windows currently best-effort-logs
+/// (EmptyWorkingSet-style suspend requires more privileges / NtSuspendProcess).
 pub struct ProcessFreezer;
 
 impl ProcessFreezer {
     pub fn freeze_process(pid: u32) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            println!("macOS: proc_suspend triggered for {}", pid);
+            // SAFETY: kill with SIGSTOP on a known Chromium pid we spawned.
+            let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGSTOP) };
+            if rc != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
             Ok(())
         }
         #[cfg(target_os = "windows")]
         {
-            println!("Windows: EmptyWorkingSet triggered for {}", pid);
-            Ok(())
-        }
-        #[cfg(target_os = "linux")]
-        {
-            println!("Linux: cgroup.freeze triggered for {}", pid);
+            // Best-effort placeholder: full NtSuspendProcess wiring is deferred.
+            let _ = pid;
             Ok(())
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
+            let _ = pid;
             Err("Unsupported OS for freezing".to_string())
         }
     }
 
     pub fn unfreeze_process(pid: u32) -> Result<(), String> {
-        #[cfg(target_os = "macos")]
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
         {
-            println!("macOS: proc_resume triggered for {}", pid);
+            let rc = unsafe { libc::kill(pid as libc::pid_t, libc::SIGCONT) };
+            if rc != 0 {
+                return Err(std::io::Error::last_os_error().to_string());
+            }
             Ok(())
         }
         #[cfg(target_os = "windows")]
         {
-            println!("Windows: Process unfreezing triggered for {}", pid);
-            Ok(())
-        }
-        #[cfg(target_os = "linux")]
-        {
-            println!("Linux: cgroup unfreeze triggered for {}", pid);
+            let _ = pid;
             Ok(())
         }
         #[cfg(not(any(target_os = "macos", target_os = "windows", target_os = "linux")))]
         {
+            let _ = pid;
             Err("Unsupported OS for unfreezing".to_string())
         }
     }
 }
 
+/// CDP `Page.setWebLifecycleState` helpers (frozen / active).
+///
+/// Some Chromium builds reject the experimental command; callers should treat
+/// errors as soft failures and fall back to [`ProcessFreezer`].
+pub struct CdpPageFreezer;
+
+impl CdpPageFreezer {
+    pub async fn freeze_page(page: &Page) -> ChromiumResult<()> {
+        use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateState;
+        let params = SetWebLifecycleStateParams::new(SetWebLifecycleStateState::Frozen);
+        page.execute(params).await?;
+        Ok(())
+    }
+
+    pub async fn unfreeze_page(page: &Page) -> ChromiumResult<()> {
+        use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateState;
+        let params = SetWebLifecycleStateParams::new(SetWebLifecycleStateState::Active);
+        page.execute(params).await?;
+        Ok(())
+    }
+}
+
+/// Prefetch pages into RAM on hover (madvise WILLNEED).
 pub struct WarmUpThread;
 
 impl WarmUpThread {
     pub fn prefetch_ram_on_hover(address: *mut libc::c_void, length: usize) {
         let addr_val = address as usize;
-        thread::spawn(move || {
-            thread::sleep(Duration::from_millis(50));
+        std::thread::spawn(move || {
+            std::thread::sleep(std::time::Duration::from_millis(50));
             let ptr = addr_val as *mut libc::c_void;
-            #[cfg(target_os = "linux")]
+            #[cfg(any(target_os = "linux", target_os = "macos"))]
             {
                 unsafe {
                     libc::madvise(ptr, length, libc::MADV_WILLNEED);
                 }
-                println!("Linux: madvise MADV_WILLNEED triggered");
-            }
-            #[cfg(target_os = "macos")]
-            {
-                unsafe {
-                    libc::madvise(ptr, length, libc::MADV_WILLNEED);
-                }
-                println!("macOS: madvise MADV_WILLNEED triggered");
             }
             #[cfg(target_os = "windows")]
             {
-                println!("Windows: Memory prefetching triggered");
+                let _ = (ptr, length);
             }
         });
     }
 }
 
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn freeze_invalid_pid_errors_on_unix() {
+        #[cfg(any(target_os = "macos", target_os = "linux"))]
+        {
+            // PID 1 may or may not allow SIGSTOP depending on privileges; use absurd pid.
+            let err = ProcessFreezer::freeze_process(u32::MAX - 2);
+            assert!(err.is_err());
+        }
+    }
+}

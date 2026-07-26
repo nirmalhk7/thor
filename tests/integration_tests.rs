@@ -1,8 +1,10 @@
 use std::collections::HashSet;
+use thor::dx::bookmarks::BookmarkStore;
 use thor::dx::cmd_palette::{
-    get_default_bookmarks, parse_chrome_bookmarks, parse_chrome_extension_manifest,
-    read_chrome_extensions, score_palette_item, CmdPalette, CmdPaletteMode, PaletteItem,
-    PaletteItemType, SettingsRegistry, TabHistoryTracker,
+    build_cmd_k_items, cmd_k_payload_json, get_default_bookmarks, open_tabs_to_palette_items,
+    parse_chrome_bookmarks, parse_chrome_extension_manifest, read_chrome_extensions,
+    score_palette_item, settings_payload_json, tab_history_entries_to_palette_items, CmdPalette,
+    CmdPaletteMode, PaletteItemType, SettingsRegistry, TabHistoryTracker,
 };
 use thor::dx::stack_detector::TechStackDetector;
 use thor::net::locust::{LocustMetricScorer, RequestMetric};
@@ -329,28 +331,103 @@ mod tests {
         let chrome_bookmarks = get_default_bookmarks();
         assert!(!chrome_bookmarks.is_empty());
 
-        let mut combined = Vec::new();
-        for h in history {
-            combined.push(PaletteItem::new(
-                format!("hist_{}", h.url),
-                h.title,
-                PaletteItemType::TabHistory,
-                h.url,
-                Some("Tab History".into()),
-                Some("🌐".into()),
-                "Tab History",
-                None,
-            ));
-        }
-        combined.extend(chrome_bookmarks);
+        let history_items = tab_history_entries_to_palette_items(&history, "tab_1");
+        let open_tabs = open_tabs_to_palette_items(&[
+            ("tab_1", "Hacker News", "https://news.ycombinator.com"),
+            ("tab_2", "Docs", "https://docs.rs"),
+        ]);
+
+        let combined = build_cmd_k_items(&chrome_bookmarks, &history_items, &open_tabs);
+        assert!(combined.iter().any(|i| i.item_type == PaletteItemType::Tab));
+        assert!(combined
+            .iter()
+            .any(|i| i.item_type == PaletteItemType::TabHistory));
+        assert!(combined
+            .iter()
+            .any(|i| i.item_type == PaletteItemType::Bookmark));
+        // Open tabs ranked first
+        assert_eq!(combined[0].item_type, PaletteItemType::Tab);
 
         palette.set_items(combined);
         palette.set_query("hacker".into());
 
         let results = palette.search();
         assert!(!results.is_empty());
-        assert_eq!(results[0].title, "Hacker News");
-        assert_eq!(results[0].item_type, PaletteItemType::TabHistory);
+        assert!(
+            results[0].title.contains("Hacker News"),
+            "expected Hacker News match, got {:?}",
+            results[0].title
+        );
+        assert!(matches!(
+            results[0].item_type,
+            PaletteItemType::Tab | PaletteItemType::TabHistory
+        ));
+
+        // Privacy: closing a tab clears its history
+        tracker.clear_tab_history("tab_1");
+        assert!(tracker.get_history_for_tab("tab_1").is_empty());
+    }
+
+    #[test]
+    fn test_thor_bookmark_store_persistence() {
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("thor_int_bookmarks_{}", nanos));
+        std::fs::create_dir_all(&dir).unwrap();
+
+        {
+            let mut store = BookmarkStore::open_in(&dir).unwrap();
+            store.add("Rust", "https://www.rust-lang.org").unwrap();
+            store.add("GitHub", "https://github.com").unwrap();
+            assert_eq!(store.list().len(), 2);
+
+            let items = store.to_palette_items();
+            assert_eq!(items.len(), 2);
+            assert!(items.iter().all(|i| i.item_type == PaletteItemType::Bookmark));
+        }
+
+        {
+            let mut store = BookmarkStore::open_in(&dir).unwrap();
+            assert_eq!(store.list().len(), 2);
+            let id = store.list()[0].id.clone();
+            assert!(store.remove(&id).unwrap());
+            assert_eq!(store.list().len(), 1);
+        }
+
+        let store = BookmarkStore::open_in(&dir).unwrap();
+        assert_eq!(store.list().len(), 1);
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_cmd_k_payload_json_shape() {
+        let bookmarks = get_default_bookmarks();
+        let open_tabs = open_tabs_to_palette_items(&[("1", "Local", "http://localhost:3000")]);
+        let history = tab_history_entries_to_palette_items(
+            &[thor::dx::cmd_palette::TabHistoryEntry {
+                url: "https://example.com".into(),
+                title: "Example".into(),
+                timestamp: 1,
+            }],
+            "tab_x",
+        );
+
+        let json = cmd_k_payload_json(&bookmarks, &history, &open_tabs).unwrap();
+        let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).unwrap();
+        assert!(!parsed.is_empty());
+        let first = &parsed[0];
+        assert!(first.get("id").is_some());
+        assert!(first.get("title").is_some());
+        assert!(first.get("item_type").is_some());
+        assert!(first.get("path_or_url").is_some());
+        assert!(first.get("category").is_some());
+        assert_eq!(first["item_type"], "Tab");
+
+        let settings_json = settings_payload_json().unwrap();
+        let settings: Vec<serde_json::Value> = serde_json::from_str(&settings_json).unwrap();
+        assert!(settings.iter().all(|s| s["item_type"] != "Bookmark"));
     }
 
     #[test]
@@ -541,6 +618,76 @@ mod tests {
 
         assert!(kernel.register_plugin(manifest).is_ok());
         assert_eq!(kernel.get_active_plugins().len(), 1);
+    }
+
+    #[test]
+    fn test_locust_http_runner_against_local_listener() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::time::Duration;
+        use thor::net::locust::{LocustConfig, LocustHandle};
+
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind");
+        let addr = listener.local_addr().unwrap();
+        let url = format!("http://{addr}/");
+
+        let server = std::thread::spawn(move || {
+            for _ in 0..48 {
+                if let Ok((mut stream, _)) = listener.accept() {
+                    let mut buf = [0u8; 512];
+                    let _ = stream.read(&mut buf);
+                    let _ = stream.write_all(
+                        b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                    );
+                }
+            }
+        });
+
+        let handle = LocustHandle::start(LocustConfig::new(&url, 3, 0, 2)).expect("start");
+        std::thread::sleep(Duration::from_millis(700));
+        let scored = handle.stop();
+        assert!(
+            scored.total_requests > 0,
+            "Locust must collect real HTTP RequestMetric entries"
+        );
+        assert!(scored.success_requests > 0);
+        let _ = server.join();
+    }
+
+    #[test]
+    fn test_ssl_ca_generate_ecdsa_p256() {
+        use std::fs;
+        use std::time::{SystemTime, UNIX_EPOCH};
+        use thor::net::ssl_ca::SslManager;
+
+        let stamp = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        let dir = std::env::temp_dir().join(format!("thor-int-ssl-{stamp}"));
+        let paths = SslManager::generate_ca_and_leaf_to(Some(&dir)).expect("generate CA");
+        assert!(paths.ca_cert_pem.exists());
+        assert!(paths.leaf_cert_pem.exists());
+        assert!(fs::read_to_string(&paths.ca_cert_pem)
+            .unwrap()
+            .contains("BEGIN CERTIFICATE"));
+        let _ = fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_app_state_global_tamper_and_security() {
+        use thor::app_state::AppState;
+
+        let state = AppState::global();
+        state.tamper().set_interception_enabled(false);
+        // DevHost defaults leave strip off — enable explicitly for this assert.
+        state.security().set_strip_tracking(true);
+        let (clean, stripped) = state
+            .security()
+            .sanitize_navigate_url("https://x.test/a?utm_medium=email&id=1");
+        assert!(stripped);
+        assert_eq!(clean, "https://x.test/a?id=1");
+        state.security().set_strip_tracking(false);
     }
 }
 

@@ -39,7 +39,7 @@ fn generate_10k_palette_items() -> Vec<PaletteItem> {
         let url = match i % 4 {
             0 => format!("https://github.com/thor-browser/repo-{i}?utm_source=github&gclid=abc_{i}"),
             1 => format!("https://google.com/search?q=item_{i}&utm_medium=cpc&fbclid=xyz_{i}"),
-            2 => format!("thor://settings/node_{i}?ref_=thor_app&msclkid=123_{i}"),
+            2 => format!("Thor://settings/node_{i}?ref_=thor_app&msclkid=123_{i}"),
             _ => format!("http://localhost:{i}?utm_campaign=dev_test&igshid=456_{i}"),
         };
 

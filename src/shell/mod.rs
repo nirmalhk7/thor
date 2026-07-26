@@ -1521,7 +1521,389 @@ pub(crate) fn setup_macos_app_menu() {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    chromium_shell::run_chromium_shell()
+    run_wry_shell()
+}
+
+
+/// Wry-based in-window shell: AppKit native toolbar on top, WKWebView content
+/// fills the area below CHROME_HEIGHT. No external Chromium process is spawned.
+fn run_wry_shell() -> anyhow::Result<()> {
+    println!("[Thor Shell] Initializing wry in-window shell...");
+
+    #[cfg(target_os = "macos")]
+    setup_macos_app_menu();
+
+    let _ = AppState::global();
+    let _ = CHROME_HEIGHT; // keep referenced
+
+    let event_loop = EventLoopBuilder::<UserEvent>::with_user_event().build();
+    let proxy: EventLoopProxy<UserEvent> = event_loop.create_proxy();
+
+    let builder = {
+        #[cfg(target_os = "macos")]
+        {
+            use tao::dpi::LogicalPosition;
+            use tao::platform::macos::WindowBuilderExtMacOS;
+            WindowBuilder::new()
+                .with_title("Thor — Developer Browser")
+                .with_inner_size(tao::dpi::LogicalSize::new(1440.0, 900.0))
+                .with_decorations(true)
+                .with_fullsize_content_view(true)
+                .with_titlebar_transparent(true)
+                .with_title_hidden(true)
+                .with_traffic_light_inset(LogicalPosition::new(14.0, (52.0 - 12.0) / 2.0))
+        }
+        #[cfg(not(target_os = "macos"))]
+        {
+            WindowBuilder::new()
+                .with_title("Thor — Developer Browser")
+                .with_inner_size(tao::dpi::LogicalSize::new(1440.0, 900.0))
+                .with_decorations(true)
+        }
+    };
+
+    let window = Rc::new(builder.build(&event_loop)?);
+
+    let scale_factor = window.scale_factor();
+    let initial_logical = window.inner_size().to_logical::<f64>(scale_factor);
+    let (init_w, init_h) = (initial_logical.width, initial_logical.height);
+
+    let tabs: Rc<RefCell<ShellTabs>> = Rc::new(RefCell::new(ShellTabs {
+        webviews: HashMap::new(),
+        meta: HashMap::new(),
+        active: String::new(),
+    }));
+
+    // chrome_ref holds the optional ⌘K palette overlay (hidden initially).
+    let chrome_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
+
+    #[cfg(target_os = "macos")]
+    let toolbar_ref: Rc<RefCell<Option<native_toolbar::NativeToolbar>>> =
+        Rc::new(RefCell::new(None));
+
+    // Create the initial content tab (Google home, visible).
+    {
+        let first_tab_id = "tab_1".to_string();
+        let wv = create_content_tab(
+            &window,
+            "https://www.google.com",
+            first_tab_id.clone(),
+            chrome_ref.clone(),
+            tabs.clone(),
+            proxy.clone(),
+            #[cfg(target_os = "macos")]
+            toolbar_ref.clone(),
+            init_w,
+            init_h,
+            true,
+        )?;
+        let mut t = tabs.borrow_mut();
+        t.webviews.insert(first_tab_id.clone(), wv);
+        t.meta.insert(
+            first_tab_id.clone(),
+            TabMeta {
+                last_active: Instant::now(),
+                url: "https://www.google.com".to_string(),
+                title: "Google".to_string(),
+            },
+        );
+        t.active = first_tab_id;
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        let tb = native_toolbar::NativeToolbar::attach(&window, proxy.clone());
+        tb.set_url("https://www.google.com");
+        tb.focus_omnibox();
+        *toolbar_ref.borrow_mut() = Some(tb);
+    }
+
+    let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((init_w, init_h)));
+    let win_size_for_resize = win_size.clone();
+
+    let tabs_for_loop = tabs.clone();
+    let chrome_for_loop = chrome_ref.clone();
+    #[cfg(target_os = "macos")]
+    let toolbar_for_loop = toolbar_ref.clone();
+    let window_for_events = window.clone();
+    let proxy_for_loop = proxy.clone();
+
+    let mut next_gc_at = Instant::now() + TAB_GC_INTERVAL;
+
+    println!("============================================================");
+    println!("⚡ [Thor Shell] AppKit chrome + wry WKWebView (in-window — no external Chromium)");
+    println!("⚡ [Thor Shell] ⌘K palette · omnibox Enter navigates WKWebView");
+    println!("============================================================");
+
+    event_loop.run(move |event, _, control_flow| {
+        *control_flow = ControlFlow::WaitUntil(next_gc_at);
+
+        match event {
+            Event::UserEvent(UserEvent::Exit) => {
+                *control_flow = ControlFlow::Exit;
+            }
+
+            Event::UserEvent(UserEvent::FocusOmnibox) => {
+                #[cfg(target_os = "macos")]
+                if let Some(tb) = toolbar_for_loop.borrow().as_ref() {
+                    tb.focus_omnibox();
+                }
+            }
+
+            Event::UserEvent(UserEvent::OpenCmdK)
+            | Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::OpenCmdK)) => {
+                open_cmd_k_in_active_tab(&tabs_for_loop.borrow());
+            }
+
+            Event::UserEvent(UserEvent::OpenCmdShiftK)
+            | Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::OpenCmdShiftK)) => {
+                open_cmd_shift_k_in_active_tab(&tabs_for_loop.borrow());
+            }
+
+            Event::UserEvent(UserEvent::LocustToggle)
+            | Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::LocustToggle)) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let tabs_slot = tabs_for_loop.borrow();
+                    let mut tb = toolbar_for_loop.borrow_mut();
+                    open_tool_in_omnibar(&tabs_slot, &mut *tb, "locust_active_origin");
+                }
+            }
+
+            Event::UserEvent(UserEvent::OpenTool(ref action_key)) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let key = action_key.clone();
+                    let tabs_slot = tabs_for_loop.borrow();
+                    let mut tb = toolbar_for_loop.borrow_mut();
+                    open_tool_in_omnibar(&tabs_slot, &mut *tb, &key);
+                }
+            }
+
+            Event::UserEvent(UserEvent::Navigate(ref url)) => {
+                let url = normalize_omnibox_url(url);
+                if !url.is_empty() {
+                    let tabs = tabs_for_loop.borrow();
+                    if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                        let _ = wv.load_url(&url);
+                        drop(tabs);
+                        #[cfg(target_os = "macos")]
+                        if let Some(tb) = toolbar_for_loop.borrow().as_ref() {
+                            tb.set_url(&url);
+                        }
+                    }
+                }
+            }
+
+            Event::UserEvent(UserEvent::WebVitalsResult(ref summary)) => {
+                let s = summary.clone();
+                #[cfg(target_os = "macos")]
+                if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
+                    tb.set_status(&s);
+                    println!("⚡ [Thor Vitals] {s}");
+                }
+            }
+
+            Event::UserEvent(UserEvent::ToggleProfile)
+            | Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::ToggleProfile)) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let tabs_slot = tabs_for_loop.borrow();
+                    let mut tb = toolbar_for_loop.borrow_mut();
+                    open_tool_in_omnibar(&tabs_slot, &mut *tb, "toggle_profile");
+                }
+                #[cfg(not(target_os = "macos"))]
+                toggle_profile_mode();
+            }
+
+            Event::UserEvent(UserEvent::ClosePalette) => {}
+
+            Event::UserEvent(UserEvent::SwitchTab(ref target)) => {
+                let (w, h) = *win_size_for_resize.borrow();
+                let target = target.clone();
+                let url = switch_tab_session(&mut tabs_for_loop.borrow_mut(), &target, w, h);
+                #[cfg(target_os = "macos")]
+                if let Some(url) = url {
+                    if let Some(tb) = toolbar_for_loop.borrow().as_ref() {
+                        tb.set_url(&url);
+                        tb.raise();
+                    }
+                }
+                println!("⚡ [Thor] switch tab → {target}");
+            }
+
+            Event::UserEvent(UserEvent::CloseActiveTab) => {
+                let (w, h) = *win_size_for_resize.borrow();
+                let mut tabs = tabs_for_loop.borrow_mut();
+                if tabs.webviews.len() <= 1 {
+                    if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                        let _ = wv.evaluate_script("location.reload()");
+                    }
+                } else {
+                    let closing = tabs.active.clone();
+                    println!("⚡ [Thor] close tab {closing}");
+                    close_tab_session(&mut tabs, &closing, w, h);
+                    let url = tabs.resolved_url(&tabs.active.clone());
+                    drop(tabs);
+                    #[cfg(target_os = "macos")]
+                    if let Some(tb) = toolbar_for_loop.borrow().as_ref() {
+                        tb.set_url(&url);
+                    }
+                }
+            }
+
+            // Omnibox Enter key: read text from the native AppKit field, navigate WKWebView.
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::SubmitOmnibox)) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let raw = toolbar_for_loop
+                        .borrow()
+                        .as_ref()
+                        .map(|t| t.read_url())
+                        .unwrap_or_default();
+                    let url = normalize_omnibox_url(&raw);
+                    if !url.is_empty() {
+                        let tabs = tabs_for_loop.borrow();
+                        if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                            let _ = wv.load_url(&url);
+                            println!("⚡ [Thor] omnibox navigate → {url}");
+                            drop(tabs);
+                            if let Some(tb) = toolbar_for_loop.borrow().as_ref() {
+                                tb.set_url(&url);
+                            }
+                        }
+                    }
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::Back)) => {
+                let tabs = tabs_for_loop.borrow();
+                if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                    let _ = wv.evaluate_script("history.back()");
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::Forward)) => {
+                let tabs = tabs_for_loop.borrow();
+                if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                    let _ = wv.evaluate_script("history.forward()");
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::Reload)) => {
+                let tabs = tabs_for_loop.borrow();
+                if let Some(wv) = tabs.webviews.get(&tabs.active) {
+                    let _ = wv.evaluate_script("location.reload()");
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::NewTab)) => {
+                let (w, h) = *win_size_for_resize.borrow();
+                let tab_id = format!("tab_{}", Instant::now().elapsed().as_nanos());
+                let url = "https://www.google.com";
+                match create_content_tab(
+                    &window_for_events,
+                    url,
+                    tab_id.clone(),
+                    chrome_for_loop.clone(),
+                    tabs_for_loop.clone(),
+                    proxy_for_loop.clone(),
+                    #[cfg(target_os = "macos")]
+                    toolbar_for_loop.clone(),
+                    w,
+                    h,
+                    false,
+                ) {
+                    Ok(wv) => {
+                        let mut tabs = tabs_for_loop.borrow_mut();
+                        tabs.webviews.insert(tab_id.clone(), wv);
+                        tabs.meta.insert(
+                            tab_id.clone(),
+                            TabMeta {
+                                last_active: Instant::now(),
+                                url: url.to_string(),
+                                title: "New Tab".to_string(),
+                            },
+                        );
+                        let old_active = tabs.active.clone();
+                        tabs.active = tab_id.clone();
+                        tabs.show_only(&tab_id, w, h);
+                        tabs.touch(&old_active);
+                        drop(tabs);
+                        #[cfg(target_os = "macos")]
+                        if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
+                            tb.set_url(url);
+                            tb.reflow(w, h);
+                        }
+                        println!("⚡ [Thor] new tab {tab_id}");
+                    }
+                    Err(e) => eprintln!("⚡ [Thor] new_tab failed: {e}"),
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::ToolGo)) => {
+                #[cfg(target_os = "macos")]
+                {
+                    let (w, h) = *win_size_for_resize.borrow();
+                    let mut tabs_slot = tabs_for_loop.borrow_mut();
+                    let mut tb = toolbar_for_loop.borrow_mut();
+                    let done = run_omnibar_tool_go(&mut tabs_slot, &mut *tb, w, h);
+                    if done {
+                        if let Some(t) = tb.as_mut() {
+                            t.set_tool_mode(native_toolbar::ChromeToolMode::Browse);
+                            t.focus_omnibox();
+                        }
+                    }
+                }
+            }
+
+            Event::UserEvent(UserEvent::Toolbar(ToolbarCmd::ToolCancel)) => {
+                #[cfg(target_os = "macos")]
+                if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
+                    if !tb.tool_mode().is_browse() {
+                        tb.set_tool_mode(native_toolbar::ChromeToolMode::Browse);
+                        tb.focus_omnibox();
+                    }
+                }
+            }
+
+            // Catch-all for remaining Toolbar variants.
+            Event::UserEvent(UserEvent::Toolbar(_)) => {}
+
+            Event::NewEvents(StartCause::ResumeTimeReached { .. })
+            | Event::NewEvents(StartCause::Init) => {
+                let now = Instant::now();
+                if now >= next_gc_at {
+                    next_gc_at = now + TAB_GC_INTERVAL;
+                    let (w, h) = *win_size_for_resize.borrow();
+                    let chrome = chrome_for_loop.borrow();
+                    gc_idle_tabs(&mut tabs_for_loop.borrow_mut(), &*chrome, w, h);
+                }
+            }
+
+            Event::WindowEvent { event, .. } => match event {
+                WindowEvent::CloseRequested => {
+                    *control_flow = ControlFlow::Exit;
+                }
+                WindowEvent::Resized(new_size) => {
+                    let sf = window_for_events.scale_factor();
+                    let logical = new_size.to_logical::<f64>(sf);
+                    let (w, h) = (logical.width, logical.height);
+                    *win_size_for_resize.borrow_mut() = (w, h);
+                    let tabs = tabs_for_loop.borrow();
+                    tabs.show_only(&tabs.active.clone(), w, h);
+                    drop(tabs);
+                    #[cfg(target_os = "macos")]
+                    if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
+                        tb.reflow(w, h);
+                    }
+                }
+                _ => {}
+            },
+
+            _ => {}
+        }
+    });
 }
 
 pub(crate) fn normalize_omnibox_url(raw: &str) -> String {
