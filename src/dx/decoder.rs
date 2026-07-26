@@ -7,6 +7,8 @@ pub enum PayloadType {
     Base64,
     Hex,
     Json,
+    LlmStream,
+    Web3Rpc,
     Unknown,
 }
 
@@ -30,11 +32,21 @@ pub struct DecodedJwt {
 pub struct DecoderStudio;
 
 impl DecoderStudio {
-    /// Detect payload type from raw string
+    /// Detect payload type from raw string with auto-detection for JWT, Base64, Hex, JSON, LLM Stream, and Web3 RPC
     pub fn detect_type(input: &str) -> PayloadType {
         let trimmed = input.trim();
         if Self::is_jwt(trimmed) {
             PayloadType::Jwt
+        } else if crate::dx::web3_inspector::Web3Inspector::is_web3_rpc(trimmed)
+            || trimmed.starts_with("0xa9059cbb")
+            || trimmed.starts_with("0x095ea7b3")
+            || (trimmed.starts_with("0x")
+                && trimmed.len() >= 10
+                && crate::dx::web3_inspector::Web3Inspector::decode_abi_selector(trimmed).is_some())
+        {
+            PayloadType::Web3Rpc
+        } else if trimmed.starts_with("data: ") || trimmed.contains("data: [DONE]") {
+            PayloadType::LlmStream
         } else if trimmed.starts_with('{') && trimmed.ends_with('}') {
             PayloadType::Json
         } else if Self::is_hex(trimmed) {
@@ -85,6 +97,17 @@ impl DecoderStudio {
         })
     }
 
+    /// Helper parser for streaming LLM SSE frame
+    pub fn decode_llm_stream(input: &str, start_ms: u64) -> crate::dx::llm_studio::SseStreamMetrics {
+        let mut parser = crate::dx::llm_studio::SseStreamParser::new(start_ms);
+        parser.feed_chunk(input, start_ms + 100)
+    }
+
+    /// Helper decoder for Web3 ABI calldata selector
+    pub fn decode_web3_rpc(input: &str) -> Option<crate::dx::web3_inspector::AbiSelectorMatch> {
+        crate::dx::web3_inspector::Web3Inspector::decode_abi_selector(input)
+    }
+
     fn is_hex(s: &str) -> bool {
         !s.is_empty() && s.len() % 2 == 0 && s.chars().all(|c| c.is_ascii_hexdigit())
     }
@@ -102,8 +125,7 @@ impl DecoderStudio {
         while base64_str.len() % 4 != 0 {
             base64_str.push('=');
         }
-        
-        // Simple base64 decoding logic
+
         use std::collections::HashMap;
         let b64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
         let char_map: HashMap<char, u8> = b64_chars.chars().zip(0..64).collect();
@@ -141,7 +163,6 @@ mod tests {
 
     #[test]
     fn test_jwt_detection_and_decoding() {
-        // Standard sample JWT with header {"alg":"HS256","typ":"JWT"} and payload {"sub":"1234567890","name":"Thor Security"}
         let jwt = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiIxMjM0NTY3ODkwIiwibmFtZSI6IlRob3IgU2VjdXJpdHkifQ.signature_bytes";
         assert_eq!(DecoderStudio::detect_type(jwt), PayloadType::Jwt);
 
@@ -149,6 +170,18 @@ mod tests {
         assert_eq!(decoded.algorithm, "HS256");
         assert!(decoded.header_json.unwrap().contains("HS256"));
         assert!(decoded.payload_json.unwrap().contains("Thor Security"));
+    }
+
+    #[test]
+    fn test_llm_and_web3_auto_detection() {
+        let sse = "data: {\"choices\":[{\"delta\":{\"content\":\"Thor AI\"}}]}\n\n";
+        assert_eq!(DecoderStudio::detect_type(sse), PayloadType::LlmStream);
+
+        let web3 = r#"{"jsonrpc":"2.0","method":"eth_call","params":[],"id":1}"#;
+        assert_eq!(DecoderStudio::detect_type(web3), PayloadType::Web3Rpc);
+
+        let calldata = "0xa9059cbb0000000000000000000000005aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed0000000000000000000000000000000000000000000000000de0b6b3a7640000";
+        assert_eq!(DecoderStudio::detect_type(calldata), PayloadType::Web3Rpc);
     }
 
     #[test]
