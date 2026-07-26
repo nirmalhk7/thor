@@ -9,7 +9,7 @@ use parking_lot::Mutex;
 use tokio::sync::mpsc::{unbounded_channel, UnboundedReceiver, UnboundedSender};
 use tokio::task::JoinHandle;
 
-use crate::engine::chromium_runtime::{ChromiumResult, ChromiumRuntime};
+use crate::engine::chromium_runtime::{ChromiumError, ChromiumResult, ChromiumRuntime};
 use crate::engine::tab_session::TabSession;
 
 /// Represents a console.log (and friends) event from the JS runtime via CDP.
@@ -57,8 +57,8 @@ impl CdpIntegration {
         self.log_tx = Some(tx.clone());
         self.log_rx = Some(rx);
 
-        let mut events = tab
-            .page()
+        let page = tab.page().ok_or_else(|| ChromiumError::Config("Page not initialized".to_string()))?;
+        let mut events = page
             .event_listener::<EventConsoleApiCalled>()
             .await?;
 
@@ -94,7 +94,10 @@ impl CdpIntegration {
     /// Blocking wrapper for [`Self::attach_tab_console`].
     pub fn attach_tab_console_blocking(&mut self, tab: &TabSession) -> ChromiumResult<()> {
         // We need &mut self across block_on — clone needed fields carefully.
-        let page = tab.page().clone();
+        let page = match tab.page() {
+            Some(p) => p,
+            None => return Err(ChromiumError::Config("Page not initialized".to_string())),
+        };
         let handle = tab.runtime().handle().clone();
         let ws = tab.runtime().websocket_url().to_string();
         let logs = Arc::clone(&self.logs);
