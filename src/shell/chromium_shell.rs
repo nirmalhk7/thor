@@ -55,7 +55,7 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
                 .with_fullsize_content_view(true)
                 .with_titlebar_transparent(true)
                 .with_title_hidden(true)
-                .with_traffic_light_inset(LogicalPosition::new(14.0, (52.0 - 12.0) / 2.0))
+                .with_traffic_light_inset(LogicalPosition::new(14.0, 18.0))
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -349,8 +349,9 @@ fn open_cmd_k_chromium(tabs: &ChromiumTabs) {
         return;
     };
     let status = engine_status::engine_status_script();
+    let hotkey_script = content_hotkey_script();
     let script = format!(
-        "{status}; window.__thorCmdKPayload = {payload}; if (window.openThorModal) window.openThorModal('nav');"
+        "{hotkey_script}; {status}; window.__thorCmdKPayload = {payload}; if (window.__thorEnsureCmdPalette) window.__thorEnsureCmdPalette(); if (window.openThorModal) window.openThorModal('nav');"
     );
     let _ = tabs.evaluate_active(&script);
     println!("⚡ [Thor] Opening ⌘K on Chromium tab {}", tabs.active);
@@ -361,8 +362,9 @@ fn open_cmd_shift_k_chromium(tabs: &ChromiumTabs) {
         return;
     };
     let status = engine_status::engine_status_script();
+    let hotkey_script = content_hotkey_script();
     let script = format!(
-        "{status}; window.__thorSettingsPayload = {payload}; if (window.openThorModal) window.openThorModal('settings');"
+        "{hotkey_script}; {status}; window.__thorSettingsPayload = {payload}; if (window.__thorEnsureCmdPalette) window.__thorEnsureCmdPalette(); if (window.openThorModal) window.openThorModal('settings');"
     );
     let _ = tabs.evaluate_active(&script);
     println!("⚡ [Thor] Opening ⌘⇧K on Chromium tab {}", tabs.active);
@@ -386,10 +388,10 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
         "hotkey_toggle_profile" | "toggle_profile" => {
             let _ = proxy.send_event(UserEvent::ToggleProfile);
         }
-        "hotkey_new_tab" => {
+        "hotkey_new_tab" | "new_tab" => {
             let _ = proxy.send_event(UserEvent::Toolbar(ToolbarCmd::NewTab));
         }
-        "hotkey_close_tab" => {
+        "hotkey_close_tab" | "close_tab" => {
             let _ = proxy.send_event(UserEvent::CloseActiveTab);
         }
         "hotkey_reload" | "reload" => {
@@ -427,6 +429,17 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
         }
         "toggle_devtools" => {
             let _ = proxy.send_event(UserEvent::OpenTool("toggle_devtools".into()));
+        }
+        "open_ide"
+        | "add_tamper_rule"
+        | "add_bookmark"
+        | "remove_bookmark"
+        | "locust_start"
+        | "locust_stop"
+        | "decode_payload"
+        | "decode_jwt_crack" => {
+            let res = super::ipc_dispatch::dispatch_privileged(cmd, &payload);
+            println!("⚡ [Thor IPC Dispatch] {cmd} → {res:?}");
         }
         "log" => {
             if let Some(m) = payload["message"].as_str() {
