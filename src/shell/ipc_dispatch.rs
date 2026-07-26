@@ -139,6 +139,49 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
         "decode_jwt_crack" => DispatchResult::Err(
             "JWT crack unavailable (honest). Display-only decoder is supported.".into(),
         ),
+        "add_tamper_rule" => {
+            let pattern = payload["target_url_pattern"].as_str().unwrap_or("").to_string();
+            let key = payload["replace_header_key"].as_str().unwrap_or("").to_string();
+            let val = payload["replace_header_value"].as_str().unwrap_or("").to_string();
+            let _drop = payload["drop"].as_bool().unwrap_or(false);
+            if pattern.is_empty() {
+                return DispatchResult::Err("Pattern required".into());
+            }
+            state.tamper().add_rule(crate::net::tamper::TamperRule {
+                id: format!("rule_{}", std::time::Instant::now().elapsed().as_nanos()),
+                enabled: true,
+                target_url_pattern: pattern,
+                match_header_key: None,
+                replace_header_key: key,
+                replace_header_value: val,
+            });
+            DispatchResult::Message("tamper:rule_added".into())
+        }
+        "add_bookmark" => {
+            let title = payload["title"].as_str().unwrap_or("").to_string();
+            let url = payload["url"].as_str().unwrap_or("").to_string();
+            if url.is_empty() {
+                return DispatchResult::Err("URL required".into());
+            }
+            if let Ok(mut store) = crate::dx::bookmarks::BookmarkStore::open() {
+                let _ = store.add(title, url);
+                DispatchResult::Message("bookmark:added".into())
+            } else {
+                DispatchResult::Err("Failed to save bookmark".into())
+            }
+        }
+        "remove_bookmark" => {
+            let url = payload["url"].as_str().unwrap_or("").to_string();
+            if url.is_empty() {
+                return DispatchResult::Err("URL required".into());
+            }
+            if let Ok(mut store) = crate::dx::bookmarks::BookmarkStore::open() {
+                let _ = store.remove_by_url(&url);
+                DispatchResult::Message("bookmark:removed".into())
+            } else {
+                DispatchResult::Err("Failed to remove bookmark".into())
+            }
+        }
         other => {
             println!("⚡ [Thor IPC] unknown/ignored privileged cmd: {other}");
             DispatchResult::Ok
