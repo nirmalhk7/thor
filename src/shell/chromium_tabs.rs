@@ -1,12 +1,14 @@
 //! Chromium (CDP) content tabs for the dual-window M2 shell.
 //! AppKit owns chrome; pages live in one headful Chromium process.
+//! Enforces 3-Level Isolation Hierarchy and 4-Stage Tab Lifecycle.
 
 use std::collections::HashMap;
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use crate::engine::{
-    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig, TabSession,
+    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig, IdentityContext,
+    TabLifecycle, TabSession,
 };
 use crate::shell::engine_status;
 
@@ -50,6 +52,9 @@ impl ChromiumTabs {
     }
 
     pub fn touch(&mut self, tab_id: &str) {
+        if let Some(session) = self.sessions.get(tab_id) {
+            session.touch();
+        }
         if let Some(meta) = self.meta.get_mut(tab_id) {
             meta.last_active = Instant::now();
         }
@@ -64,6 +69,9 @@ impl ChromiumTabs {
                 meta.title = title.to_string();
             }
             meta.last_active = Instant::now();
+        }
+        if let Some(session) = self.sessions.get(tab_id) {
+            session.touch();
         }
     }
 
@@ -123,13 +131,51 @@ impl ChromiumTabs {
         Ok(())
     }
 
+    /// Create a Disposable Isolated Tab with an ephemeral Identity Context.
+    pub fn create_disposable_tab(&mut self, tab_id: &str, url: &str) -> ChromiumResult<()> {
+        let clean = sanitize_and_record(tab_id, url, "");
+        let session = self.runtime.new_tab_blocking(Some(&clean))?;
+        let profile = crate::app_state::AppState::global().profiles().get_profile();
+        let profile_id = match profile.mode {
+            crate::engine::profiles::ProfileMode::DevHost => "dev_host",
+            crate::engine::profiles::ProfileMode::StealthTarget => "stealth_target",
+        };
+        let ephemeral_ctx = IdentityContext::ephemeral(profile_id);
+        session.update_identity_context(|ctx| *ctx = ephemeral_ctx);
+        self.reinject(&session);
+        self.meta.insert(
+            tab_id.to_string(),
+            TabMeta {
+                last_active: Instant::now(),
+                url: clean,
+                title: "Disposable Tab".into(),
+            },
+        );
+        self.sessions.insert(tab_id.to_string(), session);
+        self.active = tab_id.to_string();
+        self.show_only(tab_id);
+        Ok(())
+    }
+
     pub fn show_only(&self, target_id: &str) {
+        let now = Instant::now();
         for (id, session) in self.sessions.iter() {
             if id == target_id {
+                if session.lifecycle() == TabLifecycle::Discarded {
+                    let _ = session.restore_blocking();
+                    self.reinject(session);
+                }
                 let _ = session.soft_unfreeze_blocking();
                 let _ = session.bring_to_front_blocking();
             } else {
-                let _ = session.soft_freeze_blocking();
+                let elapsed = now.duration_since(session.last_active());
+                if elapsed >= Duration::from_secs(3600) {
+                    let _ = session.discard_blocking();
+                } else if elapsed >= Duration::from_secs(900) {
+                    let _ = session.soft_freeze_blocking();
+                } else {
+                    let _ = session.soft_freeze_blocking();
+                }
             }
         }
     }
@@ -239,23 +285,44 @@ impl ChromiumTabs {
         }
     }
 
-    pub fn gc_idle(&mut self, idle: std::time::Duration) {
+    /// Enforce the 4-Stage Tab Lifecycle:
+    /// - Active (0m - 15m)
+    /// - Frozen (15m - 1h)
+    /// - Discarded (1h - 24h)
+    /// - Expired (≥24h: close & wipe tab history)
+    pub fn gc_idle(&mut self, idle: Duration) {
         let now = Instant::now();
-        let victims: Vec<String> = self
-            .meta
-            .iter()
-            .filter(|(id, meta)| {
-                self.sessions.len() > 1
-                    && now.duration_since(meta.last_active) >= idle
-                    && (*id != &self.active || self.sessions.len() > 1)
-            })
-            .map(|(id, _)| id.clone())
-            .collect();
-        for id in victims {
-            if self.sessions.len() <= 1 {
-                break;
+        let fifteen_min = Duration::from_secs(15 * 60);
+        let one_hour = Duration::from_secs(60 * 60);
+        let twenty_four_hours = idle;
+
+        let mut expired_victims = Vec::new();
+
+        for (id, session) in self.sessions.iter() {
+            if id == &self.active && self.sessions.len() == 1 {
+                continue;
             }
-            println!("⚡ [Thor GC] Closing idle Chromium tab (≥24h): {id}");
+            let elapsed = now.duration_since(session.last_active());
+
+            if elapsed >= twenty_four_hours {
+                if self.sessions.len() > 1 && id != &self.active {
+                    expired_victims.push(id.clone());
+                }
+            } else if elapsed >= one_hour {
+                if session.lifecycle() != TabLifecycle::Discarded {
+                    println!("⚡ [Thor 4-Stage Lifecycle] Discarding tab after 1h idle: {id}");
+                    let _ = session.discard_blocking();
+                }
+            } else if elapsed >= fifteen_min {
+                if session.lifecycle() == TabLifecycle::Active {
+                    println!("⚡ [Thor 4-Stage Lifecycle] Freezing tab after 15m idle: {id}");
+                    let _ = session.soft_freeze_blocking();
+                }
+            }
+        }
+
+        for id in expired_victims {
+            println!("⚡ [Thor 4-Stage Lifecycle] Expiring idle tab (≥24h) & wiping history: {id}");
             self.close_tab(&id);
         }
     }
