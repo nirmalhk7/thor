@@ -54,12 +54,15 @@ fn create_content_tab(
                         }
                         "open_ide" => {
                             let ide_name = payload["ide"].as_str().unwrap_or("vscode");
+                            let path = payload["path"].as_str().unwrap_or(".");
+                            let line = payload["line"].as_u64().map(|l| l as usize);
+                            let col = payload["col"].as_u64().map(|c| c as usize);
                             let ide = match ide_name {
                                 "cursor" => crate::dx::ide_bridge::Ide::Cursor,
                                 "webstorm" => crate::dx::ide_bridge::Ide::WebStorm,
                                 _ => crate::dx::ide_bridge::Ide::VSCode,
                             };
-                            let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, ".", None, None);
+                            let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                         }
                         "open_cmd_k" => {
                             let _ = chrome_wv.focus();

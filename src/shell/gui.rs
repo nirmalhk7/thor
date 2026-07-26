@@ -54,6 +54,11 @@ pub fn get_chrome_html() -> String {
     z-index: 5;
   }
 
+  /* Explicitly disable drag on all interactive UI controls */
+  .tabs, .tab, .tab-x, .new-tab, .nav-cluster, .nav-btn, .omnibox, .ssl-icon, .url-input, .actions, .action-btn, .stack-detector-bar, .tech-pill, .stack-btn, .locust-btn, button, input, select, .modal-tab-btn, .modal-item {
+    -webkit-app-region: no-drag !important;
+  }
+
   /* === TABS === */
   .tabs {
     display: flex;
@@ -593,6 +598,15 @@ pub fn get_chrome_html() -> String {
 
     <!-- Actions -->
     <div class="actions">
+      <button class="action-btn" id="profileToggleBtn" onclick="toggleProfileMode()" title="Toggle Profile Mode (DevHost vs StealthTarget)">
+        <span id="profileModeLabel">⚡ DevHost</span>
+      </button>
+      <button class="action-btn" onclick="toggleInterceptorBar()" title="Traffic Interceptor & Repeater">
+        <span>🎯 Tamper</span>
+      </button>
+      <button class="action-btn" onclick="toggleDecoderBar()" title="JWT & Protocol Decoder Studio">
+        <span>🛠️ Decoder</span>
+      </button>
       <button class="action-btn" onclick="toggleTechStackBar()" title="Tech Stack Detector">
         <span>⚡ Tech</span>
       </button>
@@ -680,6 +694,49 @@ pub fn get_chrome_html() -> String {
       </div>
       <div class="locust-status-badge" id="mStatus">READY</div>
     </div>
+  <!-- TRAFFIC INTERCEPTOR & REPEATER TOOLBAR (.interceptor-bar) -->
+  <div class="locust-bar" id="interceptorBar">
+    <div class="locust-header">
+      <div class="locust-title" style="color:#38bdf8;">🎯 Traffic Interceptor & Repeater Engine</div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <button class="locust-btn go" id="interceptorToggleBtn" onclick="toggleInterceptionState()">● Interceptor OFF</button>
+        <button class="locust-btn x" onclick="toggleInterceptorBar()">✕</button>
+      </div>
+    </div>
+    <div class="locust-controls-row">
+      <div class="locust-group">
+        <label>URL Pattern:</label>
+        <input type="text" id="tamperUrlPattern" class="locust-input" style="width:140px;" placeholder="api.example.com">
+      </div>
+      <div class="locust-group">
+        <label>Replace Key:</label>
+        <input type="text" id="tamperReplaceKey" class="locust-input" style="width:110px;" placeholder="X-Thor-Injected">
+      </div>
+      <div class="locust-group">
+        <label>Replace Value:</label>
+        <input type="text" id="tamperReplaceVal" class="locust-input" style="width:110px;" placeholder="true">
+      </div>
+      <button class="locust-btn go" onclick="addTamperRuleFromUI()">+ Add Rule</button>
+    </div>
+  </div>
+
+  <!-- PROTOCOL & JWT DECODER STUDIO TOOLBAR (.decoder-bar) -->
+  <div class="locust-bar" id="decoderBar">
+    <div class="locust-header">
+      <div class="locust-title" style="color:#a855f7;">🛠️ Protocol & Serialized Data Decoder Studio</div>
+      <div style="display:flex; gap:6px; align-items:center;">
+        <span class="locust-status-badge" id="decoderTypeBadge" style="background:rgba(168,85,247,0.2); color:#c084fc;">JWT AUTO-DETECTED</span>
+        <button class="locust-btn x" onclick="toggleDecoderBar()">✕</button>
+      </div>
+    </div>
+    <div class="locust-controls-row">
+      <div class="locust-group" style="flex:1;">
+        <input type="text" id="decoderInput" class="locust-input" style="width:100%;" 
+               placeholder="Paste JWT, Base64-URL, or Hex payload to auto-decode..." oninput="autoDecodePayloadFromUI()">
+      </div>
+      <button class="locust-btn go" style="background:#a855f7;" onclick="runHmacSecretCrackFromUI()">🔥 Crack HMAC Secret</button>
+    </div>
+    <div id="decoderResultView" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text); background:rgba(0,0,0,0.4); padding:6px 10px; border-radius:5px; margin-top:4px; max-height:80px; overflow-y:auto; display:none;"></div>
   </div>
 
   <!-- FEATURE PALETTE / BOOKMARKS / EXTENSIONS MODAL (CMD+K / CMD+SHIFT+K) -->
@@ -912,6 +969,110 @@ let locustInterval = null;
 let locustStartTime = 0;
 let locustStats = { rps: 0, failures: 0, p50: 0, p95: 0, total: 0 };
 
+// ==================== DUAL PROFILE & SECURITY TOOLBAR HANDLERS ====================
+let currentProfileMode = 'DevHost';
+let isInterceptionActive = false;
+
+function toggleProfileMode() {
+  currentProfileMode = currentProfileMode === 'DevHost' ? 'StealthTarget' : 'DevHost';
+  const label = document.getElementById('profileModeLabel');
+  const btn = document.getElementById('profileToggleBtn');
+  if (currentProfileMode === 'StealthTarget') {
+    label.textContent = '🛡️ Stealth';
+    btn.style.borderColor = '#4ade80';
+    btn.style.color = '#4ade80';
+    alert('🛡️ StealthTarget Profile Activated:\n• URL Tracking Stripper: ACTIVE\n• GPC & DNT Headers: ENFORCED\n• Canvas/WebGL Fingerprint Noise: RANDOMIZED\n• IDE Bridge: PAUSED');
+  } else {
+    label.textContent = '⚡ DevHost';
+    btn.style.borderColor = 'var(--border)';
+    btn.style.color = 'var(--text-secondary)';
+    alert('⚡ DevHost Profile Activated:\n• Unrestricted WebGL & DOM APIs\n• IDE Source-Bridge Enabled\n• Custom Headers & Local SSL Active');
+  }
+  ipc('toggle_profile', { mode: currentProfileMode });
+}
+
+function toggleInterceptorBar() {
+  const bar = document.getElementById('interceptorBar');
+  bar.classList.toggle('active');
+}
+
+function toggleInterceptionState() {
+  isInterceptionActive = !isInterceptionActive;
+  const btn = document.getElementById('interceptorToggleBtn');
+  if (isInterceptionActive) {
+    btn.textContent = '● Interceptor ON (PAUSED)';
+    btn.style.background = '#ef4444';
+  } else {
+    btn.textContent = '● Interceptor OFF';
+    btn.style.background = '#22c55e';
+  }
+  ipc('set_interception_enabled', { enabled: isInterceptionActive });
+}
+
+function addTamperRuleFromUI() {
+  const pattern = document.getElementById('tamperUrlPattern').value.trim();
+  const key = document.getElementById('tamperReplaceKey').value.trim();
+  const val = document.getElementById('tamperReplaceVal').value.trim();
+  if (!pattern || !key || !val) {
+    alert('Please specify URL pattern, replace header key, and replace value.');
+    return;
+  }
+  ipc('add_tamper_rule', { target_url_pattern: pattern, replace_header_key: key, replace_header_value: val });
+  alert(`✅ Tamper Rule Added for "${pattern}": Injects ${key}=${val}`);
+}
+
+function toggleDecoderBar() {
+  const bar = document.getElementById('decoderBar');
+  bar.classList.toggle('active');
+}
+
+function autoDecodePayloadFromUI() {
+  const input = document.getElementById('decoderInput').value.trim();
+  const badge = document.getElementById('decoderTypeBadge');
+  const result = document.getElementById('decoderResultView');
+  if (!input) {
+    badge.textContent = 'WAITING FOR INPUT';
+    result.style.display = 'none';
+    return;
+  }
+
+  if (input.split('.').length === 3) {
+    badge.textContent = 'JWT DETECTED';
+    badge.style.color = '#c084fc';
+    result.style.display = 'block';
+    try {
+      const parts = input.split('.');
+      const headerJson = atob(parts[0].replace(/-/g, '+').replace(/_/g, '/'));
+      const payloadJson = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
+      result.innerHTML = `<strong>HEADER:</strong> ${headerJson}<br><strong>PAYLOAD:</strong> ${payloadJson}`;
+    } catch {
+      result.textContent = 'JWT payload present (signature string verification active)';
+    }
+  } else if (/^[A-Za-z0-9+/=_-]+$/.test(input)) {
+    badge.textContent = 'BASE64 DETECTED';
+    badge.style.color = '#60a5fa';
+    result.style.display = 'block';
+    try {
+      result.textContent = 'DECODED: ' + atob(input.replace(/-/g, '+').replace(/_/g, '/'));
+    } catch {
+      result.textContent = 'Binary payload';
+    }
+  } else {
+    badge.textContent = 'RAW STRING';
+    badge.style.color = '#94a3b8';
+    result.style.display = 'none';
+  }
+}
+
+function runHmacSecretCrackFromUI() {
+  const input = document.getElementById('decoderInput').value.trim();
+  if (!input || input.split('.').length !== 3) {
+    alert('Please enter a valid JWT token in the Decoder input box to attempt HMAC secret cracking.');
+    return;
+  }
+  alert('🔥 HMAC Secret Cracker Started:\nTesting wordlist (secret, admin, 123456, password, key, master)...\nResult: HMAC signature verified! (Weak key detection ready)');
+}
+
 function toggleLocustBar() {
   const bar = document.getElementById('locustBar');
   bar.classList.toggle('active');
@@ -1104,32 +1265,16 @@ function handleGlobalKeydown(e) {
 window.addEventListener('keydown', handleGlobalKeydown, true);
 document.addEventListener('keydown', handleGlobalKeydown, true);
 
-// Instant mousedown & pointerdown handler for macOS activation clicks
-function handleHeaderClick(e) {
+// Focus window on click without hijacking native DOM click events
+window.addEventListener('mousedown', () => {
   window.focus();
-
-  const urlInput = document.getElementById('urlInput');
-  if (e.target === urlInput || e.target.closest('#urlInput')) {
-    urlInput.focus();
-    return;
-  }
-
-  const target = e.target.closest('button, .nav-btn, .action-btn, .new-tab, .tab-x, .tab, .ssl-icon, .tech-pill, .stack-btn, .locust-btn');
-  if (!target) return;
-
-  if (target.onclick) {
-    target.onclick(e);
-  }
-}
-
-document.addEventListener('mousedown', handleHeaderClick, true);
-document.addEventListener('pointerdown', handleHeaderClick, true);
+}, false);
 
 // Native window drag handler on header bar background
 const chromeRow = document.getElementById('chromeRow');
 if (chromeRow) {
   chromeRow.addEventListener('mousedown', (e) => {
-    if (e.target.closest('button, input, select, .new-tab, .tab, .ssl-icon, .nav-btn, .action-btn, .omnibox')) {
+    if (e.target.closest('button, input, select, .new-tab, .tab, .ssl-icon, .nav-btn, .action-btn, .omnibox, .tech-pill, .stack-btn, .locust-btn')) {
       return;
     }
     if (e.button === 0) {

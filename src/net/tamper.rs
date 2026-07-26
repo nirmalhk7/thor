@@ -105,6 +105,17 @@ impl TrafficTamperEngine {
         None
     }
 
+    /// Drop/cancel an intercepted request without forwarding
+    pub fn drop_request(&self, request_id: &str) -> bool {
+        if let Ok(mut pending) = self.pending_interceptions.write() {
+            if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+                pending.remove(pos);
+                return true;
+            }
+        }
+        false
+    }
+
     /// Record completed request/response pair into history for Repeater/Inspector
     pub fn record_history(&self, req: InterceptedRequest, resp: Option<InterceptedResponse>) {
         if let Ok(mut hist) = self.history.write() {
@@ -184,5 +195,25 @@ mod tests {
         let processed = engine.process_outgoing_request(req).unwrap();
         assert!(processed.is_modified);
         assert_eq!(processed.headers.get("X-Thor-Injected").map(|s| s.as_str()), Some("true"));
+    }
+
+    #[test]
+    fn test_drop_request() {
+        let engine = TrafficTamperEngine::new();
+        engine.set_interception_enabled(true);
+        let req = InterceptedRequest {
+            id: "req_drop".to_string(),
+            timestamp: 1000,
+            method: "GET".to_string(),
+            url: "https://api.example.com/drop".to_string(),
+            headers: HashMap::new(),
+            body: None,
+            is_modified: false,
+        };
+        engine.process_outgoing_request(req);
+        assert_eq!(engine.get_pending_requests().len(), 1);
+
+        assert!(engine.drop_request("req_drop"));
+        assert_eq!(engine.get_pending_requests().len(), 0);
     }
 }
