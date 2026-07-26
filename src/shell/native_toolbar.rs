@@ -28,7 +28,7 @@ const ROW_H: f64 = 28.0;
 const FIELD_INSET_Y: f64 = 5.0; // vertical pad so caret/baseline sits mid-glass
 
 fn traffic_light_inset_y() -> f64 {
-    ((CHROME_HEIGHT - TRAFFIC_LIGHT_SIZE) / 2.0).max(0.0)
+    18.0
 }
 
 fn row_y() -> f64 {
@@ -519,7 +519,7 @@ pub struct NativeToolbar {
 }
 
 impl NativeToolbar {
-    pub fn attach(window: &Window, proxy: EventLoopProxy<UserEvent>) -> Self {
+    pub(crate) fn attach(window: &Window, proxy: EventLoopProxy<UserEvent>) -> Self {
         *proxy_slot().lock().unwrap() = Some(proxy);
         configure_unified_titlebar(window);
 
