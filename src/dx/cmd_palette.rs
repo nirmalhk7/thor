@@ -55,7 +55,7 @@ impl CmdPalette {
     }
 
     /// Basic mock fuzzy search implementation
-    pub fn search(&self) -> Vec<PaletteItem> {
+pub fn search(&self) -> Vec<PaletteItem> {
         let items = self.items.lock().unwrap();
         if self.query.is_empty() {
             return items.clone();
@@ -72,5 +72,16 @@ impl CmdPalette {
 impl Default for CmdPalette {
     fn default() -> Self {
         Self::new()
+    }
+}
+
+/// Reads Chrome Bookmarks JSON from user's Chrome profile on macOS/Linux
+pub fn read_chrome_bookmarks_json() -> Option<String> {
+    let home = std::env::var("HOME").ok()?;
+    let path = format!("{}/Library/Application Support/Google/Chrome/Default/Bookmarks", home);
+    if std::path::Path::new(&path).exists() {
+        std::fs::read_to_string(&path).ok()
+    } else {
+        None
     }
 }

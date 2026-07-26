@@ -476,15 +476,66 @@ pub fn get_chrome_html() -> String {
 // ==================== TAB STATE & BOOKMARKS/HISTORY DATA ====================
 let tabs = [{ id: 'default_tab', title: 'Google', url: 'https://www.google.com', active: true }];
 
-const bookmarks = [
-  { icon: '🐙', title: 'GitHub', url: 'https://github.com', category: 'bookmarks' },
-  { icon: '🔍', title: 'Google Search', url: 'https://www.google.com', category: 'bookmarks' },
-  { icon: '📚', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', category: 'bookmarks' },
-  { icon: '💬', title: 'Stack Overflow', url: 'https://stackoverflow.com', category: 'bookmarks' },
-  { icon: '⚙️', title: 'Localhost:3000 (React/Next.js Dev Server)', url: 'http://localhost:3000', category: 'bookmarks' },
-  { icon: '⚡', title: 'Vite Dev Server (Localhost:5173)', url: 'http://localhost:5173', category: 'bookmarks' },
-  { icon: '📄', title: 'Rust Documentation', url: 'https://docs.rs', category: 'bookmarks' },
+let bookmarks = [
+  { icon: '🐙', title: 'GitHub', url: 'https://github.com', category: 'bookmarks', badge: 'Default' },
+  { icon: '🔍', title: 'Google Search', url: 'https://www.google.com', category: 'bookmarks', badge: 'Default' },
+  { icon: '📚', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', category: 'bookmarks', badge: 'Default' },
+  { icon: '💬', title: 'Stack Overflow', url: 'https://stackoverflow.com', category: 'bookmarks', badge: 'Default' },
+  { icon: '⚙️', title: 'Localhost:3000', url: 'http://localhost:3000', category: 'bookmarks', badge: 'Dev' },
+  { icon: '⚡', title: 'Vite Dev Server', url: 'http://localhost:5173', category: 'bookmarks', badge: 'Dev' },
+  { icon: '📄', title: 'Rust Documentation', url: 'https://docs.rs', category: 'bookmarks', badge: 'Dev' },
 ];
+
+function flattenChromeNode(node, folderPath = '') {
+  if (!node) return [];
+  let result = [];
+  const name = node.name || '';
+  const currentPath = (folderPath && name && name !== 'bookmark_bar' && name !== 'other' && name !== 'synced')
+    ? (folderPath + ' / ' + name)
+    : (name !== 'bookmark_bar' && name !== 'other' && name !== 'synced' ? name : folderPath);
+
+  if (node.type === 'url' && node.url) {
+    let icon = '🔖';
+    if (node.url.includes('github')) icon = '🐙';
+    else if (node.url.includes('google') || node.url.includes('gemini')) icon = '🔍';
+    else if (node.url.includes('chatgpt') || node.url.includes('perplexity') || node.url.includes('oneai')) icon = '🤖';
+    else if (node.url.includes('zoom')) icon = '📹';
+    else if (node.url.includes('slack')) icon = '💬';
+    else if (node.url.includes('canvas') || node.url.includes('colorado')) icon = '🎓';
+
+    result.push({
+      icon: icon,
+      title: node.name || node.url,
+      url: node.url,
+      category: 'bookmarks',
+      badge: currentPath || 'Chrome'
+    });
+  } else if (node.children && Array.isArray(node.children)) {
+    node.children.forEach(child => {
+      result.push(...flattenChromeNode(child, currentPath));
+    });
+  }
+  return result;
+}
+
+window.loadChromeBookmarksFromJSON = function(jsonStr) {
+  try {
+    const data = (typeof jsonStr === 'string') ? JSON.parse(jsonStr) : jsonStr;
+    const parsed = [];
+    if (data && data.roots) {
+      if (data.roots.bookmark_bar) parsed.push(...flattenChromeNode(data.roots.bookmark_bar, ''));
+      if (data.roots.other) parsed.push(...flattenChromeNode(data.roots.other, 'Other'));
+      if (data.roots.synced) parsed.push(...flattenChromeNode(data.roots.synced, 'Mobile'));
+    }
+    if (parsed.length > 0) {
+      bookmarks.length = 0;
+      bookmarks.push(...parsed);
+      console.log('[Thor Chrome] Loaded ' + parsed.length + ' Chrome bookmarks.');
+    }
+  } catch(e) {
+    console.error('[Thor Chrome Error] Failed to parse Chrome Bookmarks JSON:', e);
+  }
+};
 
 let historyItems = [
   { icon: '🌐', title: 'Google Home', url: 'https://www.google.com', category: 'history', time: 'Just now' },

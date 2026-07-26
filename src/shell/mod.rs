@@ -120,65 +120,111 @@ pub fn run() -> anyhow::Result<()> {
     let active_tab_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
     let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((1440.0, 900.0)));
 
-    let hotkey_script = r#"
-        (function() {
-            function sendIpc(msg) {
-                try {
-                    if (window.ipc && window.ipc.postMessage) {
-                        window.ipc.postMessage(msg);
-                    } else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
-                        window.webkit.messageHandlers.ipc.postMessage(msg);
-                    }
-                } catch(e) {}
-            }
+    let raw_chrome_bookmarks = crate::dx::cmd_palette::read_chrome_bookmarks_json().unwrap_or_default();
+    let escaped_chrome_bookmarks = serde_json::to_string(&raw_chrome_bookmarks).unwrap_or_default();
 
-            function initThorModal() {
+    let hotkey_script = format!(r#"
+        (function() {{
+            window.__thor_chrome_bookmarks_raw = {};
+
+            function sendIpc(msg) {{
+                try {{
+                    if (window.ipc && window.ipc.postMessage) {{
+                        window.ipc.postMessage(msg);
+                    }} else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {{
+                        window.webkit.messageHandlers.ipc.postMessage(msg);
+                    }}
+                }} catch(e) {{}}
+            }}
+
+            function flattenChromeNode(node, folderPath) {{
+                if (!node) return [];
+                let res = [];
+                const name = node.name || '';
+                const currentPath = (folderPath && name && name !== 'bookmark_bar' && name !== 'other' && name !== 'synced')
+                  ? (folderPath + ' / ' + name)
+                  : (name !== 'bookmark_bar' && name !== 'other' && name !== 'synced' ? name : folderPath);
+
+                if (node.type === 'url' && node.url) {{
+                  let icon = '🔖';
+                  if (node.url.includes('github')) icon = '🐙';
+                  else if (node.url.includes('google') || node.url.includes('gemini')) icon = '🔍';
+                  else if (node.url.includes('chatgpt') || node.url.includes('perplexity') || node.url.includes('oneai')) icon = '🤖';
+                  else if (node.url.includes('zoom')) icon = '📹';
+                  else if (node.url.includes('slack')) icon = '💬';
+                  else if (node.url.includes('canvas') || node.url.includes('colorado')) icon = '🎓';
+
+                  res.push({{ icon: icon, title: node.name || node.url, url: node.url, badge: currentPath || 'Chrome' }});
+                }} else if (node.children && Array.isArray(node.children)) {{
+                  node.children.forEach(child => res.push(...flattenChromeNode(child, currentPath)));
+                }}
+                return res;
+            }}
+
+            function getParsedChromeBookmarks() {{
+                try {{
+                    const raw = window.__thor_chrome_bookmarks_raw;
+                    if (!raw) return [];
+                    const data = (typeof raw === 'string') ? JSON.parse(raw) : raw;
+                    const res = [];
+                    if (data && data.roots) {{
+                        if (data.roots.bookmark_bar) res.push(...flattenChromeNode(data.roots.bookmark_bar, ''));
+                        if (data.roots.other) res.push(...flattenChromeNode(data.roots.other, 'Other'));
+                        if (data.roots.synced) res.push(...flattenChromeNode(data.roots.synced, 'Mobile'));
+                    }}
+                    return res;
+                }} catch(e) {{
+                    return [];
+                }}
+            }}
+
+            function initThorModal() {{
                 if (document.getElementById('thorModalOverlay')) return;
                 const style = document.createElement('style');
                 style.textContent = `
-                  .thor-modal-overlay {
+                  .thor-modal-overlay {{
                     position: fixed; top: 0; left: 0; right: 0; bottom: 0;
                     background: rgba(0, 0, 0, 0.75); z-index: 999999999;
                     display: none; align-items: flex-start; justify-content: center;
                     padding-top: 50px; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
-                  }
-                  .thor-modal-overlay.active { display: flex; }
-                  .thor-modal-box {
+                  }}
+                  .thor-modal-overlay.active {{ display: flex; }}
+                  .thor-modal-box {{
                     width: 650px; max-width: 90vw; background: #161820;
                     border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
                     box-shadow: 0 16px 48px rgba(0,0,0,0.8); overflow: hidden; display: flex; flex-direction: column;
                     color: #f1f5f9;
-                  }
-                  .thor-modal-search {
+                  }}
+                  .thor-modal-search {{
                     padding: 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.1);
                     display: flex; align-items: center; gap: 10px;
-                  }
-                  .thor-modal-input {
+                  }}
+                  .thor-modal-input {{
                     flex: 1; background: transparent; border: none; outline: none;
                     color: #fff; font-size: 14px; font-family: sans-serif;
-                  }
-                  .thor-modal-list { max-height: 320px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
-                  .thor-modal-item {
+                  }}
+                  .thor-modal-list {{ max-height: 340px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }}
+                  .thor-modal-item {{
                     padding: 10px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;
                     cursor: pointer; background: transparent; transition: background 100ms;
-                  }
-                  .thor-modal-item:hover, .thor-modal-item.selected { background: rgba(255,255,255,0.1); }
-                  .thor-item-title { font-weight: 500; font-size: 13px; color: #f1f5f9; }
-                  .thor-item-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
-                  .thor-item-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1); color: #3b82f6; font-family: monospace; }
+                  }}
+                  .thor-modal-item:hover, .thor-modal-item.selected {{ background: rgba(255,255,255,0.1); }}
+                  .thor-item-title {{ font-weight: 500; font-size: 13px; color: #f1f5f9; }}
+                  .thor-item-sub {{ font-size: 11px; color: #94a3b8; margin-top: 2px; }}
+                  .thor-item-badge {{ font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1); color: #3b82f6; font-family: monospace; }}
                 `;
                 document.head ? document.head.appendChild(style) : document.documentElement.appendChild(style);
 
                 const overlay = document.createElement('div');
                 overlay.className = 'thor-modal-overlay';
                 overlay.id = 'thorModalOverlay';
-                overlay.onclick = function(e) { if (e.target === overlay) closeThorModal(); };
+                overlay.onclick = function(e) {{ if (e.target === overlay) closeThorModal(); }};
 
                 overlay.innerHTML = `
                   <div class="thor-modal-box">
                     <div class="thor-modal-search">
                       <span style="color:#3b82f6;">🔍</span>
-                      <input type="text" class="thor-modal-input" id="thorModalInput" placeholder="Type a command, bookmark, or URL...">
+                      <input type="text" class="thor-modal-input" id="thorModalInput" placeholder="Search Chrome bookmarks, commands, or URLs...">
                       <span style="font-size:10px;color:#64748b;background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;">ESC</span>
                     </div>
                     <div class="thor-modal-list" id="thorModalList"></div>
@@ -188,118 +234,117 @@ pub fn run() -> anyhow::Result<()> {
 
                 const input = document.getElementById('thorModalInput');
                 input.oninput = renderThorItems;
-                input.onkeydown = function(e) {
+                input.onkeydown = function(e) {{
                     if (e.key === 'Escape') closeThorModal();
-                    else if (e.key === 'Enter') {
+                    else if (e.key === 'Enter') {{
                         const query = input.value.trim();
-                        if (query) {
+                        if (query) {{
                             let url = (query.includes('.') && !query.includes(' ')) ? 'https://' + query : 'https://www.google.com/search?q=' + encodeURIComponent(query);
-                            sendIpc(JSON.stringify({ cmd: 'navigate', url: url }));
+                            location.href = url;
                             closeThorModal();
-                        }
-                    }
-                };
-            }
+                        }}
+                    }}
+                }};
+            }}
 
-            const items = [
-              { icon: '🐙', title: 'GitHub', url: 'https://github.com', badge: 'bookmark' },
-              { icon: '🔍', title: 'Google Search', url: 'https://www.google.com', badge: 'bookmark' },
-              { icon: '📚', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', badge: 'bookmark' },
-              { icon: '💬', title: 'Stack Overflow', url: 'https://stackoverflow.com', badge: 'bookmark' },
-              { icon: '⚙️', title: 'Localhost:3000 (React Dev Server)', url: 'http://localhost:3000', badge: 'localhost' },
-              { icon: '⚡', title: 'Vite Dev Server (Localhost:5173)', url: 'http://localhost:5173', badge: 'localhost' },
-              { icon: '💻', title: 'Open Project in VS Code', action: 'vscode', badge: 'vscode://' },
-              { icon: '⚡', title: 'Open Project in Cursor AI', action: 'cursor', badge: 'cursor://' },
-              { icon: '🛠️', title: 'Toggle WebKit DevTools', action: 'devtools', badge: 'F12' }
-            ];
+            function getCombinedItems() {{
+                const chromeBms = getParsedChromeBookmarks();
+                const dxItems = [
+                  {{ icon: '💻', title: 'Open Project in VS Code', action: 'vscode', badge: 'vscode://' }},
+                  {{ icon: '⚡', title: 'Open Project in Cursor AI', action: 'cursor', badge: 'cursor://' }},
+                  {{ icon: '🛠️', title: 'Toggle WebKit DevTools', action: 'devtools', badge: 'F12' }}
+                ];
+                return [...chromeBms, ...dxItems];
+            }}
 
-            function renderThorItems() {
+            function renderThorItems() {{
                 const list = document.getElementById('thorModalList');
                 const input = document.getElementById('thorModalInput');
                 if (!list || !input) return;
                 const q = input.value.toLowerCase().trim();
                 list.innerHTML = '';
-                const filtered = items.filter(it => it.title.toLowerCase().includes(q) || (it.url && it.url.toLowerCase().includes(q)));
-                filtered.forEach(it => {
+                const items = getCombinedItems();
+                const filtered = items.filter(it => it.title.toLowerCase().includes(q) || (it.url && it.url.toLowerCase().includes(q)) || (it.badge && it.badge.toLowerCase().includes(q)));
+                filtered.forEach(it => {{
                     const el = document.createElement('div');
                     el.className = 'thor-modal-item';
                     el.innerHTML = `
                       <div>
-                        <div class="thor-item-title">${it.icon} ${it.title}</div>
-                        <div class="thor-item-sub">${it.url || ''}</div>
+                        <div class="thor-item-title">${{it.icon}} ${{it.title}}</div>
+                        <div class="thor-item-sub">${{it.url || ''}}</div>
                       </div>
-                      <div class="thor-item-badge">${it.badge}</div>
+                      <div class="thor-item-badge">${{it.badge}}</div>
                     `;
-                    el.onclick = function() {
-                        if (it.url) {
+                    el.onclick = function() {{
+                        if (it.url) {{
                             location.href = it.url;
-                        } else if (it.action === 'vscode' || it.action === 'cursor') {
-                            sendIpc(JSON.stringify({ cmd: 'open_ide', ide: it.action }));
-                        } else if (it.action === 'devtools') {
-                            sendIpc(JSON.stringify({ cmd: 'toggle_devtools' }));
-                        }
+                        }} else if (it.action === 'vscode' || it.action === 'cursor') {{
+                            sendIpc(JSON.stringify({{ cmd: 'open_ide', ide: it.action }}));
+                        }} else if (it.action === 'devtools') {{
+                            sendIpc(JSON.stringify({{ cmd: 'toggle_devtools' }}));
+                        }}
                         closeThorModal();
-                    };
+                    }};
                     list.appendChild(el);
-                });
-            }
+                }});
+            }}
 
-            window.openThorModal = function() {
+            window.openThorModal = function() {{
                 initThorModal();
                 const overlay = document.getElementById('thorModalOverlay');
                 const input = document.getElementById('thorModalInput');
-                if (overlay) {
+                if (overlay) {{
                     overlay.classList.add('active');
                     renderThorItems();
-                    if (input) { input.value = ''; setTimeout(() => input.focus(), 30); }
-                }
-            };
+                    if (input) {{ input.value = ''; setTimeout(() => input.focus(), 30); }}
+                }}
+            }};
 
-            window.closeThorModal = function() {
+            window.closeThorModal = function() {{
                 const overlay = document.getElementById('thorModalOverlay');
                 if (overlay) overlay.classList.remove('active');
-            };
+            }};
 
-            function handleKey(e) {
+            function handleKey(e) {{
                 const isCmdOrCtrl = e.metaKey || e.ctrlKey;
                 if (!isCmdOrCtrl) return;
 
                 const key = e.key ? e.key.toLowerCase() : '';
                 const code = e.code ? e.code.toLowerCase() : '';
 
-                if (e.shiftKey && (key === 'k' || code === 'keyk')) {
+                if (e.shiftKey && (key === 'k' || code === 'keyk')) {{
                     e.preventDefault();
                     e.stopPropagation();
                     window.openThorModal();
-                } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
+                }} else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {{
                     e.preventDefault();
                     e.stopPropagation();
                     window.openThorModal();
-                } else if (key === 't') {
+                }} else if (key === 't') {{
                     e.preventDefault();
                     e.stopPropagation();
-                    sendIpc(JSON.stringify({ cmd: 'hotkey_new_tab' }));
-                } else if (key === 'w') {
+                    sendIpc(JSON.stringify({{ cmd: 'hotkey_new_tab' }}));
+                }} else if (key === 'w') {{
                     e.preventDefault();
                     e.stopPropagation();
-                    sendIpc(JSON.stringify({ cmd: 'hotkey_close_tab' }));
-                } else if (key === 'l') {
+                    sendIpc(JSON.stringify({{ cmd: 'hotkey_close_tab' }}));
+                }} else if (key === 'l') {{
                     e.preventDefault();
                     e.stopPropagation();
-                    sendIpc(JSON.stringify({ cmd: 'hotkey_focus_url' }));
-                }
-            }
+                    sendIpc(JSON.stringify({{ cmd: 'hotkey_focus_url' }}));
+                }}
+            }}
 
-            if (document.readyState === 'loading') {
+            if (document.readyState === 'loading') {{
                 document.addEventListener('DOMContentLoaded', initThorModal);
-            } else {
+            }} else {{
                 initThorModal();
-            }
+            }}
 
             window.addEventListener('keydown', handleKey, true);
             document.addEventListener('keydown', handleKey, true);
-        })();
-    "#;
+        }})();
+    "#, escaped_chrome_bookmarks);
 
     // Create Initial Default Native Tab ("default_tab")
     let initial_tab_id = "default_tab".to_string();
@@ -308,7 +353,7 @@ pub fn run() -> anyhow::Result<()> {
         "https://www.google.com",
         initial_tab_id.clone(),
         chrome_ref.clone(),
-        hotkey_script,
+        &hotkey_script,
         1440.0,
         900.0,
     )?;
@@ -322,7 +367,7 @@ pub fn run() -> anyhow::Result<()> {
     let tab_pool_for_ipc = tab_pool.clone();
     let active_tab_for_ipc = active_tab_id.clone();
     let win_size_for_ipc = win_size.clone();
-    let hotkey_script_for_ipc = hotkey_script.to_string();
+    let hotkey_script_for_ipc = hotkey_script.clone();
 
     // Build Chrome Toolbar WebView SECOND (fixed 48px header on top)
     let chrome = WebViewBuilder::new()
@@ -477,6 +522,11 @@ pub fn run() -> anyhow::Result<()> {
         })
         .build_as_child(&window)?;
 
+    // Load Chrome Bookmarks into chrome header webview
+    if !raw_chrome_bookmarks.is_empty() {
+        let _ = chrome.evaluate_script(&format!("loadChromeBookmarksFromJSON({});", escaped_chrome_bookmarks));
+    }
+
     *chrome_ref.borrow_mut() = Some(chrome);
 
     let chrome_for_resize = chrome_ref.clone();
@@ -486,7 +536,7 @@ pub fn run() -> anyhow::Result<()> {
 
     println!("============================================================");
     println!("🚀 [Thor Shell] Matte Obsidian Developer Browser ACTIVE!");
-    println!("🚀 [Thor Shell] Single-Overlay Command Palette Active.");
+    println!("🚀 [Thor Shell] Mirrored Google Chrome Bookmarks & Tree Structure LOADED.");
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {
