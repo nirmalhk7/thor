@@ -644,12 +644,9 @@ pub fn read_chrome_bookmarks_json() -> Option<String> {
 }
 
 /// Parse raw Chrome Bookmarks JSON string into a structured list of PaletteItems
-pub fn parse_chrome_bookmarks(json_str: &str) -> Vec<PaletteItem> {
+pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_json::Error> {
     let mut items = Vec::new();
-    let parsed: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(_) => return get_default_bookmarks(),
-    };
+    let parsed: serde_json::Value = serde_json::from_str(json_str)?;
 
     fn extract_nodes(node: &serde_json::Value, folder_path: &str, items: &mut Vec<PaletteItem>) {
         let name = node["name"].as_str().unwrap_or("");
@@ -715,9 +712,9 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Vec<PaletteItem> {
     }
 
     if items.is_empty() {
-        get_default_bookmarks()
+        Ok(items)
     } else {
-        items
+        Ok(items)
     }
 }
 
@@ -1151,11 +1148,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chrome_bookmarks_parser_default_fallback() {
+    fn test_chrome_bookmarks_parser_invalid_json() {
         let items = parse_chrome_bookmarks("invalid json");
-        assert!(!items.is_empty());
-        assert_eq!(items[0].category, "Bookmarks");
-        assert!(items.iter().any(|it| it.title.contains("GitHub")));
+        assert!(items.is_err());
     }
 
     #[test]
@@ -1173,7 +1168,7 @@ mod tests {
             }
         }"#;
 
-        let items = parse_chrome_bookmarks(json_str);
+        let items = parse_chrome_bookmarks(json_str).unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].title, "Rust Docs");
         assert_eq!(items[1].title, "Thor Repo");
