@@ -50,13 +50,14 @@ fn create_content_tab(
                                 println!("⚡ [Thor Log] {}", log_msg);
                             }
                         }
-                        "hotkey_cmd_k" => {
-                            let _ = chrome_wv.focus();
-                            let _ = chrome_wv.evaluate_script("openModalFromHotkey('features')");
-                        }
-                        "hotkey_cmd_shift_k" => {
-                            let _ = chrome_wv.focus();
-                            let _ = chrome_wv.evaluate_script("openModalFromHotkey('bookmarks_history')");
+                        "open_ide" => {
+                            let ide_name = payload["ide"].as_str().unwrap_or("vscode");
+                            let ide = match ide_name {
+                                "cursor" => crate::dx::ide_bridge::Ide::Cursor,
+                                "webstorm" => crate::dx::ide_bridge::Ide::WebStorm,
+                                _ => crate::dx::ide_bridge::Ide::VSCode,
+                            };
+                            let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, ".", None, None);
                         }
                         "hotkey_new_tab" => {
                             let _ = chrome_wv.focus();
@@ -117,7 +118,6 @@ pub fn run() -> anyhow::Result<()> {
     let chrome_ref: Rc<RefCell<Option<WebView>>> = Rc::new(RefCell::new(None));
     let tab_pool: Rc<RefCell<HashMap<String, WebView>>> = Rc::new(RefCell::new(HashMap::new()));
     let active_tab_id: Rc<RefCell<String>> = Rc::new(RefCell::new(String::new()));
-
     let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((1440.0, 900.0)));
 
     let hotkey_script = r#"
@@ -132,6 +132,134 @@ pub fn run() -> anyhow::Result<()> {
                 } catch(e) {}
             }
 
+            function initThorModal() {
+                if (document.getElementById('thorModalOverlay')) return;
+                const style = document.createElement('style');
+                style.textContent = `
+                  .thor-modal-overlay {
+                    position: fixed; top: 0; left: 0; right: 0; bottom: 0;
+                    background: rgba(0, 0, 0, 0.75); z-index: 999999999;
+                    display: none; align-items: flex-start; justify-content: center;
+                    padding-top: 50px; font-family: -apple-system, BlinkMacSystemFont, 'Inter', sans-serif;
+                  }
+                  .thor-modal-overlay.active { display: flex; }
+                  .thor-modal-box {
+                    width: 650px; max-width: 90vw; background: #161820;
+                    border: 1px solid rgba(255,255,255,0.2); border-radius: 10px;
+                    box-shadow: 0 16px 48px rgba(0,0,0,0.8); overflow: hidden; display: flex; flex-direction: column;
+                    color: #f1f5f9;
+                  }
+                  .thor-modal-search {
+                    padding: 14px; background: rgba(0,0,0,0.3); border-bottom: 1px solid rgba(255,255,255,0.1);
+                    display: flex; align-items: center; gap: 10px;
+                  }
+                  .thor-modal-input {
+                    flex: 1; background: transparent; border: none; outline: none;
+                    color: #fff; font-size: 14px; font-family: sans-serif;
+                  }
+                  .thor-modal-list { max-height: 320px; overflow-y: auto; padding: 8px; display: flex; flex-direction: column; gap: 4px; }
+                  .thor-modal-item {
+                    padding: 10px 12px; border-radius: 6px; display: flex; align-items: center; justify-content: space-between;
+                    cursor: pointer; background: transparent; transition: background 100ms;
+                  }
+                  .thor-modal-item:hover, .thor-modal-item.selected { background: rgba(255,255,255,0.1); }
+                  .thor-item-title { font-weight: 500; font-size: 13px; color: #f1f5f9; }
+                  .thor-item-sub { font-size: 11px; color: #94a3b8; margin-top: 2px; }
+                  .thor-item-badge { font-size: 10px; padding: 2px 6px; border-radius: 4px; background: rgba(255,255,255,0.1); color: #3b82f6; font-family: monospace; }
+                `;
+                document.head ? document.head.appendChild(style) : document.documentElement.appendChild(style);
+
+                const overlay = document.createElement('div');
+                overlay.className = 'thor-modal-overlay';
+                overlay.id = 'thorModalOverlay';
+                overlay.onclick = function(e) { if (e.target === overlay) closeThorModal(); };
+
+                overlay.innerHTML = `
+                  <div class="thor-modal-box">
+                    <div class="thor-modal-search">
+                      <span style="color:#3b82f6;">🔍</span>
+                      <input type="text" class="thor-modal-input" id="thorModalInput" placeholder="Type a command, bookmark, or URL...">
+                      <span style="font-size:10px;color:#64748b;background:rgba(255,255,255,0.1);padding:2px 6px;border-radius:4px;">ESC</span>
+                    </div>
+                    <div class="thor-modal-list" id="thorModalList"></div>
+                  </div>
+                `;
+                document.body ? document.body.appendChild(overlay) : document.documentElement.appendChild(overlay);
+
+                const input = document.getElementById('thorModalInput');
+                input.oninput = renderThorItems;
+                input.onkeydown = function(e) {
+                    if (e.key === 'Escape') closeThorModal();
+                    else if (e.key === 'Enter') {
+                        const query = input.value.trim();
+                        if (query) {
+                            let url = (query.includes('.') && !query.includes(' ')) ? 'https://' + query : 'https://www.google.com/search?q=' + encodeURIComponent(query);
+                            sendIpc(JSON.stringify({ cmd: 'navigate', url: url }));
+                            closeThorModal();
+                        }
+                    }
+                };
+            }
+
+            const items = [
+              { icon: '🐙', title: 'GitHub', url: 'https://github.com', badge: 'bookmark' },
+              { icon: '🔍', title: 'Google Search', url: 'https://www.google.com', badge: 'bookmark' },
+              { icon: '📚', title: 'MDN Web Docs', url: 'https://developer.mozilla.org', badge: 'bookmark' },
+              { icon: '💬', title: 'Stack Overflow', url: 'https://stackoverflow.com', badge: 'bookmark' },
+              { icon: '⚙️', title: 'Localhost:3000 (React Dev Server)', url: 'http://localhost:3000', badge: 'localhost' },
+              { icon: '⚡', title: 'Vite Dev Server (Localhost:5173)', url: 'http://localhost:5173', badge: 'localhost' },
+              { icon: '💻', title: 'Open Project in VS Code', action: 'vscode', badge: 'vscode://' },
+              { icon: '⚡', title: 'Open Project in Cursor AI', action: 'cursor', badge: 'cursor://' },
+              { icon: '🛠️', title: 'Toggle WebKit DevTools', action: 'devtools', badge: 'F12' }
+            ];
+
+            function renderThorItems() {
+                const list = document.getElementById('thorModalList');
+                const input = document.getElementById('thorModalInput');
+                if (!list || !input) return;
+                const q = input.value.toLowerCase().trim();
+                list.innerHTML = '';
+                const filtered = items.filter(it => it.title.toLowerCase().includes(q) || (it.url && it.url.toLowerCase().includes(q)));
+                filtered.forEach(it => {
+                    const el = document.createElement('div');
+                    el.className = 'thor-modal-item';
+                    el.innerHTML = `
+                      <div>
+                        <div class="thor-item-title">${it.icon} ${it.title}</div>
+                        <div class="thor-item-sub">${it.url || ''}</div>
+                      </div>
+                      <div class="thor-item-badge">${it.badge}</div>
+                    `;
+                    el.onclick = function() {
+                        if (it.url) {
+                            location.href = it.url;
+                        } else if (it.action === 'vscode' || it.action === 'cursor') {
+                            sendIpc(JSON.stringify({ cmd: 'open_ide', ide: it.action }));
+                        } else if (it.action === 'devtools') {
+                            sendIpc(JSON.stringify({ cmd: 'toggle_devtools' }));
+                        }
+                        closeThorModal();
+                    };
+                    list.appendChild(el);
+                });
+            }
+
+            window.openThorModal = function() {
+                initThorModal();
+                const overlay = document.getElementById('thorModalOverlay');
+                const input = document.getElementById('thorModalInput');
+                if (overlay) {
+                    overlay.classList.add('active');
+                    renderThorItems();
+                    if (input) { input.value = ''; setTimeout(() => input.focus(), 30); }
+                }
+            };
+
+            window.closeThorModal = function() {
+                const overlay = document.getElementById('thorModalOverlay');
+                if (overlay) overlay.classList.remove('active');
+            };
+
             function handleKey(e) {
                 const isCmdOrCtrl = e.metaKey || e.ctrlKey;
                 if (!isCmdOrCtrl) return;
@@ -142,11 +270,11 @@ pub fn run() -> anyhow::Result<()> {
                 if (e.shiftKey && (key === 'k' || code === 'keyk')) {
                     e.preventDefault();
                     e.stopPropagation();
-                    sendIpc(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
+                    window.openThorModal();
                 } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
                     e.preventDefault();
                     e.stopPropagation();
-                    sendIpc(JSON.stringify({ cmd: 'hotkey_cmd_k' }));
+                    window.openThorModal();
                 } else if (key === 't') {
                     e.preventDefault();
                     e.stopPropagation();
@@ -160,6 +288,12 @@ pub fn run() -> anyhow::Result<()> {
                     e.stopPropagation();
                     sendIpc(JSON.stringify({ cmd: 'hotkey_focus_url' }));
                 }
+            }
+
+            if (document.readyState === 'loading') {
+                document.addEventListener('DOMContentLoaded', initThorModal);
+            } else {
+                initThorModal();
             }
 
             window.addEventListener('keydown', handleKey, true);
@@ -207,6 +341,14 @@ pub fn run() -> anyhow::Result<()> {
                     "log" => {
                         if let Some(log_msg) = payload["message"].as_str() {
                             println!("⚡ [Thor Chrome Log] {}", log_msg);
+                        }
+                    }
+                    "open_cmd_palette" => {
+                        let cur_active = active_tab_for_ipc.borrow().clone();
+                        let pool = tab_pool_for_ipc.borrow();
+                        if let Some(wv) = pool.get(&cur_active) {
+                            let _ = wv.focus();
+                            let _ = wv.evaluate_script("if (window.openThorModal) window.openThorModal();");
                         }
                     }
                     "new_tab" => {
@@ -327,7 +469,6 @@ pub fn run() -> anyhow::Result<()> {
                             "webstorm" => crate::dx::ide_bridge::Ide::WebStorm,
                             _ => crate::dx::ide_bridge::Ide::VSCode,
                         };
-                        println!("⚡ [Thor Rust] Opening file in IDE ({}): {}", ide_name, path);
                         let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                     }
                     _ => {}
@@ -345,7 +486,7 @@ pub fn run() -> anyhow::Result<()> {
 
     println!("============================================================");
     println!("🚀 [Thor Shell] Matte Obsidian Developer Browser ACTIVE!");
-    println!("🚀 [Thor Shell] True Native Multi-Tab Engine LOADED.");
+    println!("🚀 [Thor Shell] Single-Overlay Command Palette Active.");
     println!("============================================================");
 
     event_loop.run(move |event, _, control_flow| {

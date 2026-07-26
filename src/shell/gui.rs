@@ -650,29 +650,11 @@ document.addEventListener('keydown', handleGlobalKeydown, true);
 
 // ==================== MODAL LOGIC ====================
 function toggleModal(defaultTab = 'features') {
-  logToRust('[Thor JS] toggleModal(' + defaultTab + ')');
-  const overlay = document.getElementById('modalOverlay');
-  if (overlay.classList.contains('active')) {
-    closeModal();
-  } else {
-    openModal(defaultTab);
-  }
+  ipc('open_cmd_palette');
 }
 
 function openModal(defaultTab = 'features') {
-  logToRust('[Thor JS] openModal(' + defaultTab + ')');
-  const overlay = document.getElementById('modalOverlay');
-  overlay.classList.add('active');
-
-  if (defaultTab === 'bookmarks_history') {
-    switchModalTab('bookmarks');
-  } else {
-    switchModalTab('all');
-  }
-
-  const sInput = document.getElementById('modalSearchInput');
-  sInput.value = '';
-  setTimeout(() => sInput.focus(), 30);
+  ipc('open_cmd_palette');
 }
 
 function closeModal() {
