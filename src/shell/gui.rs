@@ -52,6 +52,7 @@ pub fn get_chrome_html() -> String {
     border-bottom: 1px solid var(--border);
     position: relative;
     z-index: 5;
+    -webkit-app-region: drag;
   }
 
   /* Explicitly disable drag on all interactive UI controls */
