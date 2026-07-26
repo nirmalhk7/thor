@@ -33,26 +33,59 @@ pub fn get_chrome_html() -> String {
 
   body {
     font-family: 'Inter', system-ui, -apple-system, sans-serif;
-    background: transparent;
+    background: var(--bg-void);
     color: var(--text);
     height: 100vh;
     overflow: hidden;
     user-select: none;
     -webkit-user-select: none;
+    pointer-events: auto;
   }
 
-  /* Single-row header chrome - Clean Matte Dark Slate */
+  /* Main chrome webview fills the window; content child covers below 52px.
+     Only the top strip must stay interactive while a page is showing. */
   .chrome-row {
-    height: 48px;
+    height: 52px;
     background: var(--bg-chrome);
     display: flex;
     align-items: center;
-    padding: 0 10px 0 78px; /* macOS traffic lights spacing */
+    padding: 0 10px 0 8px;
     gap: 6px;
     border-bottom: 1px solid var(--border);
     position: relative;
     z-index: 5;
+    pointer-events: auto;
   }
+
+  .chrome-row input,
+  .chrome-row .url-input {
+    pointer-events: auto;
+    user-select: text !important;
+    -webkit-user-select: text !important;
+    cursor: text;
+  }
+
+  /* macOS-style traffic lights (left of chrome-row). */
+  .traffic-lights {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+    padding: 0 6px 0 4px;
+  }
+  .tl-btn {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    border: none;
+    padding: 0;
+    cursor: pointer;
+    flex-shrink: 0;
+  }
+  .tl-btn.close { background: #ff5f57; }
+  .tl-btn.minimize { background: #febc2e; }
+  .tl-btn.maximize { background: #28c840; }
+  .tl-btn:hover { filter: brightness(1.08); }
 
 
   /* === TABS === */
@@ -200,13 +233,17 @@ pub fn get_chrome_html() -> String {
     font-family: 'JetBrains Mono', 'SF Mono', Consolas, monospace;
     font-size: 12px; font-weight: 400;
     letter-spacing: -0.01em;
-    min-width: 0;
+    min-width: 40px;
+    height: 100%;
+    cursor: text;
+    pointer-events: auto !important;
+    user-select: text !important;
+    -webkit-user-select: text !important;
   }
   .url-input::placeholder { color: var(--text-dim); }
 
   /* Actions */
   .actions {
-    -webkit-app-region: no-drag;
     display: flex;
     align-items: center;
     gap: 4px;
@@ -251,9 +288,9 @@ pub fn get_chrome_html() -> String {
     height: 30px;
     background: #0e0f15;
     border-bottom: 1px solid var(--border);
-    display: flex;
+    display: none; /* shown via Tech button */
     align-items: center;
-    padding: 0 12px 0 78px;
+    padding: 0 12px;
     gap: 8px;
     font-size: 11px;
     color: var(--text-secondary);
@@ -345,7 +382,7 @@ pub fn get_chrome_html() -> String {
     display: none;
     background: #13151d;
     border-bottom: 1px solid var(--border-active);
-    padding: 8px 14px 8px 78px;
+    padding: 8px 14px;
     flex-direction: column;
     gap: 8px;
     box-shadow: 0 8px 24px rgba(0,0,0,0.6);
@@ -461,17 +498,21 @@ pub fn get_chrome_html() -> String {
   .modal-overlay {
     display: none;
     position: fixed;
-    top: 46px;
+    top: 0;
     left: 0;
     width: 100vw;
-    height: 474px;
+    height: 100vh;
     background: rgba(0, 0, 0, 0.75);
     z-index: 100;
     align-items: flex-start;
     justify-content: center;
     padding-top: 16px;
+    pointer-events: none;
   }
-  .modal-overlay.active { display: flex; }
+  .modal-overlay.active {
+    display: flex;
+    pointer-events: auto;
+  }
 
   .modal-box {
     width: 680px; max-width: 92vw; background: var(--bg-modal);
@@ -568,6 +609,12 @@ pub fn get_chrome_html() -> String {
 </head>
 <body>
   <div class="chrome-row" id="chromeRow">
+    <div class="traffic-lights" id="trafficLights" title="Window controls">
+      <button type="button" class="tl-btn close" onclick="ipc('window_close')" title="Close" aria-label="Close"></button>
+      <button type="button" class="tl-btn minimize" onclick="ipc('window_minimize')" title="Minimize" aria-label="Minimize"></button>
+      <button type="button" class="tl-btn maximize" onclick="ipc('window_maximize')" title="Maximize" aria-label="Maximize"></button>
+    </div>
+
     <!-- Tabs -->
     <div class="tabs" id="tabBar"></div>
     <div class="new-tab" onclick="newTab()" title="New Tab (⌘T)">+</div>
@@ -586,10 +633,11 @@ pub fn get_chrome_html() -> String {
     </div>
 
     <!-- Omnibox Search Bar -->
-    <div class="omnibox">
+    <div class="omnibox" id="omnibox" onpointerdown="focusOmnibox(event)">
       <div class="ssl-icon secure" id="sslIcon" onclick="showSslDetails()" title="SSL Connection Details">🔒</div>
       <input type="text" class="url-input" id="urlInput"
-             placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off">
+             placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off"
+             tabindex="0">
     </div>
 
     <!-- Actions -->
@@ -690,6 +738,8 @@ pub fn get_chrome_html() -> String {
       </div>
       <div class="locust-status-badge" id="mStatus">READY</div>
     </div>
+  </div>
+
   <!-- TRAFFIC INTERCEPTOR & REPEATER TOOLBAR (.interceptor-bar) -->
   <div class="locust-bar" id="interceptorBar">
     <div class="locust-header">
@@ -735,23 +785,27 @@ pub fn get_chrome_html() -> String {
     <div id="decoderResultView" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text); background:rgba(0,0,0,0.4); padding:6px 10px; border-radius:5px; margin-top:4px; max-height:80px; overflow-y:auto; display:none;"></div>
   </div>
 
-  <!-- FEATURE PALETTE / BOOKMARKS / EXTENSIONS MODAL (CMD+K / CMD+SHIFT+K) -->
+  <!-- FEATURE PALETTE: CMD+K = nav (bookmarks/history/tabs) | CMD+SHIFT+K = tools (settings/security/ext/devtools) -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBackdrop(event)">
     <div class="modal-box">
       <div class="modal-search-row">
         <span class="modal-search-icon" id="modalSearchIcon">🔍</span>
         <input type="text" class="modal-search-input" id="modalSearchInput" 
-               placeholder="Search commands, extensions, security controls, bookmarks, settings..."
+               placeholder="Search bookmarks, history, open tabs..."
                oninput="filterModalItems()" onkeydown="handleModalKeydown(event)">
         <span class="kbd">ESC to close</span>
       </div>
 
-      <div class="modal-tabs">
-        <button class="modal-tab-btn active" id="mtab-all" onclick="switchModalTab('all')">All Features</button>
-        <button class="modal-tab-btn" id="mtab-extensions" onclick="switchModalTab('extensions')">🧩 Extensions</button>
-        <button class="modal-tab-btn" id="mtab-security" onclick="switchModalTab('security')">🛡️ Security Shield</button>
+      <div class="modal-tabs" id="modalTabsNav">
+        <button class="modal-tab-btn active" id="mtab-all" onclick="switchModalTab('all')">All</button>
         <button class="modal-tab-btn" id="mtab-bookmarks" onclick="switchModalTab('bookmarks')">Bookmarks</button>
         <button class="modal-tab-btn" id="mtab-history" onclick="switchModalTab('history')">History</button>
+        <button class="modal-tab-btn" id="mtab-opentabs" onclick="switchModalTab('opentabs')">Open Tabs</button>
+      </div>
+      <div class="modal-tabs" id="modalTabsTools" style="display:none;">
+        <button class="modal-tab-btn" id="mtab-tools-all" onclick="switchModalTab('all')">All</button>
+        <button class="modal-tab-btn" id="mtab-extensions" onclick="switchModalTab('extensions')">🧩 Extensions</button>
+        <button class="modal-tab-btn" id="mtab-security" onclick="switchModalTab('security')">🛡️ Security</button>
         <button class="modal-tab-btn" id="mtab-devtools" onclick="switchModalTab('devtools')">DevTools</button>
         <button class="modal-tab-btn" id="mtab-settings" onclick="switchModalTab('settings')">Settings</button>
       </div>
@@ -767,7 +821,15 @@ pub fn get_chrome_html() -> String {
 
 <script>
 // ==================== TAB STATE & DATA ====================
-let tabs = [{ id: 'default_tab', title: 'Google', url: 'https://www.google.com', active: true }];
+// lastActive: epoch ms — shell integrator may GC tabs idle >24h
+let tabs = [{
+  id: 'default_tab',
+  title: 'Google',
+  url: 'https://www.google.com',
+  active: true,
+  lastActive: Date.now(),
+  history: [{ icon: '🌐', title: 'Google Search', url: 'https://www.google.com', category: 'history', time: 'Just now' }]
+}];
 
 let bookmarks = [
   { icon: '🐙', title: 'GitHub', url: 'https://github.com', category: 'bookmarks', badge: 'Default' },
@@ -779,14 +841,15 @@ let bookmarks = [
   { icon: '📄', title: 'Rust Documentation', url: 'https://docs.rs', category: 'bookmarks', badge: 'Dev' },
 ];
 
+// Extensions: metadata / info-only in Cmd+Shift+K (no load / toggle theater)
 let extensionsList = [
-  { id: 'ext_react', icon: '🧩', title: 'React Developer Tools v5.2.0', desc: 'Inspect React component tree, state, and props', enabled: true, category: 'extensions', badge: 'v5.2.0' },
-  { id: 'ext_redux', icon: '🧩', title: 'Redux DevTools v3.1.3', desc: 'Time-travel debugging & state mutation logs', enabled: true, category: 'extensions', badge: 'v3.1.3' },
-  { id: 'ext_vue', icon: '🧩', title: 'Vue.js devtools v6.5.1', desc: 'Inspect Vue 3 components, Pinia stores, and events', enabled: false, category: 'extensions', badge: 'v6.5.1' },
-  { id: 'ext_ublock', icon: '🧩', title: 'uBlock Origin — Privacy Guard', desc: 'Content blocker & anti-tracking ruleset engine', enabled: true, category: 'extensions', badge: 'v1.55' },
-  { id: 'ext_tailwind', icon: '🧩', title: 'Tailwind CSS Inspector', desc: 'Live utility class editor & responsive layout tools', enabled: true, category: 'extensions', badge: 'v2.1' },
-  { id: 'ext_postman', icon: '🧩', title: 'Postman API Harness', desc: 'REST & GraphQL API test harness with mock runner', enabled: false, category: 'extensions', badge: 'v4.0' },
-  { id: 'ext_wappalyzer', icon: '🧩', title: 'Wappalyzer Profiler', desc: 'Automated framework and server technology detector', enabled: true, category: 'extensions', badge: 'v6.8' },
+  { id: 'ext_react', icon: '🧩', title: 'React Developer Tools v5.2.0', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_redux', icon: '🧩', title: 'Redux DevTools v3.1.3', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_vue', icon: '🧩', title: 'Vue.js devtools v6.5.1', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_ublock', icon: '🧩', title: 'uBlock Origin — Privacy Guard', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_tailwind', icon: '🧩', title: 'Tailwind CSS Inspector', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_postman', icon: '🧩', title: 'Postman API Harness', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_wappalyzer', icon: '🧩', title: 'Wappalyzer Profiler', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
 ];
 
 let securityControls = [
@@ -798,25 +861,65 @@ let securityControls = [
   { id: 'sec_local_ca', icon: '⚡', title: 'Local ECDSA P-256 SSL CA Certificate', desc: 'Trusted root CA for local HTTPS dev servers (*.localhost)', enabled: true, category: 'security', badge: 'Trusted' },
 ];
 
+const settingsFeatures = [
+  { icon: '⚙️', title: 'Toggle DevHost / Stealth Profile', action: () => toggleProfileMode(), category: 'settings', badge: 'Profile' },
+  { icon: '🎯', title: 'Traffic Interceptor & Repeater', action: () => toggleInterceptorBar(), category: 'settings', badge: 'Tamper' },
+  { icon: '🛠️', title: 'JWT & Protocol Decoder Studio', action: () => toggleDecoderBar(), category: 'settings', badge: 'Decoder' },
+  { icon: '⚡', title: 'Tech Stack Detector Bar', action: () => toggleTechStackBar(), category: 'settings', badge: 'Tech' },
+];
+
 const devToolsFeatures = [
   { icon: '🚀', title: 'Locust HTTP Swarm Load Tester (Users, Ramp-Up, Profile)', action: () => toggleLocustBar(), category: 'devtools', badge: 'HTTP Swarm' },
   { icon: '🛡️', title: 'Security & Anti-Tracking Shield Controls', action: () => switchModalTab('security'), category: 'devtools', badge: 'Protection' },
-  { icon: '🛠️', title: 'Toggle WebKit Developer Tools', action: () => ipc('toggle_devtools'), category: 'devtools', badge: 'F12 / ⌘⌥I' },
+  { icon: '🛠️', title: 'Toggle Developer Tools', action: () => ipc('toggle_devtools'), category: 'devtools', badge: 'F12 / ⌘⌥I' },
   { icon: '💻', title: 'Open Project in VS Code', action: () => ipc('open_ide', { ide: 'vscode', path: '.' }), category: 'devtools', badge: 'vscode://' },
   { icon: '⚡', title: 'Open Project in Cursor AI Editor', action: () => ipc('open_ide', { ide: 'cursor', path: '.' }), category: 'devtools', badge: 'cursor://' },
   { icon: '🚀', title: 'Open Project in WebStorm', action: () => ipc('open_ide', { ide: 'webstorm', path: '.' }), category: 'devtools', badge: 'webstorm://' },
-  { icon: '🧊', title: 'Obsidian 3D DOM Snapshotter', action: () => alert('Capturing 3D DOM layout tree...'), category: 'devtools', badge: 'wgpu' },
-  { icon: '📐', title: 'Multi-Viewport Sync Canvas (Mobile/Tablet/Desktop)', action: () => alert('Multi-viewport sync enabled.'), category: 'devtools', badge: '120Hz' },
-  { icon: '📊', title: 'Live SLA Metrics: Cold-Start <30ms | IPC 0.4μs', action: () => alert('SLA metrics active.'), category: 'devtools', badge: 'SPSC Ring' },
-];
-
-let historyItems = [
-  { icon: '🌐', title: 'Google Search', url: 'https://www.google.com', category: 'history', time: 'Just now' },
 ];
 
 let currentModalTab = 'all';
+let modalMode = 'nav'; // 'nav' = Cmd+K | 'tools' = Cmd+Shift+K
 let selectedModalIndex = 0;
 let filteredItems = [];
+
+function touchTabActive(tab) {
+  if (tab) tab.lastActive = Date.now();
+}
+
+function pushTabHistory(tab, url, title) {
+  if (!tab || !url || url.startsWith('about:')) return;
+  if (!tab.history) tab.history = [];
+  const exists = tab.history.find(h => h.url === url);
+  if (exists) {
+    tab.history = [exists, ...tab.history.filter(h => h.url !== url)];
+  } else {
+    tab.history.unshift({
+      icon: '🌐',
+      title: title || url,
+      url: url,
+      category: 'history',
+      time: 'Just now'
+    });
+    if (tab.history.length > 50) tab.history.pop();
+  }
+}
+
+function getActiveTabHistory() {
+  const at = tabs.find(t => t.active);
+  return (at && at.history) ? at.history.slice() : [];
+}
+
+function getOpenTabItems() {
+  return tabs.map((t, i) => ({
+    icon: getFav(t) || '🗂',
+    title: t.title || t.url || ('Tab ' + (i + 1)),
+    desc: t.url || '',
+    url: t.url,
+    category: 'opentabs',
+    badge: t.active ? 'Active' : 'Open',
+    tabIndex: i
+  }));
+}
 
 function ipc(cmd, data) {
   const p = Object.assign({ cmd }, data || {});
@@ -862,40 +965,49 @@ function loadContentUrl(url) {
 
   ipc('navigate', { url: cleanUrl });
   updateSslStatus(cleanUrl);
-  detectTechStackForUrl(cleanUrl);
+  const at = tabs.find(t => t.active);
+  if (at) {
+    at.url = cleanUrl;
+    touchTabActive(at);
+    pushTabHistory(at, cleanUrl, cleanUrl);
+  }
+  detectTechStackForUrl(cleanUrl, true);
 }
 
 // ==================== TECH STACK DETECTOR BAR ====================
 function toggleTechStackBar() {
   const bar = document.getElementById('stackDetectorBar');
-  if (bar.style.display === 'none') {
+  if (bar.style.display === 'none' || !bar.style.display) {
     bar.style.display = 'flex';
   } else {
     bar.style.display = 'none';
   }
+  syncContentVisibility();
 }
 
 function rescanTechStack() {
   const activeTab = tabs.find(t => t.active);
   const currentUrl = activeTab ? activeTab.url : 'https://www.google.com';
-  detectTechStackForUrl(currentUrl);
+  ipc('rescan_tech_stack', { url: currentUrl });
+  detectTechStackForUrl(currentUrl, true);
   const notice = document.getElementById('trackerNotice');
   if (notice) {
     notice.style.display = 'inline-flex';
-    notice.textContent = '🔄 Stack Rescanned';
+    notice.textContent = '🔄 Stack rescanned (estimate until engine)';
     setTimeout(() => {
       notice.textContent = '🛡️ Trackers Stripped';
-    }, 1500);
+    }, 1800);
   }
 }
 
-function detectTechStackForUrl(url) {
+function detectTechStackForUrl(url, isEstimate) {
   const container = document.getElementById('stackPills');
   if (!container) return;
   container.innerHTML = '';
 
   const pills = [];
   const uLower = url ? url.toLowerCase() : '';
+  const estimate = isEstimate !== false;
 
   if (uLower.includes('github')) {
     pills.push({ icon: '⚛️', name: 'React', ver: '18.3.1' });
@@ -935,11 +1047,15 @@ function detectTechStackForUrl(url) {
     pills.push({ icon: '📦', name: 'Wasm Core', ver: 'Thor' });
   }
 
+  if (estimate) {
+    pills.unshift({ icon: '≈', name: 'URL estimate', ver: 'pending engine' });
+  }
+
   pills.forEach(p => {
     const pill = document.createElement('div');
     pill.className = 'tech-pill';
-    pill.title = `${p.name} (${p.ver}) — Click for details`;
-    pill.onclick = () => showTechPillDetails(p);
+    pill.title = `${p.name} (${p.ver})` + (estimate ? ' — URL heuristic estimate' : '');
+    pill.onclick = () => showTechPillDetails(p, estimate);
 
     const iconSpan = document.createElement('span');
     iconSpan.textContent = p.icon;
@@ -956,13 +1072,34 @@ function detectTechStackForUrl(url) {
   });
 }
 
-function showTechPillDetails(p) {
-  alert(`⚡ Detected Technology:\n\nFramework/Lib: ${p.name}\nVersion: ${p.ver}\nIcon: ${p.icon}\nStatus: Active on current page context`);
+function showTechPillDetails(p, isEstimate) {
+  const kind = isEstimate ? 'URL heuristic estimate (engine rescan pending)' : 'Engine detection';
+  alert(`⚡ Detected Technology:\n\nFramework/Lib: ${p.name}\nVersion: ${p.ver}\nSource: ${kind}`);
 }
 
+window.__thorUpdateTechStack = function(pills) {
+  const container = document.getElementById('stackPills');
+  if (!container || !Array.isArray(pills)) return;
+  container.innerHTML = '';
+  pills.forEach(p => {
+    const pill = document.createElement('div');
+    pill.className = 'tech-pill';
+    pill.title = `${p.name || ''} (${p.ver || ''}) — engine`;
+    pill.onclick = () => showTechPillDetails(p, false);
+    const iconSpan = document.createElement('span');
+    iconSpan.textContent = p.icon || '⚡';
+    const nameSpan = document.createElement('span');
+    nameSpan.textContent = p.name || '';
+    const verSpan = document.createElement('span');
+    verSpan.className = 'tech-pill-version';
+    verSpan.textContent = p.ver || '';
+    pill.append(iconSpan, nameSpan, verSpan);
+    container.appendChild(pill);
+  });
+};
+
 // ==================== LOCUST HTTP LOAD TESTING TOOLBAR ====================
-let locustInterval = null;
-let locustStartTime = 0;
+let locustRunning = false;
 let locustStats = { rps: 0, failures: 0, p50: 0, p95: 0, total: 0 };
 
 // ==================== DUAL PROFILE & SECURITY TOOLBAR HANDLERS ====================
@@ -990,6 +1127,7 @@ function toggleProfileMode() {
 function toggleInterceptorBar() {
   const bar = document.getElementById('interceptorBar');
   bar.classList.toggle('active');
+  syncContentVisibility();
 }
 
 function toggleInterceptionState() {
@@ -1020,6 +1158,7 @@ function addTamperRuleFromUI() {
 function toggleDecoderBar() {
   const bar = document.getElementById('decoderBar');
   bar.classList.toggle('active');
+  syncContentVisibility();
 }
 
 function autoDecodePayloadFromUI() {
@@ -1032,6 +1171,8 @@ function autoDecodePayloadFromUI() {
     return;
   }
 
+  ipc('decode_payload', { input: input });
+
   if (input.split('.').length === 3) {
     badge.textContent = 'JWT DETECTED';
     badge.style.color = '#c084fc';
@@ -1040,9 +1181,9 @@ function autoDecodePayloadFromUI() {
       const parts = input.split('.');
       const headerJson = atob(parts[0].replace(/-/g, '+').replace(/_/g, '/'));
       const payloadJson = atob(parts[1].replace(/-/g, '+').replace(/_/g, '/'));
-      result.innerHTML = `<strong>HEADER:</strong> ${headerJson}<br><strong>PAYLOAD:</strong> ${payloadJson}`;
+      result.innerHTML = `<strong>HEADER:</strong> ${headerJson}<br><strong>PAYLOAD:</strong> ${payloadJson}<br><em style="color:var(--text-dim)">Client-side decode — engine verify pending</em>`;
     } catch {
-      result.textContent = 'JWT payload present (signature string verification active)';
+      result.textContent = 'JWT structure detected; payload decode failed (engine pending)';
     }
   } else if (/^[A-Za-z0-9+/=_-]+$/.test(input)) {
     badge.textContent = 'BASE64 DETECTED';
@@ -1066,12 +1207,17 @@ function runHmacSecretCrackFromUI() {
     alert('Please enter a valid JWT token in the Decoder input box to attempt HMAC secret cracking.');
     return;
   }
-  alert('🔥 HMAC Secret Cracker Started:\nTesting wordlist (secret, admin, 123456, password, key, master)...\nResult: HMAC signature verified! (Weak key detection ready)');
+  ipc('decode_jwt_crack', { token: input });
+  const result = document.getElementById('decoderResultView');
+  result.style.display = 'block';
+  result.textContent = 'Wordlist HMAC crack attempt pending engine…';
+  alert('Wordlist HMAC crack attempt pending engine.');
 }
 
 function toggleLocustBar() {
   const bar = document.getElementById('locustBar');
   bar.classList.toggle('active');
+  syncContentVisibility();
 }
 
 function parseRuntimeSeconds(str) {
@@ -1083,6 +1229,34 @@ function parseRuntimeSeconds(str) {
   return parseFloat(s) || 60;
 }
 
+function setLocustWaitingUi() {
+  document.getElementById('mRps').textContent = '—';
+  document.getElementById('mFail').textContent = '—';
+  document.getElementById('mP50').textContent = '—';
+  document.getElementById('mP95').textContent = '—';
+  document.getElementById('mTotal').textContent = '—';
+  const statusEl = document.getElementById('mStatus');
+  statusEl.textContent = 'Waiting for engine…';
+  statusEl.className = 'locust-status-badge running';
+}
+
+function renderLocustStats(stats) {
+  if (!stats) return;
+  locustStats = Object.assign({}, locustStats, stats);
+  document.getElementById('mRps').textContent = (locustStats.rps != null ? Number(locustStats.rps).toLocaleString() : '—') + (locustStats.rps != null ? ' rps' : '');
+  document.getElementById('mFail').textContent = locustStats.failures != null ? (Number(locustStats.failures).toFixed(2) + '%') : '—';
+  document.getElementById('mP50').textContent = locustStats.p50 != null ? (locustStats.p50 + 'ms') : '—';
+  document.getElementById('mP95').textContent = locustStats.p95 != null ? (locustStats.p95 + 'ms') : '—';
+  document.getElementById('mTotal').textContent = locustStats.total != null ? Number(locustStats.total).toLocaleString() : '—';
+  const statusEl = document.getElementById('mStatus');
+  if (locustStats.status) {
+    statusEl.textContent = locustStats.status;
+  } else if (locustRunning) {
+    statusEl.textContent = 'RUNNING';
+  }
+  statusEl.className = 'locust-status-badge' + (locustRunning ? ' running' : '');
+}
+
 function startLocustSwarm() {
   const users = parseInt(document.getElementById('locustUsers').value) || 100;
   const ramp = parseInt(document.getElementById('locustRamp').value) || 10;
@@ -1092,86 +1266,69 @@ function startLocustSwarm() {
 
   document.getElementById('locustGoBtn').style.display = 'none';
   document.getElementById('locustStopBtn').style.display = 'inline-flex';
-  
-  const statusEl = document.getElementById('mStatus');
-  statusEl.textContent = 'RUNNING';
-  statusEl.className = 'locust-status-badge running';
 
-  locustStartTime = Date.now();
-  locustStats = { rps: 0, failures: 0, p50: 12, p95: 38, total: 0 };
+  locustRunning = true;
+  locustStats = { rps: 0, failures: 0, p50: 0, p95: 0, total: 0 };
+  setLocustWaitingUi();
 
   ipc('locust_start', { users, ramp, runtime: runtimeSec, profile });
-
-  locustInterval = setInterval(() => {
-    const elapsed = (Date.now() - locustStartTime) / 1000;
-    if (elapsed >= runtimeSec) {
-      stopLocustSwarm();
-      return;
-    }
-
-    let activeUsers = users;
-    if (profile === 'ramp') {
-      activeUsers = Math.min(users, Math.floor(elapsed * ramp) + 1);
-    } else if (profile === 'spike') {
-      activeUsers = (elapsed % 10 < 4) ? users * 2.5 : users * 0.3;
-    } else if (profile === 'wave') {
-      activeUsers = Math.floor(users * (0.5 + 0.5 * Math.sin(elapsed / 3)));
-    }
-
-    const rpsBase = activeUsers * (12 + Math.random() * 8);
-    locustStats.rps = Math.round(rpsBase);
-    const addedReqs = Math.round(locustStats.rps * 0.25);
-    locustStats.total += addedReqs;
-
-    const errorRate = (profile === 'spike' && activeUsers > users * 2) ? 0.45 : 0.02;
-    locustStats.failures = errorRate;
-
-    locustStats.p50 = Math.round(8 + (activeUsers / 20) + Math.random() * 6);
-    locustStats.p95 = Math.round(24 + (activeUsers / 8) + Math.random() * 15);
-
-    document.getElementById('mRps').textContent = locustStats.rps.toLocaleString() + ' rps';
-    document.getElementById('mFail').textContent = locustStats.failures.toFixed(2) + '%';
-    document.getElementById('mP50').textContent = locustStats.p50 + 'ms';
-    document.getElementById('mP95').textContent = locustStats.p95 + 'ms';
-    document.getElementById('mTotal').textContent = locustStats.total.toLocaleString();
-  }, 250);
 }
 
 function stopLocustSwarm() {
-  if (locustInterval) {
-    clearInterval(locustInterval);
-    locustInterval = null;
-  }
+  locustRunning = false;
   ipc('locust_stop');
   document.getElementById('locustGoBtn').style.display = 'inline-flex';
   document.getElementById('locustStopBtn').style.display = 'none';
   const statusEl = document.getElementById('mStatus');
-  statusEl.textContent = 'FINISHED';
+  statusEl.textContent = 'STOPPED';
   statusEl.className = 'locust-status-badge';
 }
+
+window.__thorUpdateLocustStats = function(stats) {
+  if (!stats) return;
+  if (stats.running === false) {
+    locustRunning = false;
+    document.getElementById('locustGoBtn').style.display = 'inline-flex';
+    document.getElementById('locustStopBtn').style.display = 'none';
+  } else if (stats.running === true) {
+    locustRunning = true;
+    document.getElementById('locustGoBtn').style.display = 'none';
+    document.getElementById('locustStopBtn').style.display = 'inline-flex';
+  }
+  renderLocustStats(stats);
+};
 
 // ==================== TAB MANAGEMENT ====================
 function newTab() {
   tabs.forEach(t => t.active = false);
   const newUrl = 'https://www.google.com';
   const newId = 'tab_' + Math.random().toString(36).substr(2, 9);
-  tabs.push({ id: newId, title: 'Google', url: newUrl, active: true });
+  const now = Date.now();
+  tabs.push({
+    id: newId,
+    title: 'Google',
+    url: newUrl,
+    active: true,
+    lastActive: now,
+    history: [{ icon: '🌐', title: 'Google', url: newUrl, category: 'history', time: 'Just now' }]
+  });
   renderTabs();
   ipc('new_tab', { id: newId, url: newUrl });
   document.getElementById('urlInput').value = newUrl;
   updateSslStatus(newUrl);
-  detectTechStackForUrl(newUrl);
+  detectTechStackForUrl(newUrl, true);
 }
 
 function switchTab(idx) {
   if (idx < 0 || idx >= tabs.length || tabs[idx].active) return;
   tabs.forEach(t => t.active = false);
   tabs[idx].active = true;
+  touchTabActive(tabs[idx]);
   renderTabs();
   document.getElementById('urlInput').value = tabs[idx].url;
   ipc('switch_tab', { id: tabs[idx].id });
   updateSslStatus(tabs[idx].url);
-  detectTechStackForUrl(tabs[idx].url);
+  detectTechStackForUrl(tabs[idx].url, true);
 }
 
 function closeTab(idx) {
@@ -1183,17 +1340,37 @@ function closeTab(idx) {
   if (wasActive) {
     const ni = Math.min(idx, tabs.length - 1);
     tabs[ni].active = true;
+    touchTabActive(tabs[ni]);
     document.getElementById('urlInput').value = tabs[ni].url;
     ipc('switch_tab', { id: tabs[ni].id });
     updateSslStatus(tabs[ni].url);
-    detectTechStackForUrl(tabs[ni].url);
+    detectTechStackForUrl(tabs[ni].url, true);
   }
   renderTabs();
 }
 
 // ==================== SEARCH BAR NAVIGATION ====================
 const urlInput = document.getElementById('urlInput');
+
+// Chrome-style: clicking the address bar selects all text so the user can
+// immediately type a new URL without manually triple-clicking to select.
+function focusOmnibox(e) {
+  if (e) {
+    e.stopPropagation();
+  }
+  // Notify Rust so the native AppKit toolbar omnibox also gains focus + selects.
+  ipc('hotkey_focus_url');
+  const input = document.getElementById('urlInput');
+  if (!input) return;
+  requestAnimationFrame(() => {
+    input.focus();
+    input.select(); // Select all — Chrome/Firefox standard address bar behavior
+  });
+}
+
+
 urlInput.addEventListener('keydown', (e) => {
+  e.stopPropagation();
   if (e.key === 'Enter') {
     e.preventDefault();
     let url = urlInput.value.trim();
@@ -1206,13 +1383,26 @@ urlInput.addEventListener('keydown', (e) => {
     if (noticeEl) noticeEl.style.display = stripped ? 'inline-flex' : 'none';
 
     const at = tabs.find(t => t.active);
-    if (at) { at.url = cleanUrl; at.title = cleanUrl; renderTabs(); }
+    if (at) {
+      at.url = cleanUrl;
+      at.title = cleanUrl;
+      touchTabActive(at);
+      renderTabs();
+    }
     urlInput.value = cleanUrl;
     loadContentUrl(cleanUrl);
     urlInput.blur();
   }
 });
-urlInput.addEventListener('focus', () => urlInput.select());
+// Capture so we win over chrome-row drag handler / window handlers.
+urlInput.addEventListener('pointerdown', (e) => {
+  e.stopPropagation();
+  focusOmnibox(e);
+}, true);
+urlInput.addEventListener('mousedown', (e) => {
+  e.stopPropagation();
+  focusOmnibox(e);
+}, true);
 
 // ==================== KEYBOARD EVENT LISTENER (CMD+K / CMD+SHIFT+K) ====================
 function handleGlobalKeydown(e) {
@@ -1227,7 +1417,7 @@ function handleGlobalKeydown(e) {
 
   if (!isCmdOrCtrl) return;
 
-  // CMD+SHIFT+K (Settings / Extensions / Security Menu)
+  // CMD+SHIFT+K — settings / security / extensions / devtools only
   if (e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
@@ -1235,18 +1425,18 @@ function handleGlobalKeydown(e) {
     return;
   }
 
-  // CMD+K (Bookmarks & Features Menu)
+  // CMD+K — bookmarks + active-tab history + open tabs
   if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
     e.preventDefault();
     e.stopPropagation();
-    toggleModal('all');
+    toggleModal('bookmarks_history');
     return;
   }
 
   switch (key) {
     case 't': e.preventDefault(); newTab(); break;
     case 'w': e.preventDefault(); { const i = tabs.findIndex(t => t.active); if (i >= 0) closeTab(i); } break;
-    case 'l': e.preventDefault(); urlInput.focus(); break;
+    case 'l': e.preventDefault(); focusOmnibox(); break;
     case '[': e.preventDefault(); ipc('back'); break;
     case ']': e.preventDefault(); ipc('forward'); break;
     case 'r': e.preventDefault(); ipc('reload'); break;
@@ -1261,46 +1451,75 @@ function handleGlobalKeydown(e) {
 window.addEventListener('keydown', handleGlobalKeydown, true);
 document.addEventListener('keydown', handleGlobalKeydown, true);
 
-// Focus window on click without hijacking native DOM click events
-window.addEventListener('mousedown', () => {
-  window.focus();
+// Click probe — flashes the toolbar so we can see hits landing on chrome.
+document.addEventListener('click', (e) => {
+  const t = e.target;
+  const name = (t && (t.id || t.className || t.tagName)) || '?';
+  ipc('log', { message: 'chrome-click:' + String(name).slice(0, 80) });
+  const row = document.getElementById('chromeRow');
+  if (row) {
+    row.style.outline = '2px solid #22c55e';
+    setTimeout(() => { row.style.outline = ''; }, 120);
+  }
+}, true);
+
+// Window drag: double-click empty chrome padding only (mousedown-drag steals clicks).
+document.getElementById('chromeRow')?.addEventListener('dblclick', (e) => {
+  if (e.target.closest('button, input, a, .tab, .tab-x, .new-tab, .nav-btn, .action-btn, .omnibox, .traffic-lights, .tl-btn, .url-input, .ssl-icon, .actions')) {
+    return;
+  }
+  ipc('drag_window');
 }, false);
 
-// Native window drag handler on header bar background
-const chromeRow = document.getElementById('chromeRow');
-if (chromeRow) {
-  chromeRow.addEventListener('mousedown', (e) => {
-    if (e.target.closest('button, input, select, .new-tab, .tab, .ssl-icon, .nav-btn, .action-btn, .omnibox, .tech-pill, .stack-btn, .locust-btn')) {
-      return;
-    }
-    if (e.button === 0) {
-      ipc('drag_window');
-    }
-  });
+// ==================== MODAL: CMD+K (nav) vs CMD+SHIFT+K (tools) ====================
+const TOOLS_ENTRY_TABS = ['settings', 'extensions', 'security', 'devtools', 'tools'];
+
+function resolveModalMode(defaultTab) {
+  if (TOOLS_ENTRY_TABS.includes(defaultTab)) return 'tools';
+  return 'nav';
 }
 
-// ==================== MODAL & CMD+SHIFT+K LOGIC ====================
-function toggleModal(defaultTab = 'all') {
+function syncModalChrome() {
+  const navRow = document.getElementById('modalTabsNav');
+  const toolsRow = document.getElementById('modalTabsTools');
+  const input = document.getElementById('modalSearchInput');
+  if (modalMode === 'nav') {
+    if (navRow) navRow.style.display = 'flex';
+    if (toolsRow) toolsRow.style.display = 'none';
+    if (input) input.placeholder = 'Search bookmarks, history, open tabs...';
+  } else {
+    if (navRow) navRow.style.display = 'none';
+    if (toolsRow) toolsRow.style.display = 'flex';
+    if (input) input.placeholder = 'Search settings, security, extensions, devtools...';
+  }
+}
+
+function syncContentVisibility() {
+  const modal = document.getElementById('modalOverlay')?.classList.contains('active');
+  const locust = document.getElementById('locustBar')?.classList.contains('active');
+  const interceptor = document.getElementById('interceptorBar')?.classList.contains('active');
+  const decoder = document.getElementById('decoderBar')?.classList.contains('active');
+  const tech = document.getElementById('stackDetectorBar')?.style.display === 'flex';
+  // Panels live in the chrome webview below the 52px strip; hide the content
+  // child so those panels (and modals) are visible and clickable.
+  ipc('set_content_visible', { visible: !(modal || locust || interceptor || decoder || tech) });
+}
+
+function toggleModal(defaultTab = 'bookmarks_history') {
   const overlay = document.getElementById('modalOverlay');
-  if (overlay.classList.contains('active') && currentModalTab === defaultTab) {
+  const nextMode = resolveModalMode(defaultTab);
+  let nextTab = defaultTab;
+  if (defaultTab === 'bookmarks_history' || defaultTab === 'tools') nextTab = 'all';
+  if (overlay.classList.contains('active') && modalMode === nextMode && currentModalTab === nextTab) {
     closeModal();
   } else {
     openModal(defaultTab);
   }
 }
 
-function openModal(defaultTab = 'all') {
-  const overlay = document.getElementById('modalOverlay');
-  overlay.classList.add('active');
-  switchModalTab(defaultTab);
-  const input = document.getElementById('modalSearchInput');
-  input.value = '';
-  setTimeout(() => input.focus(), 30);
-}
-
-function closeModal() {
-  const overlay = document.getElementById('modalOverlay');
-  overlay.classList.remove('active');
+function focus_chrome_then(cb) {
+  ipc('focus_chrome');
+  if (typeof cb === 'function') requestAnimationFrame(cb);
 }
 
 function closeModalOnBackdrop(e) {
@@ -1309,36 +1528,89 @@ function closeModalOnBackdrop(e) {
 
 function switchModalTab(tabName) {
   currentModalTab = tabName;
-  ['all', 'extensions', 'security', 'bookmarks', 'history', 'devtools', 'settings'].forEach(t => {
+  const ids = modalMode === 'nav'
+    ? ['all', 'bookmarks', 'history', 'opentabs']
+    : ['tools-all', 'extensions', 'security', 'devtools', 'settings'];
+  ids.forEach(t => {
     const btn = document.getElementById('mtab-' + t);
-    if (btn) btn.classList.toggle('active', t === tabName);
+    if (!btn) return;
+    const active = (t === 'tools-all' && tabName === 'all') || t === tabName;
+    btn.classList.toggle('active', active);
   });
+  // nav "all" button
+  const navAll = document.getElementById('mtab-all');
+  if (navAll && modalMode === 'nav') navAll.classList.toggle('active', tabName === 'all');
   filterModalItems();
+}
+
+function rustPaletteToModal(item) {
+  const cat = String(item.category || '').toLowerCase();
+  let category = 'bookmarks';
+  if (cat.includes('history')) category = 'history';
+  else if (cat.includes('open')) category = 'opentabs';
+  else if (cat.includes('security')) category = 'security';
+  else if (cat.includes('extension')) category = 'extensions';
+  else if (cat.includes('devtools') || cat.includes('ide') || cat.includes('setting') || cat.includes('performance')) category = 'settings';
+  return {
+    icon: item.icon || '⚡',
+    title: item.title || item.path_or_url || 'Item',
+    url: item.path_or_url || '',
+    desc: item.path_or_url || '',
+    category,
+    badge: item.badge || '',
+    action_key: item.action_key || null,
+    id: item.id || null,
+  };
+}
+
+function applyRustPalettePayloads() {
+  if (Array.isArray(window.__thorCmdKPayload)) {
+    window.__thorNavPool = window.__thorCmdKPayload.map(rustPaletteToModal);
+  }
+  if (Array.isArray(window.__thorSettingsPayload)) {
+    window.__thorToolsPool = window.__thorSettingsPayload.map(rustPaletteToModal);
+  }
 }
 
 function filterModalItems() {
   const query = document.getElementById('modalSearchInput').value.toLowerCase().trim();
   let pool = [];
 
-  if (currentModalTab === 'all') {
-    pool = [...extensionsList, ...securityControls, ...devToolsFeatures, ...bookmarks, ...historyItems];
-  } else if (currentModalTab === 'extensions') {
-    pool = [...extensionsList];
-  } else if (currentModalTab === 'security') {
-    pool = [...securityControls];
-  } else if (currentModalTab === 'bookmarks') {
-    pool = [...bookmarks];
-  } else if (currentModalTab === 'history') {
-    pool = [...historyItems];
-  } else if (currentModalTab === 'devtools') {
-    pool = [...devToolsFeatures];
-  } else if (currentModalTab === 'settings') {
-    pool = [...securityControls, ...extensionsList, ...devToolsFeatures];
+  if (modalMode === 'nav') {
+    if (Array.isArray(window.__thorNavPool) && window.__thorNavPool.length) {
+      pool = window.__thorNavPool.slice();
+      if (currentModalTab === 'bookmarks') pool = pool.filter(i => i.category === 'bookmarks');
+      else if (currentModalTab === 'history') pool = pool.filter(i => i.category === 'history');
+      else if (currentModalTab === 'opentabs') pool = pool.filter(i => i.category === 'opentabs');
+    } else {
+      const hist = getActiveTabHistory();
+      const openTabs = getOpenTabItems();
+      if (currentModalTab === 'all') pool = [...bookmarks, ...hist, ...openTabs];
+      else if (currentModalTab === 'bookmarks') pool = [...bookmarks];
+      else if (currentModalTab === 'history') pool = [...hist];
+      else if (currentModalTab === 'opentabs') pool = [...openTabs];
+    }
+  } else {
+    if (Array.isArray(window.__thorToolsPool) && window.__thorToolsPool.length) {
+      pool = window.__thorToolsPool.slice();
+      if (currentModalTab === 'extensions') pool = pool.filter(i => i.category === 'extensions');
+      else if (currentModalTab === 'security') pool = pool.filter(i => i.category === 'security');
+      else if (currentModalTab === 'devtools') pool = pool.filter(i => i.category === 'settings' || i.category === 'devtools');
+      else if (currentModalTab === 'settings') pool = pool.filter(i => i.category === 'settings');
+    } else if (currentModalTab === 'all' || currentModalTab === 'settings') {
+      pool = [...settingsFeatures, ...securityControls, ...extensionsList, ...devToolsFeatures];
+    } else if (currentModalTab === 'extensions') {
+      pool = [...extensionsList];
+    } else if (currentModalTab === 'security') {
+      pool = [...securityControls];
+    } else if (currentModalTab === 'devtools') {
+      pool = [...devToolsFeatures];
+    }
   }
 
   if (query) {
-    pool = pool.filter(item => 
-      item.title.toLowerCase().includes(query) || 
+    pool = pool.filter(item =>
+      item.title.toLowerCase().includes(query) ||
       (item.desc && item.desc.toLowerCase().includes(query)) ||
       (item.url && item.url.toLowerCase().includes(query)) ||
       (item.badge && item.badge.toLowerCase().includes(query))
@@ -1348,6 +1620,90 @@ function filterModalItems() {
   filteredItems = pool;
   selectedModalIndex = 0;
   renderModalList();
+}
+
+function openModal(defaultTab = 'bookmarks_history') {
+  applyRustPalettePayloads();
+  modalMode = resolveModalMode(defaultTab);
+  let tab = defaultTab;
+  if (tab === 'bookmarks_history' || tab === 'tools') tab = 'all';
+  syncModalChrome();
+  const row = document.getElementById('chromeRow');
+  if (row) row.style.display = 'none';
+  ['stackDetectorBar','locustBar','interceptorBar','decoderBar'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.style.display = 'none'; el.classList.remove('active'); }
+  });
+  const overlay = document.getElementById('modalOverlay');
+  overlay.classList.add('active');
+  switchModalTab(tab);
+  const input = document.getElementById('modalSearchInput');
+  input.value = '';
+  setTimeout(() => input.focus(), 30);
+}
+
+function closeModal(fromRust) {
+  const overlay = document.getElementById('modalOverlay');
+  if (overlay) overlay.classList.remove('active');
+  if (!fromRust) ipc('close_palette');
+}
+
+window.__thorCloseModalSilent = function() {
+  closeModal(true);
+};
+
+function selectModalItem(item) {
+  if (item.infoOnly || item.category === 'extensions') {
+    return;
+  }
+
+  if (typeof item.enabled === 'boolean' && item.category === 'security') {
+    item.enabled = !item.enabled;
+    ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
+    renderModalList();
+    return;
+  }
+
+  if (item.action_key && String(item.action_key).startsWith('focus_tab_')) {
+    const id = String(item.action_key).slice('focus_tab_'.length);
+    closeModal();
+    ipc('switch_tab', { id });
+    return;
+  }
+
+  if (item.action_key === 'toggle_devtools') {
+    closeModal();
+    ipc('toggle_devtools');
+    return;
+  }
+  if (item.action_key === 'open_ide_vscode') {
+    closeModal();
+    ipc('open_ide', { ide: 'vscode', path: '.' });
+    return;
+  }
+  if (item.action_key === 'open_ide_cursor') {
+    closeModal();
+    ipc('open_ide', { ide: 'cursor', path: '.' });
+    return;
+  }
+  if (item.action_key === 'open_ide_webstorm') {
+    closeModal();
+    ipc('open_ide', { ide: 'webstorm', path: '.' });
+    return;
+  }
+
+  if (item.category === 'opentabs' && typeof item.tabIndex === 'number') {
+    closeModal();
+    switchTab(item.tabIndex);
+    return;
+  }
+
+  closeModal();
+  if (item.url && !String(item.url).startsWith('Thor://') && !String(item.url).startsWith('thor://')) {
+    loadContentUrl(item.url);
+  } else if (typeof item.action === 'function') {
+    item.action();
+  }
 }
 
 function renderModalList() {
@@ -1397,8 +1753,8 @@ function renderModalList() {
       el.appendChild(badge);
     }
 
-    // Render interactive toggle switch if item has enabled boolean
-    if (typeof item.enabled === 'boolean') {
+    // Interactive toggle only for real security controls (not info-only extensions)
+    if (typeof item.enabled === 'boolean' && !item.infoOnly && item.category === 'security') {
       const toggle = document.createElement('div');
       toggle.className = 'toggle-switch' + (item.enabled ? ' active' : '');
       toggle.title = item.enabled ? 'Enabled (Click to disable)' : 'Disabled (Click to enable)';
@@ -1410,11 +1766,7 @@ function renderModalList() {
       toggle.onclick = (e) => {
         e.stopPropagation();
         item.enabled = !item.enabled;
-        if (item.category === 'extensions') {
-          ipc('toggle_extension', { id: item.id, enabled: item.enabled });
-        } else if (item.category === 'security') {
-          ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
-        }
+        ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
         renderModalList();
       };
 
@@ -1444,7 +1796,7 @@ function handleModalKeydown(e) {
     e.preventDefault();
     if (filteredItems.length > 0 && filteredItems[selectedModalIndex]) {
       selectModalItem(filteredItems[selectedModalIndex]);
-    } else {
+    } else if (modalMode === 'nav') {
       const q = document.getElementById('modalSearchInput').value.trim();
       if (q) {
         let url = (q.includes('.') && !q.includes(' ')) ? 'https://' + q : 'https://www.google.com/search?q=' + encodeURIComponent(q);
@@ -1459,26 +1811,6 @@ function scrollSelectedIntoView() {
   const listEl = document.getElementById('modalList');
   const selectedEl = listEl.children[selectedModalIndex];
   if (selectedEl) selectedEl.scrollIntoView({ block: 'nearest' });
-}
-
-function selectModalItem(item) {
-  if (typeof item.enabled === 'boolean') {
-    item.enabled = !item.enabled;
-    if (item.category === 'extensions') {
-      ipc('toggle_extension', { id: item.id, enabled: item.enabled });
-    } else if (item.category === 'security') {
-      ipc('toggle_security_shield', { id: item.id, enabled: item.enabled });
-    }
-    renderModalList();
-    return;
-  }
-
-  closeModal();
-  if (item.url) {
-    loadContentUrl(item.url);
-  } else if (item.action) {
-    item.action();
-  }
 }
 
 // ==================== SSL SECURITY STATUS ====================
@@ -1529,6 +1861,24 @@ function showSslDetails() {
 }
 
 // ==================== RUST → JS CALLBACKS ====================
+// Called by Rust idle GC (≥24h) to drop a tab from chrome UI state.
+window.__thorRemoveTab = function(id) {
+  const idx = tabs.findIndex(t => t.id === id);
+  if (idx < 0) return;
+  const wasActive = tabs[idx].active;
+  tabs.splice(idx, 1);
+  if (tabs.length === 0) return;
+  if (wasActive) {
+    const ni = Math.min(idx, tabs.length - 1);
+    tabs.forEach(t => t.active = false);
+    tabs[ni].active = true;
+    touchTabActive(tabs[ni]);
+    document.getElementById('urlInput').value = tabs[ni].url;
+    updateSslStatus(tabs[ni].url);
+  }
+  renderTabs();
+};
+
 window.updateTabTitle = function(id, title) {
   const tab = tabs.find(t => t.id === id);
   if (tab && title) {
@@ -1541,17 +1891,12 @@ window.updateTabUrl = function(id, url) {
   const tab = tabs.find(t => t.id === id);
   if (tab && url) {
     tab.url = url;
+    touchTabActive(tab);
+    pushTabHistory(tab, url, tab.title || url);
     if (tab.active) {
       if (document.activeElement !== urlInput) urlInput.value = url;
       updateSslStatus(url);
-      detectTechStackForUrl(url);
-    }
-    if (url && !url.startsWith('about:')) {
-      const exists = historyItems.find(h => h.url === url);
-      if (!exists) {
-        historyItems.unshift({ icon: '🌐', title: url, url: url, category: 'history', time: 'Just now' });
-        if (historyItems.length > 50) historyItems.pop();
-      }
+      detectTechStackForUrl(url, true);
     }
   }
 };
@@ -1570,12 +1915,26 @@ window.updateTitle = function(title) {
 };
 
 window.focusUrlInput = function() {
-  urlInput.focus();
-  urlInput.select();
+  focusOmnibox();
 };
 
 window.openThorModal = function(type) {
   openModal(type);
+};
+
+window.__thorUpdateDecodeResult = function(payload) {
+  const result = document.getElementById('decoderResultView');
+  const badge = document.getElementById('decoderTypeBadge');
+  if (!result) return;
+  result.style.display = 'block';
+  if (payload && payload.badge && badge) {
+    badge.textContent = payload.badge;
+  }
+  if (payload && payload.html) {
+    result.innerHTML = payload.html;
+  } else if (payload && payload.text) {
+    result.textContent = payload.text;
+  }
 };
 
 // ==================== RENDER TABS ====================
@@ -1618,7 +1977,15 @@ function getFav(tab) {
 }
 
 renderTabs();
-detectTechStackForUrl('https://www.google.com');
+(function initOmnibox() {
+  const at = tabs.find(t => t.active) || tabs[0];
+  if (at && at.url) {
+    const input = document.getElementById('urlInput');
+    if (input) input.value = at.url;
+    updateSslStatus(at.url);
+    detectTechStackForUrl(at.url, true);
+  }
+})();
 </script>
 </body>
 </html>"##.to_string()
