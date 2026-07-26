@@ -48,7 +48,6 @@ pub fn get_chrome_html() -> String {
     border-bottom: 1px solid var(--border);
     position: relative;
     z-index: 5;
-    -webkit-app-region: drag;
   }
 
   /* === TABS === */
@@ -59,7 +58,6 @@ pub fn get_chrome_html() -> String {
     flex-shrink: 1;
     min-width: 0;
     overflow: hidden;
-    -webkit-app-region: no-drag;
   }
 
   .tab {
