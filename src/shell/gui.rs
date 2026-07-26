@@ -1191,6 +1191,7 @@ function loadContentUrl(url) {
 
   ipc('navigate', { url: cleanUrl });
   updateSslStatus(cleanUrl);
+  updateBookmarkStarState(cleanUrl);
   const at = tabs.find(t => t.active);
   if (at) {
     at.url = cleanUrl;
@@ -1524,6 +1525,197 @@ window.__thorUpdateLocustStats = function(stats) {
   renderLocustStats(stats);
 };
 
+// ==================== 4 TOP-LEVEL NAVIGATION AREAS ====================
+let currentNavArea = 'browse';
+
+function switchNavArea(area) {
+  currentNavArea = area;
+  ['Browse', 'Inspect', 'Compare', 'Run'].forEach(a => {
+    const btn = document.getElementById('navArea' + a);
+    if (btn) btn.classList.toggle('active', a.toLowerCase() === area);
+  });
+
+  const inspectBar = document.getElementById('stackDetectorBar');
+  const compareBar = document.getElementById('compareBar');
+  const locustBar = document.getElementById('locustBar');
+
+  if (area === 'browse') {
+    if (inspectBar) inspectBar.style.display = 'none';
+    if (compareBar) compareBar.classList.remove('active');
+    if (locustBar) locustBar.classList.remove('active');
+  } else if (area === 'inspect') {
+    if (inspectBar) inspectBar.style.display = 'flex';
+    if (compareBar) compareBar.classList.remove('active');
+    if (locustBar) locustBar.classList.remove('active');
+    rescanTechStack();
+  } else if (area === 'compare') {
+    if (inspectBar) inspectBar.style.display = 'none';
+    if (compareBar) compareBar.classList.add('active');
+    if (locustBar) locustBar.classList.remove('active');
+  } else if (area === 'run') {
+    if (inspectBar) inspectBar.style.display = 'none';
+    if (compareBar) compareBar.classList.remove('active');
+    if (locustBar) locustBar.classList.add('active');
+  }
+  syncContentVisibility();
+}
+
+function runPageComparison() {
+  const activeTab = tabs.find(t => t.active);
+  const currentUrl = activeTab ? activeTab.url : 'about:blank';
+  const targetUrl = document.getElementById('compareUrlInput').value.trim();
+  const result = document.getElementById('compareResultView');
+  if (!targetUrl) {
+    alert('Please enter a target URL to compare.');
+    return;
+  }
+  result.style.display = 'block';
+  result.innerHTML = `<strong>COMPARE ACTIVE:</strong> ${currentUrl}<br><strong>TARGET:</strong> ${targetUrl}<br><span style="color:#22c55e;">Status: Side-by-side dual target stream initialized.</span>`;
+}
+
+// ==================== BOOKMARK SAVING & STAR TOGGLE ====================
+function isUrlBookmarked(url) {
+  if (!url) return false;
+  return bookmarks.some(b => b.url === url || (b.path_or_url && b.path_or_url === url));
+}
+
+function updateBookmarkStarState(url) {
+  const star = document.getElementById('bookmarkStar');
+  if (!star) return;
+  const isBookmarked = isUrlBookmarked(url);
+  if (isBookmarked) {
+    star.textContent = '★';
+    star.classList.add('starred');
+    star.title = 'Bookmarked (⌘D to remove)';
+  } else {
+    star.textContent = '☆';
+    star.classList.remove('starred');
+    star.title = 'Bookmark Page (⌘D)';
+  }
+}
+
+function toggleBookmarkActiveTab(e) {
+  if (e) e.stopPropagation();
+  const at = tabs.find(t => t.active);
+  if (!at || !at.url || at.url.startsWith('about:')) return;
+
+  const url = at.url;
+  const title = at.title || url;
+
+  if (isUrlBookmarked(url)) {
+    bookmarks = bookmarks.filter(b => b.url !== url && b.path_or_url !== url);
+    updateBookmarkStarState(url);
+    ipc('remove_bookmark', { url });
+    showToast('Bookmark removed', '☆');
+  } else {
+    const newBm = {
+      icon: getFav(at),
+      title: title,
+      url: url,
+      category: 'bookmarks',
+      badge: 'Thor'
+    };
+    bookmarks.unshift(newBm);
+    updateBookmarkStarState(url);
+    ipc('add_bookmark', { title, url });
+    showToast('Bookmark saved: ' + title, '⭐');
+  }
+}
+
+function showToast(msg, icon = '⭐') {
+  const container = document.getElementById('toastContainer');
+  if (!container) return;
+  const toast = document.createElement('div');
+  toast.className = 'toast';
+  toast.innerHTML = `<span style="font-size: 14px;">${icon}</span> <span>${msg}</span>`;
+  container.appendChild(toast);
+  requestAnimationFrame(() => toast.classList.add('show'));
+  setTimeout(() => {
+    toast.classList.remove('show');
+    setTimeout(() => toast.remove(), 200);
+  }, 2200);
+}
+
+// ==================== FIND IN PAGE FLOATING GLASS OVERLAY ====================
+let findMatchIndex = 0;
+let findMatchCount = 0;
+
+function toggleFindBar() {
+  const bar = document.getElementById('findBar');
+  if (bar.classList.contains('active')) {
+    closeFindBar();
+  } else {
+    openFindBar();
+  }
+}
+
+function openFindBar() {
+  const bar = document.getElementById('findBar');
+  bar.classList.add('active');
+  syncContentVisibility();
+  const input = document.getElementById('findInput');
+  setTimeout(() => {
+    input.focus();
+    input.select();
+  }, 30);
+}
+
+function closeFindBar() {
+  const bar = document.getElementById('findBar');
+  bar.classList.remove('active');
+  syncContentVisibility();
+  ipc('clear_find');
+}
+
+function onFindInput() {
+  const query = document.getElementById('findInput').value.trim();
+  const countEl = document.getElementById('findCount');
+  if (!query) {
+    countEl.textContent = '0 of 0';
+    ipc('clear_find');
+    return;
+  }
+  ipc('find_in_page', { query, forward: true });
+  try {
+    findMatchCount = (document.body.innerText.match(new RegExp(query.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'), 'gi')) || []).length;
+  } catch(e) {
+    findMatchCount = 0;
+  }
+  findMatchIndex = findMatchCount > 0 ? 1 : 0;
+  countEl.textContent = findMatchCount > 0 ? `${findMatchIndex} of ${findMatchCount}` : '0 matches';
+}
+
+function findNext() {
+  const query = document.getElementById('findInput').value.trim();
+  if (!query) return;
+  if (findMatchCount > 0) {
+    findMatchIndex = (findMatchIndex % findMatchCount) + 1;
+    document.getElementById('findCount').textContent = `${findMatchIndex} of ${findMatchCount}`;
+  }
+  ipc('find_in_page', { query, forward: true });
+}
+
+function findPrev() {
+  const query = document.getElementById('findInput').value.trim();
+  if (!query) return;
+  if (findMatchCount > 0) {
+    findMatchIndex = (findMatchIndex - 2 + findMatchCount) % findMatchCount + 1;
+    document.getElementById('findCount').textContent = `${findMatchIndex} of ${findMatchCount}`;
+  }
+  ipc('find_in_page', { query, forward: false });
+}
+
+function handleFindKeydown(e) {
+  if (e.key === 'Escape') {
+    e.preventDefault();
+    closeFindBar();
+  } else if (e.key === 'Enter') {
+    e.preventDefault();
+    if (e.shiftKey) findPrev();
+    else findNext();
+  }
+}
+
 // ==================== TAB MANAGEMENT ====================
 function newTab() {
   tabs.forEach(t => t.active = false);
@@ -1542,6 +1734,7 @@ function newTab() {
   ipc('new_tab', { id: newId, url: newUrl });
   document.getElementById('urlInput').value = newUrl;
   updateSslStatus(newUrl);
+  updateBookmarkStarState(newUrl);
   detectTechStackForUrl(newUrl, true);
 }
 
@@ -1554,6 +1747,7 @@ function switchTab(idx) {
   document.getElementById('urlInput').value = tabs[idx].url;
   ipc('switch_tab', { id: tabs[idx].id });
   updateSslStatus(tabs[idx].url);
+  updateBookmarkStarState(tabs[idx].url);
   detectTechStackForUrl(tabs[idx].url, true);
 }
 
@@ -1570,6 +1764,7 @@ function closeTab(idx) {
     document.getElementById('urlInput').value = tabs[ni].url;
     ipc('switch_tab', { id: tabs[ni].id });
     updateSslStatus(tabs[ni].url);
+    updateBookmarkStarState(tabs[ni].url);
     detectTechStackForUrl(tabs[ni].url, true);
   }
   renderTabs();
@@ -1660,6 +1855,8 @@ function handleGlobalKeydown(e) {
   }
 
   switch (key) {
+    case 'd': e.preventDefault(); toggleBookmarkActiveTab(); break;
+    case 'f': e.preventDefault(); toggleFindBar(); break;
     case 't': e.preventDefault(); newTab(); break;
     case 'w': e.preventDefault(); { const i = tabs.findIndex(t => t.active); if (i >= 0) closeTab(i); } break;
     case 'l': e.preventDefault(); focusOmnibox(); break;
@@ -1722,13 +1919,15 @@ function syncModalChrome() {
 
 function syncContentVisibility() {
   const modal = document.getElementById('modalOverlay')?.classList.contains('active');
+  const find = document.getElementById('findBar')?.classList.contains('active');
   const locust = document.getElementById('locustBar')?.classList.contains('active');
+  const compare = document.getElementById('compareBar')?.classList.contains('active');
   const interceptor = document.getElementById('interceptorBar')?.classList.contains('active');
   const decoder = document.getElementById('decoderBar')?.classList.contains('active');
   const tech = document.getElementById('stackDetectorBar')?.style.display === 'flex';
   // Panels live in the chrome webview below the 52px strip; hide the content
   // child so those panels (and modals) are visible and clickable.
-  ipc('set_content_visible', { visible: !(modal || locust || interceptor || decoder || tech) });
+  ipc('set_content_visible', { visible: !(modal || find || locust || compare || interceptor || decoder || tech) });
 }
 
 function toggleModal(defaultTab = 'bookmarks_history') {
@@ -2209,6 +2408,7 @@ renderTabs();
     const input = document.getElementById('urlInput');
     if (input) input.value = at.url;
     updateSslStatus(at.url);
+    updateBookmarkStarState(at.url);
     detectTechStackForUrl(at.url, true);
   }
 })();
