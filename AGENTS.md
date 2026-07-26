@@ -22,7 +22,7 @@ Hard constraints:
    - **Level 3 (Tab)**: Tab-scoped history list, scroll pos, trace buffer, and lifecycle. Wiped clean on tab close / 24h GC.
 4. **Four-Stage Ephemeral Tab Lifecycle**:
    - `Active` (0–15m foreground) $\rightarrow$ `Frozen` (15m–1h CDP stop) $\rightarrow$ `Discarded` (1h–24h RAM target detach & memory release) $\rightarrow$ `Expired` ($\ge$24h auto-close & tab history wipe).
-5. **Cmd+K** = bookmarks + active-tab history + open tabs. **Cmd+⇧K** = Developer Control Center & 5 Specialist Lenses.
+5. **Cmd+K** = Sites menu (bookmarks + active-tab history + open tabs). **Cmd+⇧K** = Toolbox menu (Developer Control Center & 5 Specialist Lenses).
 6. **No Fake/Stub UI**: Prefer wiring real Rust engines via **`AppState::global()`** — never mock RNG or pretend crypto.
 7. **Privileged lab IPC** (Locust public, intercept, CA install) enforced in Rust (`net/consent`, `shell/ipc_dispatch`).
 8. **Universal Evidence Engine & 5 Specialist Lenses**:

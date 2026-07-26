@@ -171,12 +171,12 @@ impl AppState {
     /// Gated Locust start (consent + caps). Replaces any prior swarm.
     pub fn locust_start_gated(&self, gate: LocustStartGate) -> Result<(), String> {
         let config = validate_locust_start(gate)?;
-        let mut slot = self.locust.lock();
-        if let Some(prev) = slot.take() {
+        let prev = self.locust.lock().take();
+        if let Some(prev) = prev {
             let _ = prev.stop();
         }
         let handle = LocustHandle::start(config)?;
-        *slot = Some(handle);
+        *self.locust.lock() = Some(handle);
         Ok(())
     }
 
@@ -201,8 +201,8 @@ impl AppState {
 
     /// Stop the active Locust swarm and return scored metrics from real HTTP requests.
     pub fn locust_stop(&self) -> Option<LocustScoredMetrics> {
-        let mut slot = self.locust.lock();
-        slot.take().map(|h| h.stop())
+        let prev = self.locust.lock().take();
+        prev.map(|h| h.stop())
     }
 
     /// Snapshot scored metrics without stopping the swarm.

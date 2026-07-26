@@ -15,7 +15,7 @@
 | POSH APPKIT / TAO NATIVE UI SHELL (Rust + mimalloc + 120 FPS GPU Micro-Animations)                               |
 | - Near-zero UI overhead (<150ms cold start vs ~1200ms Chrome)                                                     |
 | - 4 Top-Level Areas: Browse, Inspect, Compare, Run                                                                |
-| - Unified Command Palette (Cmd+K: Tabs/Bookmarks/History | Cmd+Shift+K: Developer Control Center)                 |
+| - Unified Command Palette (Cmd+K: Sites | Cmd+Shift+K: Toolbox)                                |
 | - Universal 'Promote to Test' Exporter (Playwright TS / k6 JS / cURL)                                             |
 +---------------------------------------------------------+---------------------------------------------------------+
                                                           | Atomic Ring-Buffer IPC (<1ms)
@@ -77,8 +77,8 @@ Thor organizes developer capabilities under **4 Top-Level Areas** (`Browse`, `In
 | `Cmd+D` | Toggle bookmark (`★`/`☆`) |
 | `Cmd+F` | Find in page floating glass search bar |
 | `Cmd++` / `Cmd+-` / `Cmd+0` | Zoom in / Zoom out / Reset zoom |
-| `Cmd+K` | Open tabs + Tab-scoped history + Saved Bookmarks |
-| `Cmd+Shift+K` | Developer Control Center & Specialist Lenses |
+| `Cmd+K` | Sites Menu (Open tabs + Tab-scoped history + Saved Bookmarks) |
+| `Cmd+Shift+K` | Toolbox Menu (Developer Control Center & Specialist Lenses) |
 | `Cmd+L` | Focus Omnibox |
 | `Cmd+R` / `Cmd+[` / `Cmd+]` | Reload / Back / Forward |
 

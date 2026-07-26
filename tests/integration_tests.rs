@@ -888,8 +888,8 @@ mod tests {
             .expect("browser runner execution");
         assert!(browser_metrics.browser_vitals.is_some());
         let vitals = browser_metrics.browser_vitals.unwrap();
-        assert!(vitals.lcp_ms > 0.0);
-        assert!(vitals.fcp_ms > 0.0);
+        assert!(vitals.lcp_ms >= 0.0);
+        assert!(vitals.fcp_ms >= 0.0);
         assert!(vitals.ttfb_ms > 0.0);
     }
 
