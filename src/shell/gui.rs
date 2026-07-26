@@ -52,16 +52,8 @@ pub fn get_chrome_html() -> String {
     border-bottom: 1px solid var(--border);
     position: relative;
     z-index: 5;
-    -webkit-app-region: drag;
   }
 
-  /* Explicitly disable drag on ALL descendants inside the chrome toolbar.
-     -webkit-app-region does NOT inherit in WebKit, so we must blanket every
-     child element. The .chrome-row itself stays 'drag' so its padding/gap
-     areas remain draggable for window movement. */
-  .chrome-row * {
-    -webkit-app-region: no-drag !important;
-  }
 
   /* === TABS === */
   .tabs {
