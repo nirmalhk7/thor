@@ -474,7 +474,7 @@ pub fn get_chrome_html() -> String {
 
 <script>
 // ==================== TAB STATE & BOOKMARKS/HISTORY DATA ====================
-let tabs = [{ id: genId(), title: 'Google', url: 'https://www.google.com', active: true }];
+let tabs = [{ id: 'default_tab', title: 'Google', url: 'https://www.google.com', active: true }];
 
 const bookmarks = [
   { icon: '🐙', title: 'GitHub', url: 'https://github.com', category: 'bookmarks' },
@@ -540,10 +540,12 @@ function newTab() {
   logToRust('[Thor JS] newTab() triggered');
   tabs.forEach(t => t.active = false);
   const newUrl = 'https://www.google.com';
-  tabs.push({ id: genId(), title: 'Google', url: newUrl, active: true });
+  const newId = 'tab_' + genId();
+  tabs.push({ id: newId, title: 'Google', url: newUrl, active: true });
   renderTabs();
-  loadContentUrl(newUrl);
+  ipc('new_tab', { id: newId, url: newUrl });
   document.getElementById('urlInput').value = newUrl;
+  updateSslStatus(newUrl);
 }
 
 function switchTab(idx) {
@@ -552,18 +554,22 @@ function switchTab(idx) {
   tabs[idx].active = true;
   renderTabs();
   document.getElementById('urlInput').value = tabs[idx].url;
-  loadContentUrl(tabs[idx].url);
+  ipc('switch_tab', { id: tabs[idx].id });
+  updateSslStatus(tabs[idx].url);
 }
 
 function closeTab(idx) {
   if (tabs.length <= 1) return;
-  const wasActive = tabs[idx].active;
+  const closedTab = tabs[idx];
+  const wasActive = closedTab.active;
   tabs.splice(idx, 1);
+  ipc('close_tab', { id: closedTab.id });
   if (wasActive) {
     const ni = Math.min(idx, tabs.length - 1);
     tabs[ni].active = true;
     document.getElementById('urlInput').value = tabs[ni].url;
-    loadContentUrl(tabs[ni].url);
+    ipc('switch_tab', { id: tabs[ni].id });
+    updateSslStatus(tabs[ni].url);
   }
   renderTabs();
 }
@@ -874,19 +880,40 @@ function showSslDetails() {
 }
 
 // ==================== RUST → JS CALLBACKS ====================
-window.updateUrl = function(url) {
-  const activeTab = tabs.find(t => t.active);
-  if (activeTab) activeTab.url = url;
-  if (document.activeElement !== urlInput) urlInput.value = url;
-  updateSslStatus(url);
+window.updateTabTitle = function(id, title) {
+  const tab = tabs.find(t => t.id === id);
+  if (tab && title) {
+    tab.title = title;
+    renderTabs();
+  }
+};
 
-  if (url && !url.startsWith('about:')) {
-    const exists = historyItems.find(h => h.url === url);
-    if (!exists) {
-      historyItems.unshift({ icon: '🌐', title: url, url: url, category: 'history', time: 'Just now' });
-      if (historyItems.length > 50) historyItems.pop();
+window.updateTabUrl = function(id, url) {
+  const tab = tabs.find(t => t.id === id);
+  if (tab && url) {
+    tab.url = url;
+    if (tab.active) {
+      if (document.activeElement !== urlInput) urlInput.value = url;
+      updateSslStatus(url);
+    }
+    if (url && !url.startsWith('about:')) {
+      const exists = historyItems.find(h => h.url === url);
+      if (!exists) {
+        historyItems.unshift({ icon: '🌐', title: url, url: url, category: 'history', time: 'Just now' });
+        if (historyItems.length > 50) historyItems.pop();
+      }
     }
   }
+};
+
+window.updateUrl = function(url) {
+  const activeTab = tabs.find(t => t.active);
+  if (activeTab) updateTabUrl(activeTab.id, url);
+};
+
+window.updateTitle = function(title) {
+  const activeTab = tabs.find(t => t.active);
+  if (activeTab) updateTabTitle(activeTab.id, title);
 };
 
 window.updateTitle = function(title) {
