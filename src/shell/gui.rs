@@ -494,31 +494,111 @@ pub fn get_chrome_html() -> String {
   }
   @keyframes pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.6; } }
 
-  /* === FEATURE PALETTE MODAL OVERLAY (CMD+K / CMD+SHIFT+K) === */
+  /* === 4 TOP-LEVEL NAVIGATION AREAS === */
+  .nav-areas {
+    display: flex;
+    align-items: center;
+    gap: 2px;
+    background: rgba(0, 0, 0, 0.4);
+    border: 1px solid var(--border);
+    border-radius: 7px;
+    padding: 2px;
+    flex-shrink: 0;
+  }
+  .nav-area-btn {
+    height: 25px;
+    padding: 0 8px;
+    border-radius: 5px;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-dim);
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    cursor: pointer;
+    font-size: 11px;
+    font-weight: 500;
+    transition: all 140ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .nav-area-btn:hover {
+    color: var(--text-secondary);
+    background: rgba(255, 255, 255, 0.06);
+  }
+  .nav-area-btn.active {
+    background: var(--bg-active);
+    border-color: var(--border-active);
+    color: var(--text);
+    font-weight: 600;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.4);
+    transform: translateY(-0.5px);
+  }
+  .nav-area-icon { font-size: 11px; }
+  .nav-area-label { font-size: 11px; }
+
+  /* Omnibox Bookmark Star Button */
+  .bookmark-star {
+    font-size: 14px;
+    cursor: pointer;
+    padding: 2px 5px;
+    border-radius: 4px;
+    color: var(--text-dim);
+    transition: all 140ms cubic-bezier(0.16, 1, 0.3, 1);
+    user-select: none;
+    flex-shrink: 0;
+    line-height: 1;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .bookmark-star:hover {
+    color: var(--accent-amber);
+    transform: scale(1.25);
+  }
+  .bookmark-star.starred {
+    color: #f59e0b;
+    text-shadow: 0 0 10px rgba(245, 158, 11, 0.6);
+  }
+
+  /* === FEATURE PALETTE MODAL OVERLAY (CMD+K / CMD+SHIFT+K) WITH GPU-COMPOSITED SPRING ANIMATIONS === */
   .modal-overlay {
-    display: none;
+    display: flex;
     position: fixed;
     top: 0;
     left: 0;
     width: 100vw;
     height: 100vh;
-    background: rgba(0, 0, 0, 0.75);
+    background: rgba(0, 0, 0, 0.65);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
     z-index: 100;
     align-items: flex-start;
     justify-content: center;
-    padding-top: 16px;
+    padding-top: 32px;
+    opacity: 0;
+    visibility: hidden;
     pointer-events: none;
+    transition: opacity 160ms cubic-bezier(0.16, 1, 0.3, 1), visibility 160ms ease;
+    will-change: opacity, visibility;
   }
   .modal-overlay.active {
-    display: flex;
+    opacity: 1;
+    visibility: visible;
     pointer-events: auto;
   }
 
   .modal-box {
-    width: 680px; max-width: 92vw; background: var(--bg-modal);
-    border: 1px solid var(--border-active); border-radius: 8px;
-    box-shadow: 0 12px 36px rgba(0, 0, 0, 0.6); overflow: hidden;
-    display: flex; flex-direction: column;
+    width: 680px; max-width: 92vw; background: rgba(22, 24, 32, 0.94);
+    backdrop-filter: blur(24px);
+    -webkit-backdrop-filter: blur(24px);
+    border: 1px solid var(--border-active); border-radius: 12px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.7), 0 0 1px rgba(255, 255, 255, 0.15);
+    overflow: hidden; display: flex; flex-direction: column;
+    transform: scale(0.95) translateY(-10px);
+    transition: transform 180ms cubic-bezier(0.16, 1, 0.3, 1);
+    will-change: transform;
+  }
+  .modal-overlay.active .modal-box {
+    transform: scale(1) translateY(0);
   }
 
   .modal-search-row {
@@ -541,7 +621,7 @@ pub fn get_chrome_html() -> String {
   .modal-tab-btn {
     padding: 6px 10px; font-size: 11.5px; font-weight: 500;
     color: var(--text-dim); border: none; background: transparent;
-    cursor: pointer; border-radius: 4px 4px 0 0; transition: all var(--transition);
+    cursor: pointer; border-radius: 4px 4px 0 0; transition: all 140ms cubic-bezier(0.16, 1, 0.3, 1);
     white-space: nowrap; flex-shrink: 0;
   }
   .modal-tab-btn:hover { color: var(--text-secondary); background: var(--bg-hover); }
@@ -557,10 +637,12 @@ pub fn get_chrome_html() -> String {
   .modal-item {
     padding: 8px 10px; border-radius: 6px; display: flex;
     align-items: center; justify-content: space-between; cursor: pointer;
-    transition: background var(--transition); background: transparent;
+    transition: transform 120ms cubic-bezier(0.16, 1, 0.3, 1), background 120ms cubic-bezier(0.16, 1, 0.3, 1), border-color 120ms ease;
+    background: transparent; border: 1px solid transparent;
   }
   .modal-item:hover, .modal-item.selected {
-    background: var(--bg-hover); border: 1px solid var(--border-active);
+    background: var(--bg-hover); border-color: var(--border-active);
+    transform: translateX(2px);
   }
   .modal-item-left { display: flex; align-items: center; gap: 10px; overflow: hidden; flex: 1; min-width: 0; }
   .modal-item-icon {
@@ -581,7 +663,7 @@ pub fn get_chrome_html() -> String {
     border-radius: 9px;
     position: relative;
     cursor: pointer;
-    transition: background 150ms ease;
+    transition: background 150ms cubic-bezier(0.16, 1, 0.3, 1);
     flex-shrink: 0;
     margin-left: 8px;
   }
@@ -594,13 +676,109 @@ pub fn get_chrome_html() -> String {
     position: absolute;
     top: 2px;
     left: 2px;
-    transition: transform 150ms ease;
+    transition: transform 150ms cubic-bezier(0.16, 1, 0.3, 1);
   }
   .toggle-switch.active .toggle-switch-knob { transform: translateX(14px); }
 
   .modal-footer {
     padding: 6px 14px; background: rgba(0,0,0,0.25); border-top: 1px solid var(--border);
     display: flex; align-items: center; justify-content: space-between; font-size: 11px; color: var(--text-dim);
+  }
+
+  /* === FIND IN PAGE FLOATING GLASS OVERLAY === */
+  .find-bar {
+    position: fixed;
+    top: 60px;
+    right: 24px;
+    z-index: 90;
+    height: 36px;
+    background: rgba(22, 24, 32, 0.88);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-active);
+    border-radius: 8px;
+    box-shadow: 0 12px 32px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    padding: 0 8px 0 10px;
+    gap: 6px;
+    opacity: 0;
+    visibility: hidden;
+    pointer-events: none;
+    transform: translateY(-8px) scale(0.96);
+    transition: opacity 150ms cubic-bezier(0.16, 1, 0.3, 1), transform 150ms cubic-bezier(0.16, 1, 0.3, 1), visibility 150ms ease;
+    will-change: transform, opacity;
+  }
+  .find-bar.active {
+    opacity: 1;
+    visibility: visible;
+    pointer-events: auto;
+    transform: translateY(0) scale(1);
+  }
+  .find-input {
+    width: 170px;
+    background: rgba(0,0,0,0.35);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    color: var(--text);
+    font-size: 12px;
+    font-family: 'Inter', sans-serif;
+    padding: 4px 8px;
+    outline: none;
+    transition: border-color 120ms ease;
+  }
+  .find-input:focus { border-color: var(--accent); }
+  .find-count {
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+    color: var(--text-secondary);
+    min-width: 55px;
+    text-align: center;
+  }
+  .find-btn {
+    width: 24px; height: 24px;
+    border-radius: 4px;
+    border: 1px solid var(--border);
+    background: var(--bg-card);
+    color: var(--text-secondary);
+    display: flex; align-items: center; justify-content: center;
+    cursor: pointer; font-size: 12px; font-weight: 600;
+    transition: all 120ms ease;
+  }
+  .find-btn:hover { background: var(--bg-hover); color: var(--text); border-color: var(--border-active); }
+
+  /* === TOAST NOTIFICATIONS === */
+  .toast-container {
+    position: fixed;
+    top: 60px;
+    right: 20px;
+    z-index: 200;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    pointer-events: none;
+  }
+  .toast {
+    background: rgba(22, 24, 32, 0.92);
+    backdrop-filter: blur(16px);
+    -webkit-backdrop-filter: blur(16px);
+    border: 1px solid var(--border-active);
+    color: var(--text);
+    padding: 10px 16px;
+    border-radius: 8px;
+    font-size: 12px;
+    font-weight: 500;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    opacity: 0;
+    transform: translateY(-10px) scale(0.95);
+    transition: all 180ms cubic-bezier(0.16, 1, 0.3, 1);
+  }
+  .toast.show {
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
 
   ::-webkit-scrollbar { width: 4px; }
@@ -614,6 +792,24 @@ pub fn get_chrome_html() -> String {
       <button type="button" class="tl-btn minimize" onclick="ipc('window_minimize')" title="Minimize" aria-label="Minimize"></button>
       <button type="button" class="tl-btn maximize" onclick="ipc('window_maximize')" title="Maximize" aria-label="Maximize"></button>
     </div>
+
+    <!-- 4 Top-Level Navigation Areas -->
+    <div class="nav-areas" id="navAreas">
+      <button type="button" class="nav-area-btn active" id="navAreaBrowse" onclick="switchNavArea('browse')" title="Browse Mode (Standard Navigation)">
+        <span class="nav-area-icon">🌐</span> <span class="nav-area-label">Browse</span>
+      </button>
+      <button type="button" class="nav-area-btn" id="navAreaInspect" onclick="switchNavArea('inspect')" title="Inspect Mode (Tech Stack, Interceptor, DevTools)">
+        <span class="nav-area-icon">🔍</span> <span class="nav-area-label">Inspect</span>
+      </button>
+      <button type="button" class="nav-area-btn" id="navAreaCompare" onclick="switchNavArea('compare')" title="Compare Mode (Split View & URL Diff)">
+        <span class="nav-area-icon">⚖️</span> <span class="nav-area-label">Compare</span>
+      </button>
+      <button type="button" class="nav-area-btn" id="navAreaRun" onclick="switchNavArea('run')" title="Run Mode (Locust Load Swarm Runner)">
+        <span class="nav-area-icon">🚀</span> <span class="nav-area-label">Run</span>
+      </button>
+    </div>
+
+    <div class="sep"></div>
 
     <!-- Tabs -->
     <div class="tabs" id="tabBar"></div>
@@ -638,6 +834,7 @@ pub fn get_chrome_html() -> String {
       <input type="text" class="url-input" id="urlInput"
              placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off"
              tabindex="0">
+      <div class="bookmark-star" id="bookmarkStar" onclick="toggleBookmarkActiveTab(event)" title="Bookmark Page (⌘D)">☆</div>
     </div>
 
     <!-- Actions -->
@@ -739,6 +936,35 @@ pub fn get_chrome_html() -> String {
       <div class="locust-status-badge" id="mStatus">READY</div>
     </div>
   </div>
+
+  <!-- PAGE COMPARE STUDIO TOOLBAR (.locust-bar) -->
+  <div class="locust-bar" id="compareBar">
+    <div class="locust-header">
+      <div class="locust-title" style="color:#22c55e;">⚖️ Side-by-Side Dual View & Page Comparison Studio</div>
+      <button class="locust-btn x" onclick="switchNavArea('browse')">✕</button>
+    </div>
+    <div class="locust-controls-row">
+      <div class="locust-group" style="flex:1;">
+        <label>Compare Target URL:</label>
+        <input type="text" id="compareUrlInput" class="locust-input" style="width:100%;" placeholder="Enter target URL to compare against active page...">
+      </div>
+      <button class="locust-btn go" style="background:#22c55e;" onclick="runPageComparison()">⚡ Run Diff</button>
+    </div>
+    <div id="compareResultView" style="font-family:'JetBrains Mono',monospace; font-size:11px; color:var(--text); background:rgba(0,0,0,0.4); padding:6px 10px; border-radius:5px; margin-top:4px; display:none;"></div>
+  </div>
+
+  <!-- FIND IN PAGE FLOATING GLASS OVERLAY BAR (.find-bar) -->
+  <div class="find-bar" id="findBar">
+    <span style="font-size: 13px; color: var(--accent);">🔍</span>
+    <input type="text" class="find-input" id="findInput" placeholder="Find in page..." oninput="onFindInput()" onkeydown="handleFindKeydown(event)">
+    <span class="find-count" id="findCount">0 of 0</span>
+    <button type="button" class="find-btn" onclick="findNext()" title="Next match (Enter)">‹</button>
+    <button type="button" class="find-btn" onclick="findPrev()" title="Previous match (Shift+Enter)">›</button>
+    <button type="button" class="find-btn" onclick="closeFindBar()" title="Close (Esc)">✕</button>
+  </div>
+
+  <!-- TOAST NOTIFICATION CONTAINER -->
+  <div class="toast-container" id="toastContainer"></div>
 
   <!-- TRAFFIC INTERCEPTOR & REPEATER TOOLBAR (.interceptor-bar) -->
   <div class="locust-bar" id="interceptorBar">
