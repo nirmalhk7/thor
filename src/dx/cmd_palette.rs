@@ -637,39 +637,105 @@ impl CmdPalette {
         let items = self.items.lock().unwrap();
         let query_trimmed = self.query.trim();
         if query_trimmed.is_empty() {
-            return items.iter().take(100).cloned().collect();
+            return items.iter().take(50).cloned().collect();
         }
 
         let prepared = PreparedQuery::new(query_trimmed);
-        let mut min_heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
-            std::collections::BinaryHeap::with_capacity(101);
-        let mut min_score = 0;
-
-        for (idx, item) in items.iter().enumerate() {
-            let score = score_palette_item_prepared(
-                &prepared,
-                &item.title,
-                &item.path_or_url,
-                item.badge.as_deref(),
-            );
-
-            if score > min_score {
-                if min_heap.len() < 100 {
-                    min_heap.push(std::cmp::Reverse((score, idx)));
-                    if min_heap.len() == 100 {
-                        min_score = min_heap.peek().unwrap().0 .0;
-                    }
-                } else {
-                    min_heap.pop();
-                    min_heap.push(std::cmp::Reverse((score, idx)));
-                    min_score = min_heap.peek().unwrap().0 .0;
-                }
-            }
+        let len = items.len();
+        if len == 0 {
+            return Vec::new();
         }
 
-        let mut top_scored: Vec<(i32, usize)> = min_heap.into_iter().map(|r| r.0).collect();
-        top_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
-        top_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+        // For small lists, single-threaded path; for large lists (>= 1,000), parallel path
+        if len < 1000 {
+            let mut min_heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
+                std::collections::BinaryHeap::with_capacity(51);
+            let mut min_score = 0;
+
+            for (idx, item) in items.iter().enumerate() {
+                let score = score_palette_item_prepared(
+                    &prepared,
+                    &item.title,
+                    &item.path_or_url,
+                    item.badge.as_deref(),
+                );
+
+                if score > min_score {
+                    if min_heap.len() < 50 {
+                        min_heap.push(std::cmp::Reverse((score, idx)));
+                        if min_heap.len() == 50 {
+                            min_score = min_heap.peek().unwrap().0 .0;
+                        }
+                    } else {
+                        let mut head = min_heap.peek_mut().unwrap();
+                        head.0 = (score, idx);
+                        drop(head);
+                        min_score = min_heap.peek().unwrap().0 .0;
+                    }
+                }
+            }
+
+            let mut top_scored: Vec<(i32, usize)> = min_heap.into_iter().map(|r| r.0).collect();
+            top_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            top_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+        } else {
+            let num_threads = std::thread::available_parallelism()
+                .map(|n| n.get())
+                .unwrap_or(4)
+                .min(8);
+            let chunk_size = (len + num_threads - 1) / num_threads;
+
+            let thread_results: Vec<Vec<(i32, usize)>> = std::thread::scope(|s| {
+                let mut handles = Vec::with_capacity(num_threads);
+
+                for (chunk_idx, chunk) in items.chunks(chunk_size).enumerate() {
+                    let prepared_ref = &prepared;
+                    handles.push(s.spawn(move || {
+                        let mut min_heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
+                            std::collections::BinaryHeap::with_capacity(51);
+                        let mut min_score = 0;
+                        let base_idx = chunk_idx * chunk_size;
+
+                        for (i, item) in chunk.iter().enumerate() {
+                            let score = score_palette_item_prepared(
+                                prepared_ref,
+                                &item.title,
+                                &item.path_or_url,
+                                item.badge.as_deref(),
+                            );
+
+                            if score > min_score {
+                                let idx = base_idx + i;
+                                if min_heap.len() < 50 {
+                                    min_heap.push(std::cmp::Reverse((score, idx)));
+                                    if min_heap.len() == 50 {
+                                        min_score = min_heap.peek().unwrap().0 .0;
+                                    }
+                                } else {
+                                    let mut head = min_heap.peek_mut().unwrap();
+                                    head.0 = (score, idx);
+                                    drop(head);
+                                    min_score = min_heap.peek().unwrap().0 .0;
+                                }
+                            }
+                        }
+
+                        min_heap.into_iter().map(|r| r.0).collect()
+                    }));
+                }
+
+                handles.into_iter().map(|h| h.join().unwrap()).collect()
+            });
+
+            let mut all_scored = Vec::with_capacity(num_threads * 50);
+            for res in thread_results {
+                all_scored.extend(res);
+            }
+
+            all_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            all_scored.truncate(50);
+            all_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+        }
     }
 
 

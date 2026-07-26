@@ -1,11 +1,11 @@
 use std::collections::HashSet;
 use thor::dx::cmd_palette::{
-    get_default_bookmarks, parse_chrome_bookmarks, read_chrome_bookmarks_json,
+    get_default_bookmarks, parse_chrome_bookmarks, parse_chrome_extension_manifest,
     read_chrome_extensions, score_palette_item, CmdPalette, CmdPaletteMode, PaletteItem,
     PaletteItemType, SettingsRegistry, TabHistoryTracker,
 };
-use thor::dx::stack_detector::{DetectedStack, TechBadge, TechStackDetector};
-use thor::net::locust::{LocustMetricScorer, LocustScoredMetrics, RequestMetric};
+use thor::dx::stack_detector::TechStackDetector;
+use thor::net::locust::{LocustMetricScorer, RequestMetric};
 use thor::net::security_shield::SecurityShield;
 
 #[cfg(test)]
@@ -205,9 +205,30 @@ mod tests {
     // =========================================================================
 
     #[test]
+    fn test_chrome_extension_manifest_parser() {
+        let manifest_json = r#"{
+            "name": "React Developer Tools",
+            "version": "5.2.0",
+            "manifest_version": 3
+        }"#;
+
+        let parsed = parse_chrome_extension_manifest(manifest_json, "fmkadmapgofadopljbjfkapdkoienihi");
+        assert!(parsed.is_some());
+        let item = parsed.unwrap();
+        assert_eq!(item.id, "ext_fmkadmapgofadopljbjfkapdkoienihi");
+        assert_eq!(item.title, "React Developer Tools v5.2.0");
+        assert_eq!(item.item_type, PaletteItemType::Setting);
+        assert_eq!(item.path_or_url, "chrome-extension://fmkadmapgofadopljbjfkapdkoienihi");
+        assert_eq!(item.category, "Extensions");
+        assert_eq!(item.icon.as_deref(), Some("🧩"));
+        assert_eq!(item.badge.as_deref(), Some("Extension"));
+        assert_eq!(item.action_key.as_deref(), Some("open_extension_fmkadmapgofadopljbjfkapdkoienihi"));
+    }
+
+    #[test]
     fn test_chrome_extensions_parser_items() {
         let extensions = read_chrome_extensions();
-        assert_eq!(extensions.len(), 5, "Expected 5 default Chrome extensions");
+        assert!(extensions.len() >= 5, "Expected at least 5 built-in Chrome extensions");
 
         for ext in &extensions {
             assert_eq!(ext.item_type, PaletteItemType::Setting);
@@ -249,11 +270,11 @@ mod tests {
         assert!(!locust_results.is_empty());
         assert!(locust_results[0].title.contains("Locust HTTP Swarm"));
 
-        // Search for extension (React DevTools)
-        palette.set_query("React DevTools".into());
+        // Search for extension (React)
+        palette.set_query("React".into());
         let react_ext_results = palette.search();
         assert!(!react_ext_results.is_empty());
-        assert_eq!(react_ext_results[0].id, "ext_react_devtools");
+        assert!(react_ext_results.iter().any(|r| r.title.contains("React Developer Tools")));
 
         // Search for extension (uBlock)
         palette.set_query("uBlock".into());

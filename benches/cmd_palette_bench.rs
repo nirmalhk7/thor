@@ -4,6 +4,9 @@ use thor::dx::cmd_palette::{CmdPalette, CmdPaletteMode, PaletteItem, PaletteItem
 use thor::net::locust::{LocustMetricScorer, RequestMetric};
 use thor::net::security_shield::SecurityShield;
 
+#[global_allocator]
+static GLOBAL: mimalloc::MiMalloc = mimalloc::MiMalloc;
+
 fn generate_10k_palette_items() -> Vec<PaletteItem> {
     let mut items = Vec::with_capacity(10_000);
     let item_types = [
