@@ -797,10 +797,13 @@ fn create_content_tab(
                 "toggle_devtools" => {
                     let tabs = tabs_for_ipc.borrow();
                     if let Some(wv) = tabs.webviews.get(&id_for_ipc) {
-                        if wv.is_devtools_open() {
-                            wv.close_devtools();
-                        } else {
-                            wv.open_devtools();
+                        #[cfg(any(debug_assertions, feature = "devtools"))]
+                        {
+                            if wv.is_devtools_open() {
+                                wv.close_devtools();
+                            } else {
+                                wv.open_devtools();
+                            }
                         }
                     }
                 }
@@ -932,10 +935,13 @@ fn create_palette_webview(
                 "toggle_devtools" => {
                     let tabs_slot = tabs_for_ipc.borrow();
                     if let Some(wv) = tabs_slot.webviews.get(&tabs_slot.active) {
-                        if wv.is_devtools_open() {
-                            wv.close_devtools();
-                        } else {
-                            wv.open_devtools();
+                        #[cfg(any(debug_assertions, feature = "devtools"))]
+                        {
+                            if wv.is_devtools_open() {
+                                wv.close_devtools();
+                            } else {
+                                wv.open_devtools();
+                            }
                         }
                     }
                     let _ = proxy_for_ipc.send_event(UserEvent::ClosePalette);
@@ -1165,12 +1171,15 @@ fn open_tool_in_omnibar(
     // DevTools: toggle immediately — no intermediate omnibar confirm.
     if mode == native_toolbar::ChromeToolMode::DevTools {
         if let Some(wv) = tabs.webviews.get(&tabs.active) {
-            if wv.is_devtools_open() {
-                wv.close_devtools();
-                println!("⚡ [Thor] DevTools closed");
-            } else {
-                wv.open_devtools();
-                println!("⚡ [Thor] DevTools opened");
+            #[cfg(any(debug_assertions, feature = "devtools"))]
+            {
+                if wv.is_devtools_open() {
+                    wv.close_devtools();
+                    println!("⚡ [Thor] DevTools closed");
+                } else {
+                    wv.open_devtools();
+                    println!("⚡ [Thor] DevTools opened");
+                }
             }
         }
         if let Some(tb) = toolbar.as_mut() {
@@ -1207,7 +1216,16 @@ fn open_tool_in_omnibar(
                 let open = tabs
                     .webviews
                     .get(&tabs.active)
-                    .map(|wv| wv.is_devtools_open())
+                    .map(|wv| {
+                        #[cfg(any(debug_assertions, feature = "devtools"))]
+                        {
+                            wv.is_devtools_open()
+                        }
+                        #[cfg(not(any(debug_assertions, feature = "devtools")))]
+                        {
+                            false
+                        }
+                    })
                     .unwrap_or(false);
                 tb.set_tool_mode(mode);
                 tb.set_status(if open {
@@ -1268,12 +1286,15 @@ fn run_omnibar_tool_go(
         }
         native_toolbar::ChromeToolMode::DevTools => {
             if let Some(wv) = tabs.webviews.get(&tabs.active) {
-                if wv.is_devtools_open() {
-                    wv.close_devtools();
-                    tb.set_status("Inspector: closed");
-                } else {
-                    wv.open_devtools();
-                    tb.set_status("Inspector: OPEN");
+                #[cfg(any(debug_assertions, feature = "devtools"))]
+                {
+                    if wv.is_devtools_open() {
+                        wv.close_devtools();
+                        tb.set_status("Inspector: closed");
+                    } else {
+                        wv.open_devtools();
+                        tb.set_status("Inspector: OPEN");
+                    }
                 }
             }
             false // keep strip open so user sees status

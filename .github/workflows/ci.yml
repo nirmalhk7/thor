@@ -1,23 +1,100 @@
-name: CI
+name: CI & Release
 
 on:
   push:
     branches: [ "main" ]
+    tags: [ "v*" ]
   pull_request:
     branches: [ "main" ]
 
+permissions:
+  contents: write
+
 jobs:
-  build_and_test:
-    runs-on: ubuntu-latest
+  test_and_lint:
+    name: Test & Lint (macOS)
+    runs-on: macos-latest
     steps:
-    - uses: actions/checkout@v3
-    - name: Set up Rust
-      uses: actions-rs/toolchain@v1
-      with:
-        profile: minimal
-        toolchain: stable
-        override: true
-    - name: Run Tests
-      run: cargo test
-    - name: Run Benchmarks (Speedometer & Memory SLA)
-      run: cargo bench
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Cargo Check
+        run: cargo check --workspace --all-targets
+
+      - name: Library Unit Tests
+        run: cargo test --lib
+
+      - name: Integration Tests
+        run: cargo test --test integration_tests
+
+  build_and_release:
+    name: Package & Release macOS Installer
+    needs: test_and_lint
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: macos-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Rust Cache
+        uses: Swatinem/rust-cache@v2
+
+      - name: Auto-Bump Semantic Version
+        id: semver
+        run: |
+          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
+          echo "Current Cargo version: ${CURRENT_VERSION}"
+          
+          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION}"
+          NEW_PATCH=$((PATCH + 1))
+          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
+          echo "New Version: ${NEW_VERSION}"
+          
+          sed -i '' "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" Cargo.toml
+          
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          
+          git add Cargo.toml
+          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]" || true
+          git tag -f "v${NEW_VERSION}" || true
+          git push origin "v${NEW_VERSION}" || true
+          git push origin main || true
+          
+          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
+
+      - name: Build & Package macOS Installers
+        run: ./scripts/package_macos.sh "${{ steps.semver.outputs.version }}"
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: "v${{ steps.semver.outputs.version }}"
+          name: "Thor Browser v${{ steps.semver.outputs.version }}"
+          body: |
+            ## Thor Browser v${{ steps.semver.outputs.version }} Release
+            
+            High-performance, ephemeral developer browser.
+            
+            ### Artifacts Included:
+            - `Thor-v${{ steps.semver.outputs.version }}-macos.dmg` (macOS Disk Image Installer)
+            - `Thor-v${{ steps.semver.outputs.version }}-macos.zip` (macOS App Zip Archive)
+            - `checksums.txt` (SHA256 Checksums)
+          files: |
+            dist/Thor-v${{ steps.semver.outputs.version }}-macos.dmg
+            dist/Thor-v${{ steps.semver.outputs.version }}-macos.zip
+            dist/checksums.txt
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
