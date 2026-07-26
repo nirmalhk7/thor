@@ -232,6 +232,7 @@ pub fn run() -> anyhow::Result<()> {
                             if let Some(ref wv) = *content_for_ipc.borrow() {
                                 println!("⚡ [Thor Rust] Navigating content webview to: {}", url);
                                 let _ = wv.load_url(url);
+                                let _ = wv.focus();
                             }
                         }
                     }
