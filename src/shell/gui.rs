@@ -440,6 +440,10 @@ pub fn get_chrome_html() -> String {
     </div>
   </div>
 
+  <!-- Content Viewport -->
+  <iframe id="contentFrame" src="https://www.google.com" 
+          style="width: 100vw; height: calc(100vh - 46px); border: none; background: #ffffff; display: block;"></iframe>
+
   <!-- FEATURE PALETTE / BOOKMARKS MODAL -->
   <div class="modal-overlay" id="modalOverlay" onclick="closeModalOnBackdrop(event)">
     <div class="modal-box">
@@ -530,6 +534,14 @@ function logToRust(msg) {
   ipc('log', { message: msg });
 }
 
+function loadContentUrl(url) {
+  const iframe = document.getElementById('contentFrame');
+  if (iframe) {
+    iframe.src = url;
+  }
+  updateSslStatus(url);
+}
+
 // ==================== TAB MANAGEMENT ====================
 function newTab() {
   logToRust('[Thor JS] newTab() triggered');
@@ -537,7 +549,7 @@ function newTab() {
   const newUrl = 'https://www.google.com';
   tabs.push({ id: genId(), title: 'Google', url: newUrl, active: true });
   renderTabs();
-  ipc('navigate', { url: newUrl });
+  loadContentUrl(newUrl);
   document.getElementById('urlInput').value = newUrl;
 }
 
@@ -547,7 +559,7 @@ function switchTab(idx) {
   tabs[idx].active = true;
   renderTabs();
   document.getElementById('urlInput').value = tabs[idx].url;
-  ipc('navigate', { url: tabs[idx].url });
+  loadContentUrl(tabs[idx].url);
 }
 
 function closeTab(idx) {
@@ -558,7 +570,7 @@ function closeTab(idx) {
     const ni = Math.min(idx, tabs.length - 1);
     tabs[ni].active = true;
     document.getElementById('urlInput').value = tabs[ni].url;
-    ipc('navigate', { url: tabs[ni].url });
+    loadContentUrl(tabs[ni].url);
   }
   renderTabs();
 }
@@ -580,7 +592,7 @@ urlInput.addEventListener('keydown', (e) => {
       renderTabs();
     }
     urlInput.value = url;
-    ipc('navigate', { url });
+    loadContentUrl(url);
     urlInput.blur();
   }
 });
@@ -623,9 +635,9 @@ function handleGlobalKeydown(e) {
     case 't': e.preventDefault(); newTab(); break;
     case 'w': e.preventDefault(); { const i = tabs.findIndex(t => t.active); if (i >= 0) closeTab(i); } break;
     case 'l': e.preventDefault(); urlInput.focus(); break;
-    case '[': e.preventDefault(); ipc('back'); break;
-    case ']': e.preventDefault(); ipc('forward'); break;
-    case 'r': e.preventDefault(); ipc('reload'); break;
+    case '[': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.history.back(); } break;
+    case ']': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.history.forward(); } break;
+    case 'r': e.preventDefault(); { const iframe = document.getElementById('contentFrame'); if (iframe && iframe.contentWindow) iframe.contentWindow.location.reload(); } break;
   }
   if (key >= '1' && key <= '9') {
     e.preventDefault();
@@ -652,7 +664,6 @@ function openModal(defaultTab = 'features') {
   logToRust('[Thor JS] openModal(' + defaultTab + ')');
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.add('active');
-  ipc('expand_chrome'); // Expand webview height in Rust to 520px
 
   if (defaultTab === 'bookmarks_history') {
     switchModalTab('bookmarks');
@@ -669,7 +680,6 @@ function closeModal() {
   logToRust('[Thor JS] closeModal()');
   const overlay = document.getElementById('modalOverlay');
   overlay.classList.remove('active');
-  ipc('shrink_chrome'); // Shrink webview height in Rust back to 48px
 }
 
 function closeModalOnBackdrop(e) {
