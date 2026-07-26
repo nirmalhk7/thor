@@ -55,8 +55,11 @@ pub fn get_chrome_html() -> String {
     -webkit-app-region: drag;
   }
 
-  /* Explicitly disable drag on all interactive UI controls */
-  .tabs, .tab, .tab-x, .new-tab, .nav-cluster, .nav-btn, .omnibox, .ssl-icon, .url-input, .actions, .action-btn, .stack-detector-bar, .tech-pill, .stack-btn, .locust-btn, button, input, select, .modal-tab-btn, .modal-item {
+  /* Explicitly disable drag on ALL descendants inside the chrome toolbar.
+     -webkit-app-region does NOT inherit in WebKit, so we must blanket every
+     child element. The .chrome-row itself stays 'drag' so its padding/gap
+     areas remain draggable for window movement. */
+  .chrome-row * {
     -webkit-app-region: no-drag !important;
   }
 
