@@ -1,3 +1,6 @@
+#![allow(deprecated)]
+#![allow(unexpected_cfgs)]
+
 pub mod app_state;
 pub mod daemon;
 pub mod devtools;
@@ -9,6 +12,7 @@ pub mod net;
 pub mod network;
 pub mod paths;
 pub mod shell;
+pub mod mcp;
 
 pub use app_state::{AppState, SecurityShieldToggles};
 pub use paths::{thor_chromium_profile_dir, thor_data_dir};

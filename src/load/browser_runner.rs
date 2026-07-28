@@ -73,8 +73,10 @@ impl BrowserRunner {
                                 (async () => {
                                     return new Promise((resolve) => {
                                         let lcp = 0;
-                                        let fid = 5.0;
-                                        let cls = 0.01;
+                                        let inp = 0;
+                                        let fid = 0;
+                                        let cls = 0;
+                                        let tbt = 0;
                                         
                                         try {
                                             new PerformanceObserver((entryList) => {
@@ -95,9 +97,20 @@ impl BrowserRunner {
                                         try {
                                             new PerformanceObserver((entryList) => {
                                                 for (const entry of entryList.getEntries()) {
+                                                    inp = entry.duration;
                                                     fid = entry.processingStart - entry.startTime;
                                                 }
                                             }).observe({type: 'first-input', buffered: true});
+                                        } catch (e) {}
+
+                                        try {
+                                            new PerformanceObserver((entryList) => {
+                                                for (const entry of entryList.getEntries()) {
+                                                    if (entry.duration > 50) {
+                                                        tbt += (entry.duration - 50);
+                                                    }
+                                                }
+                                            }).observe({type: 'longtask', buffered: true});
                                         } catch (e) {}
                                         
                                         setTimeout(() => {
@@ -116,14 +129,16 @@ impl BrowserRunner {
                                             
                                             resolve(JSON.stringify({
                                                 lcp: lcp || fcp,
+                                                inp: inp,
                                                 fid: fid,
                                                 cls: cls,
                                                 fcp: fcp,
                                                 ttfb: ttfb,
+                                                tbt: tbt,
                                                 dcl: dcl,
                                                 di: di
                                             }));
-                                        }, 200);
+                                        }, 100);
                                     });
                                 })();
                             "#;
@@ -131,10 +146,12 @@ impl BrowserRunner {
                             if let Ok(Value::String(json_str)) = tab.evaluate_js(script).await {
                                 if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
                                     vitals.lcp_ms = parsed.get("lcp").and_then(|v| v.as_f64()).unwrap_or(0.0);
-                                    vitals.fid_ms = parsed.get("fid").and_then(|v| v.as_f64()).unwrap_or(5.0);
-                                    vitals.cls = parsed.get("cls").and_then(|v| v.as_f64()).unwrap_or(0.01);
+                                    vitals.inp_ms = parsed.get("inp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.fid_ms = parsed.get("fid").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.cls = parsed.get("cls").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                     vitals.fcp_ms = parsed.get("fcp").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                     vitals.ttfb_ms = parsed.get("ttfb").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.tbt_ms = parsed.get("tbt").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                     vitals.dom_content_loaded_ms = parsed.get("dcl").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                     vitals.dom_interactive_ms = parsed.get("di").and_then(|v| v.as_f64()).unwrap_or(0.0);
                                 }

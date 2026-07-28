@@ -154,6 +154,9 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 match_header_key: None,
                 replace_header_key: key,
                 replace_header_value: val,
+                mock_status: None,
+                mock_body: None,
+                delay_ms: None,
             });
             DispatchResult::Message("tamper:rule_added".into())
         }

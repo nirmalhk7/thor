@@ -16,7 +16,7 @@
 | - Near-zero UI overhead (<150ms cold start vs ~1200ms Chrome)                                                     |
 | - 4 Top-Level Areas: Browse, Inspect, Compare, Run                                                                |
 | - Unified Command Palette (Cmd+K: Sites | Cmd+Shift+K: Toolbox)                                |
-| - Universal 'Promote to Test' Exporter (Playwright TS / k6 JS / cURL)                                             |
+| - Universal 'Promote to Test' Polyglot Exporter (Rust reqwest / Go / Python / Playwright TS / k6 / cURL)           |
 +---------------------------------------------------------+---------------------------------------------------------+
                                                           | Atomic Ring-Buffer IPC (<1ms)
                                                           v
@@ -37,7 +37,7 @@
 
 ### 2. Four-Stage Ephemeral Tab Lifecycle
 1. **Active**: Live CDP target session in foreground / active use.
-2. **Frozen**: Soft-suspended after 15m idle via CDP page lifecycle (`CdpPageFreezer`), pausing JS timers without releasing memory.
+2. **Frozen**: Soft-suspended after 15m idle via CDP page lifecycle (`CdpPageFreezer`), pausing JS timers without releasing memory (0 OS `SIGSTOP` process stalls).
 3. **Discarded**: After 1 hour of inactivity or memory pressure, the CDP target is detached and memory released, preserving URL, scroll position, and tab-scoped history for seamless instant reload on click.
 4. **Expired**: Inactive tabs remaining dormant for $\ge$24 hours are automatically closed, purging all state and wiping tab-scoped history clean.
 
@@ -47,13 +47,13 @@
 
 Thor organizes developer capabilities under **4 Top-Level Areas** (`Browse`, `Inspect`, `Compare`, `Run`) and **5 Specialist Lenses**:
 
-1. **Full-Stack Lens**: Correlates UI clicks to backend requests and deep-links stack traces directly into VS Code (`vscode://file/...`), Cursor (`cursor://file/...`), or Zed (`zed://file/...`). Includes Tech Stack Detector.
-2. **Security Lens**: Identity Matrix testing — compares endpoint responses across `Admin`, `Owner`, `Other User`, and `Anonymous` to detect IDORs instantly. Features Traffic Tamper engine, Security Shield anti-tracking, SSL CA generator, and Decoder Studio (JWT/Base64/Hex/JSON).
-3. **Performance Lens**: Live Core Web Vitals telemetry (`LCP`, `CLS`, `INP`, `TTFB`, `FCP`), rolling profiler, and CDP timeline diffs.
-4. **AI / LLM Telemetry Studio (`src/dx/llm_studio.rs`)**: Token counter, API cost estimator (GPT-4, Claude 3.5, Gemini 1.5, Llama 3), and `SseStreamParser` tracking TTFT (Time to First Token) & tokens/sec metrics.
+1. **Full-Stack Lens**: Correlates UI clicks to backend requests and deep-links stack traces directly into VS Code (`vscode://file/...`), Cursor (`cursor://file/...`), or Zed (`zed://file/...`). Includes Tech Stack Detector and CSS Layout Overlay (`css_overlay.rs`).
+2. **Security Lens**: Identity Matrix testing — compares endpoint responses across `Admin`, `Owner`, `Other User`, and `Anonymous` to detect IDORs using structural JSON body key hashing (`compute_json_structure_hash`). Features Traffic Tamper engine with response mocking (`mock_status`, `mock_body`, `delay_ms`), secret header redaction (`SEC-027`), Security Shield anti-tracking, SSL CA generator, and Decoder Studio (JWT/Base64/Hex/JSON).
+3. **Performance Lens**: Live Core Web Vitals telemetry (`LCP`, `CLS`, `INP`, `TBT`, `TTFB`, `FCP`), lock-free atomic histogram metrics ($O(1)$ zero-lock latency tracking up to 10,000+ RPS), rolling profiler, and CDP timeline diffs.
+4. **AI / LLM Telemetry Studio (`src/dx/llm_studio.rs` & `src/dx/llm_clean_context.rs`)**: Token counter, 2026 model pricing table with prompt caching (`claude-3.7-sonnet`, `deepseek-r1`, `gpt-4o`, `gemini-2.0-flash`), multi-provider SSE parser, local Ollama (`localhost:11434`) / vLLM (`localhost:8000`) auto-detection, and `Cmd+Shift+C` Copy Page as LLM Clean Context.
 5. **Web3 / Blockchain Inspector (`src/dx/web3_inspector.rs`)**: EVM & Solana JSON-RPC call logger, 4-byte ABI selector decoder (`0xa9059cbb`), and pure-Rust EIP-55 address checksum validator.
 6. **Thor Load Engine (`src/load/`)**: Canonical `ThorScenario` specification powered by a **Browser Runner** (for Web Vitals/DOM rendering truth) and a **Protocol Runner** (multi-threaded Rust HTTP/WS traffic for high scale).
-7. **Universal 'Promote to Test' Exporter (`src/dx/test_generator.rs`)**: Converts recorded network traces and DOM steps into Playwright TypeScript end-to-end tests, k6 load scripts, and cURL commands.
+7. **Universal 'Promote to Test' Polyglot Exporter (`src/dx/test_generator.rs`)**: Converts recorded network traces into Rust `reqwest`, Go `net/http`, Python `httpx`, Playwright TypeScript end-to-end tests, k6 load scripts, and cURL commands.
 
 ---
 
@@ -80,6 +80,8 @@ Thor organizes developer capabilities under **4 Top-Level Areas** (`Browse`, `In
 | `Cmd+K` | Sites Menu (Open tabs + Tab-scoped history + Saved Bookmarks) |
 | `Cmd+Shift+K` | Toolbox Menu (Developer Control Center & Specialist Lenses) |
 | `Cmd+L` | Focus Omnibox |
+| `Cmd+Shift+C` | Copy Page as LLM Clean Context (Markdown/DOM) |
+| `Cmd+/` | Keyboard Shortcuts Cheat Sheet |
 | `Cmd+R` / `Cmd+[` / `Cmd+]` | Reload / Back / Forward |
 
 ---

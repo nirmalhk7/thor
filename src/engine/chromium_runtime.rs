@@ -564,7 +564,6 @@ mod tests {
     #[test]
     fn test_concurrent_tab_id_generation() {
         use std::thread;
-        use std::collections::HashSet;
         use std::sync::{Arc, Mutex};
         
         let thread_count = 10;

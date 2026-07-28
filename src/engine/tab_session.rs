@@ -7,7 +7,6 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 
-use chromiumoxide::cdp::browser_protocol::network::ClearBrowserCookiesParams;
 use chromiumoxide::cdp::browser_protocol::page::{
     BringToFrontParams, GetNavigationHistoryParams, NavigateToHistoryEntryParams,
     StopLoadingParams,

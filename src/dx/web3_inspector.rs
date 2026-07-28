@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// EVM / Solana JSON-RPC Request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]

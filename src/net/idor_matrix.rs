@@ -10,6 +10,47 @@ use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 use std::time::Duration;
 
+/// Calculate a structural hash of JSON response keys ignoring dynamic values
+pub fn compute_json_structure_hash(body: &str) -> u64 {
+    use std::collections::hash_map::DefaultHasher;
+    use std::hash::{Hash, Hasher};
+
+    if let Ok(val) = serde_json::from_str::<serde_json::Value>(body) {
+        let mut keys = Vec::new();
+        collect_json_keys(&val, "", &mut keys);
+        keys.sort();
+        let mut hasher = DefaultHasher::new();
+        keys.hash(&mut hasher);
+        hasher.finish()
+    } else {
+        let mut hasher = DefaultHasher::new();
+        (body.len() / 64).hash(&mut hasher);
+        hasher.finish()
+    }
+}
+
+fn collect_json_keys(val: &serde_json::Value, prefix: &str, keys: &mut Vec<String>) {
+    match val {
+        serde_json::Value::Object(map) => {
+            for (k, v) in map {
+                let full_key = if prefix.is_empty() {
+                    k.clone()
+                } else {
+                    format!("{prefix}.{k}")
+                };
+                keys.push(full_key.clone());
+                collect_json_keys(v, &full_key, keys);
+            }
+        }
+        serde_json::Value::Array(arr) => {
+            if let Some(first) = arr.first() {
+                collect_json_keys(first, &format!("{prefix}[]"), keys);
+            }
+        }
+        _ => {}
+    }
+}
+
 /// Configuration for a specific identity role in IDOR replay tests
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdorRoleConfig {
@@ -148,17 +189,26 @@ impl IdorMatrixEngine {
             let (status, len, is_vuln, desc) = match req_builder.send().await {
                 Ok(res) => {
                     let st = res.status().as_u16();
-                    let bytes = res.bytes().await.map(|b| b.len()).unwrap_or(0);
-                    // Potential IDOR flag: non-admin roles getting 200 OK or 2xx responses on privileged resources
+                    let body_text = res.text().await.unwrap_or_default();
+                    let bytes = body_text.len();
+                    let struct_hash = compute_json_structure_hash(&body_text);
+
+                    // Potential IDOR flag: non-admin roles getting 200 OK with valid data structures
+                    let is_error_body = body_text.to_lowercase().contains("unauthorized")
+                        || body_text.to_lowercase().contains("forbidden")
+                        || body_text.to_lowercase().contains("access denied");
+
                     let vuln = (role.role_name.to_lowercase().contains("user")
                         || role.role_name.to_lowercase().contains("anonymous"))
-                        && st < 300;
+                        && st < 300
+                        && !is_error_body;
+
                     (
                         st,
                         bytes,
                         vuln,
                         if vuln {
-                            "⚠️ POTENTIAL IDOR: Non-admin received 200 OK".into()
+                            format!("⚠️ POTENTIAL IDOR: Status {} (Hash: {:x})", st, struct_hash)
                         } else {
                             format!("Status {}", st)
                         },

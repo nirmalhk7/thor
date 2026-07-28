@@ -28,7 +28,6 @@ use crate::dx::cmd_palette::{
 use crate::dx::decoder::{DecoderStudio, PayloadType};
 use crate::dx::stack_detector::TechStackDetector;
 use crate::net::locust::LocustScoredMetrics;
-use crate::net::tamper::TamperRule;
 
 /// Toolbar strip height (logical px).
 pub(crate) const CHROME_HEIGHT: f64 = 52.0;
@@ -1603,7 +1602,11 @@ pub(crate) fn setup_macos_app_icon() {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    run_wry_shell()
+    if std::env::var("THOR_DUAL_WINDOW").map(|v| v == "1").unwrap_or(false) {
+        chromium_shell::run_chromium_shell()
+    } else {
+        run_wry_shell()
+    }
 }
 
 

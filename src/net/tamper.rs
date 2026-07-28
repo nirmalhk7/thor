@@ -47,6 +47,7 @@ pub struct InterceptedResponse {
 }
 
 /// Rule for automatic matching & modifying traffic on the fly
+/// Rule for automatic matching & modifying traffic on the fly
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TamperRule {
     pub id: String,
@@ -55,7 +56,23 @@ pub struct TamperRule {
     pub match_header_key: Option<String>,
     pub replace_header_key: String,
     pub replace_header_value: String,
-}use std::sync::atomic::{AtomicBool, Ordering};
+    pub mock_status: Option<u16>,
+    pub mock_body: Option<String>,
+    pub delay_ms: Option<u64>,
+}
+
+/// Result outcome of running a request through TrafficTamperEngine
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TamperOutcome {
+    /// Pass request through (potentially with modified headers)
+    Forward(InterceptedRequest),
+    /// Auto-mock response stubbed by TamperRule
+    Mock(InterceptedResponse),
+    /// Request paused waiting for manual forward/drop in UI
+    Pause,
+}
+
+use std::sync::atomic::{AtomicBool, Ordering};
 
 #[derive(Debug, Default)]
 struct TamperEngineInner {
@@ -88,7 +105,15 @@ impl TrafficTamperEngine {
     }
 
     /// Process an outgoing request through rules and interception pipeline
-    pub fn process_outgoing_request(&self, mut req: InterceptedRequest) -> Option<InterceptedRequest> {
+    pub fn process_outgoing_request(&self, req: InterceptedRequest) -> Option<InterceptedRequest> {
+        match self.evaluate_tamper_outcome(req) {
+            TamperOutcome::Forward(r) => Some(r),
+            TamperOutcome::Mock(_) | TamperOutcome::Pause => None,
+        }
+    }
+
+    /// Process an outgoing request returning detailed TamperOutcome enum
+    pub fn evaluate_tamper_outcome(&self, mut req: InterceptedRequest) -> TamperOutcome {
         // Apply match & replace rules
         let rules = self.inner.rules.read().unwrap_or_else(|e| e.into_inner());
         for rule in rules.iter().filter(|r| r.enabled) {
@@ -100,8 +125,25 @@ impl TrafficTamperEngine {
                     }
                 }
                 if match_ok {
-                    req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
-                    req.is_modified = true;
+                    if !rule.replace_header_key.is_empty() {
+                        req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
+                        req.is_modified = true;
+                    }
+
+                    // Check for automatic response mocking
+                    if rule.mock_status.is_some() || rule.mock_body.is_some() {
+                        let status_code = rule.mock_status.unwrap_or(200);
+                        let mock_resp = InterceptedResponse {
+                            request_id: req.id.clone(),
+                            timestamp: req.timestamp,
+                            status_code,
+                            headers: [("content-type".to_string(), "application/json".to_string())].into_iter().collect(),
+                            body: rule.mock_body.clone(),
+                            duration_ms: rule.delay_ms.unwrap_or(0),
+                        };
+                        self.record_history(req.clone(), Some(mock_resp.clone()));
+                        return TamperOutcome::Mock(mock_resp);
+                    }
                 }
             }
         }
@@ -110,9 +152,9 @@ impl TrafficTamperEngine {
         if self.is_interception_enabled() {
             let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
             pending.push(req);
-            None // Paused for user editing
+            TamperOutcome::Pause
         } else {
-            Some(req)
+            TamperOutcome::Forward(req)
         }
     }
 
@@ -142,8 +184,22 @@ impl TrafficTamperEngine {
         false
     }
 
-    /// Record completed request/response pair into history for Repeater/Inspector
-    pub fn record_history(&self, req: InterceptedRequest, resp: Option<InterceptedResponse>) {
+    /// Record completed request/response pair into history for Repeater/Inspector (with SEC-027 secret redaction)
+    pub fn record_history(&self, mut req: InterceptedRequest, mut resp: Option<InterceptedResponse>) {
+        for (k, v) in req.headers.iter_mut() {
+            let k_lower = k.to_lowercase();
+            if k_lower == "authorization" || k_lower == "cookie" || k_lower == "x-api-key" {
+                *v = "[REDACTED]".to_string();
+            }
+        }
+        if let Some(ref mut res) = resp {
+            for (k, v) in res.headers.iter_mut() {
+                let k_lower = k.to_lowercase();
+                if k_lower == "set-cookie" || k_lower == "authorization" {
+                    *v = "[REDACTED]".to_string();
+                }
+            }
+        }
         let mut hist = self.inner.history.write().unwrap_or_else(|e| e.into_inner());
         hist.push((req, resp));
     }
@@ -235,6 +291,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "X-Thor-Injected".to_string(),
             replace_header_value: "true".to_string(),
+            mock_status: None,
+            mock_body: None,
+            delay_ms: None,
         });
 
         let req = InterceptedRequest {

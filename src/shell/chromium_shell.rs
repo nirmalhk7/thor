@@ -20,7 +20,7 @@ use crate::shell::chromium_tabs::ChromiumTabs;
 use crate::shell::engine_status;
 
 use super::{
-    content_hotkey_script, normalize_omnibox_url, toggle_profile_mode, ToolbarCmd, UserEvent,
+    content_hotkey_script, normalize_omnibox_url, ToolbarCmd, UserEvent,
     CHROME_HEIGHT, TAB_GC_INTERVAL, TAB_IDLE_TTL,
 };
 
@@ -79,6 +79,11 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("initial Chromium tab: {e}"))?;
         println!("⚡ [Thor] Initial Chromium tab ready (dual-window)");
     }
+
+    let runtime_for_mcp = tabs.borrow().runtime.clone();
+    tokio::spawn(async move {
+        crate::mcp::server::start_mcp_server(runtime_for_mcp).await;
+    });
 
     #[cfg(target_os = "macos")]
     let toolbar_ref: Rc<RefCell<Option<native_toolbar::NativeToolbar>>> =

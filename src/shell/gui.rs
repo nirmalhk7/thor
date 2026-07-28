@@ -2327,12 +2327,23 @@ function renderModalList() {
 }
 
 function handleModalKeydown(e) {
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (filteredItems.length > 0) {
-      selectedModalIndex = (selectedModalIndex + 1) % filteredItems.length;
-      renderModalList();
-      scrollSelectedIntoView();
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      e.preventDefault();
+      toggleShortcutHelpModal();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      copyLlmCleanContext();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (filteredItems.length > 0) {
+        selectedModalIndex = (selectedModalIndex + 1) % filteredItems.length;
+        renderModalList();
+        scrollSelectedIntoView();
+      }
     }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
@@ -2486,6 +2497,14 @@ window.__thorUpdateDecodeResult = function(payload) {
     result.textContent = payload.text;
   }
 };
+
+function toggleShortcutHelpModal() {
+  alert("Thor Keyboard Shortcuts:\n⌘T: New Tab\n⌘W: Close Tab\n⌘F: Find in Page\n⌘K: Sites Palette\n⌘⇧K: Toolbox Palette\n⌘L: Focus Omnibox\n⌘⇧C: Copy Page as LLM Clean Context\n⌘/: Shortcuts Help");
+}
+
+function copyLlmCleanContext() {
+  ipc('copy_llm_clean_context');
+}
 
 // ==================== RENDER TABS ====================
 function renderTabs() {
