@@ -78,6 +78,10 @@ pub(crate) enum UserEvent {
     WebVitalsResult(String),
     /// Focus the native omnibox and select-all (⌘L, click omnibox).
     FocusOmnibox,
+    /// Engineer Feature Suite IPC from chrome (`feature_list` / `feature_invoke`
+    /// / `lens_payload`). Carries the full JSON payload; the loop dispatches it
+    /// and pushes the result to the chrome webview.
+    FeatureIpc(serde_json::Value),
 }
 
 /// Per-tab metadata tracked in Rust (mirrors chrome `lastActive`).
@@ -959,6 +963,9 @@ fn create_palette_webview(
                     let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                     let _ = proxy_for_ipc.send_event(UserEvent::ClosePalette);
                 }
+                "feature_list" | "feature_invoke" | "lens_payload" => {
+                    let _ = proxy_for_ipc.send_event(UserEvent::FeatureIpc(payload.clone()));
+                }
                 "log" => {
                     if let Some(m) = payload["message"].as_str() {
                         println!("⚡ [Thor Palette Log] {m}");
@@ -1771,6 +1778,34 @@ fn run_wry_shell() -> anyhow::Result<()> {
                 }
                 #[cfg(not(target_os = "macos"))]
                 toggle_profile_mode();
+            }
+
+            Event::UserEvent(UserEvent::FeatureIpc(ref payload)) => {
+                let cmd = payload["cmd"].as_str().unwrap_or("").to_string();
+                let result = ipc_dispatch::dispatch_privileged(&cmd, payload);
+                match result {
+                    ipc_dispatch::DispatchResult::FeatureJson(v) => {
+                        let json = serde_json::to_string(&v).unwrap_or_else(|_| "null".into());
+                        let hook = match cmd.as_str() {
+                            "feature_list" => "__thorFeatureList",
+                            "lens_payload" => "__thorLensPayload",
+                            _ => "__thorFeatureResult",
+                        };
+                        let chrome = chrome_for_loop.borrow();
+                        chrome_eval(&chrome, &format!("window.{hook} && window.{hook}({json});"));
+                    }
+                    ipc_dispatch::DispatchResult::Err(e) => {
+                        eprintln!("⚡ [Thor Feature IPC] {cmd} error: {e}");
+                        let err = serde_json::json!({ "error": e });
+                        let json = serde_json::to_string(&err).unwrap_or_else(|_| "null".into());
+                        let chrome = chrome_for_loop.borrow();
+                        chrome_eval(
+                            &chrome,
+                            &format!("window.__thorFeatureResult && window.__thorFeatureResult({json});"),
+                        );
+                    }
+                    _ => {}
+                }
             }
 
             Event::UserEvent(UserEvent::ClosePalette) => {}

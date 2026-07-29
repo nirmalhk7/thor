@@ -8,8 +8,10 @@
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
+use std::time::Duration;
 
 use crate::dx::llm_studio::{LlmCostEstimate, LlmStudio, SseStreamParser};
+use crate::dx::test_generator::RecordedSession;
 
 // ---------------------------------------------------------------------------
 // 1. LLM Inspector
@@ -195,6 +197,10 @@ pub struct InjectionFinding {
     pub pattern: String,
     pub severity: String,
     pub excerpt: String,
+    /// Finding class: "injection" for jailbreak/prompt-override patterns, "pii"
+    /// for leaked personal data / secrets.
+    #[serde(default)]
+    pub category: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -230,10 +236,39 @@ pub struct ReplayReport {
     pub verdict: String,
 }
 
+/// A single stored revision of a named prompt, with its diff from the prior one.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PromptVersion {
+    pub version: usize,
+    pub content: String,
+    pub tokens: usize,
+    pub timestamp_ms: u64,
+    /// Diff against the immediately preceding version (`None` for v1).
+    #[serde(default)]
+    pub diff_from_prev: Option<PromptDiff>,
+}
+
+/// One target endpoint for a model-comparison fan-out.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ModelEndpoint {
+    pub model: String,
+    pub url: String,
+    #[serde(default)]
+    pub api_key: Option<String>,
+    /// Request body posted to the endpoint (OpenAI-style chat/completions).
+    pub body: serde_json::Value,
+}
+
 /// AI / LLM specialist engine.
 pub struct AiEngine {
     // 4. Cost dashboard accumulator
     cost_log: Mutex<Vec<LlmCostEstimate>>,
+    // 4b. Per-experiment cost attribution (experiment_id -> aggregate).
+    experiment_costs: Mutex<BTreeMap<String, ModelCost>>,
+    // Prompt version timeline keyed by prompt name.
+    prompt_timeline: Mutex<BTreeMap<String, Vec<PromptVersion>>>,
+    // LLM mock store (record/replay) keyed by request signature.
+    mock_store: Mutex<BTreeMap<String, String>>,
 }
 
 impl Default for AiEngine {
@@ -246,6 +281,9 @@ impl AiEngine {
     pub fn new() -> Self {
         Self {
             cost_log: Mutex::new(Vec::new()),
+            experiment_costs: Mutex::new(BTreeMap::new()),
+            prompt_timeline: Mutex::new(BTreeMap::new()),
+            mock_store: Mutex::new(BTreeMap::new()),
         }
     }
 
@@ -395,6 +433,30 @@ impl AiEngine {
 
     pub fn reset_costs(&self) {
         self.cost_log.lock().clear();
+        self.experiment_costs.lock().clear();
+    }
+
+    /// Log a cost and attribute it to an `experiment_id` so spend can be sliced
+    /// per A/B arm, prompt revision, or eval run.
+    pub fn log_cost_for_experiment(
+        &self,
+        experiment_id: &str,
+        model: &str,
+        prompt_tokens: usize,
+        completion_tokens: usize,
+    ) -> LlmCostEstimate {
+        let est = self.log_cost(model, prompt_tokens, completion_tokens);
+        let mut map = self.experiment_costs.lock();
+        let mc = map.entry(experiment_id.to_string()).or_default();
+        mc.calls += 1;
+        mc.tokens += est.total_tokens;
+        mc.cost_usd += est.total_cost_usd;
+        est
+    }
+
+    /// Aggregate cost per `experiment_id`.
+    pub fn cost_by_experiment(&self) -> BTreeMap<String, ModelCost> {
+        self.experiment_costs.lock().clone()
     }
 
     // 5. Eval Replay --------------------------------------------------------
@@ -439,6 +501,79 @@ impl AiEngine {
                     tokens: r.prompt_tokens + r.completion_tokens,
                     similarity_to_first: jaccard(&baseline, &r.output),
                 }
+            })
+            .collect()
+    }
+
+    /// Fan out the same prompt to multiple model endpoints in parallel and
+    /// collect a [`ModelRun`] per endpoint. When a mock is recorded for an
+    /// endpoint's signature (see [`AiEngine::record_mock`]) it is replayed
+    /// instead of hitting the network, so the comparison is testable offline.
+    pub fn compare_models_fanout(&self, endpoints: &[ModelEndpoint]) -> Vec<ModelRun> {
+        // Resolve mocks up front (cheap, lock-free path for the offline case).
+        let mut prefilled: Vec<Option<ModelRun>> = Vec::with_capacity(endpoints.len());
+        let mut live: Vec<usize> = Vec::new();
+        for (i, ep) in endpoints.iter().enumerate() {
+            let sig = mock_signature(&ep.model, &ep.body);
+            if let Some(output) = self.replay_mock(&sig) {
+                let prompt_tokens = self.inspect_request(&ep.body).prompt_tokens;
+                let completion_tokens = LlmStudio::count_tokens(&output);
+                prefilled.push(Some(ModelRun {
+                    model: ep.model.clone(),
+                    output,
+                    prompt_tokens,
+                    completion_tokens,
+                    latency_ms: 0.0,
+                }));
+            } else {
+                prefilled.push(None);
+                live.push(i);
+            }
+        }
+
+        if !live.is_empty() {
+            if let Ok(rt) = tokio::runtime::Builder::new_multi_thread()
+                .enable_all()
+                .build()
+            {
+                let results = rt.block_on(async {
+                    let client = reqwest::Client::builder()
+                        .timeout(Duration::from_secs(30))
+                        .build()
+                        .unwrap_or_else(|_| reqwest::Client::new());
+                    let mut handles = Vec::new();
+                    for &i in &live {
+                        let ep = endpoints[i].clone();
+                        let client = client.clone();
+                        handles.push(tokio::spawn(async move {
+                            (i, fetch_model_run(&client, &ep).await)
+                        }));
+                    }
+                    let mut out = Vec::new();
+                    for h in handles {
+                        if let Ok(pair) = h.await {
+                            out.push(pair);
+                        }
+                    }
+                    out
+                });
+                for (i, run) in results {
+                    prefilled[i] = Some(run);
+                }
+            }
+        }
+
+        prefilled
+            .into_iter()
+            .enumerate()
+            .map(|(i, r)| {
+                r.unwrap_or_else(|| ModelRun {
+                    model: endpoints[i].model.clone(),
+                    output: String::new(),
+                    prompt_tokens: 0,
+                    completion_tokens: 0,
+                    latency_ms: 0.0,
+                })
             })
             .collect()
     }
@@ -575,10 +710,12 @@ impl AiEngine {
                 findings.push(InjectionFinding {
                     pattern: pat.to_string(),
                     severity: sev.to_string(),
-                    excerpt: input[start..end].to_string(),
+                    excerpt: safe_slice(input, start, end),
+                    category: "injection".to_string(),
                 });
             }
         }
+        findings.extend(detect_pii(input));
         findings
     }
 
@@ -638,6 +775,249 @@ impl AiEngine {
             verdict: verdict.to_string(),
         }
     }
+
+    // Prompt version timeline ----------------------------------------------
+    /// Append a new revision of `name`'s prompt, computing its diff against the
+    /// previous revision. Returns the stored [`PromptVersion`].
+    pub fn record_prompt_version(&self, name: &str, content: &str) -> PromptVersion {
+        let mut timeline = self.prompt_timeline.lock();
+        let history = timeline.entry(name.to_string()).or_default();
+        let diff_from_prev = history.last().map(|prev| self.prompt_diff(&prev.content, content));
+        let version = PromptVersion {
+            version: history.len() + 1,
+            content: content.to_string(),
+            tokens: LlmStudio::count_tokens(content),
+            timestamp_ms: now_ms(),
+            diff_from_prev,
+        };
+        history.push(version.clone());
+        version
+    }
+
+    /// Full revision history for a named prompt (oldest first).
+    pub fn prompt_timeline(&self, name: &str) -> Vec<PromptVersion> {
+        self.prompt_timeline
+            .lock()
+            .get(name)
+            .cloned()
+            .unwrap_or_default()
+    }
+
+    // LLM mock store (record/replay) ---------------------------------------
+    /// Record a canned response for a request signature. Use
+    /// [`mock_signature`] to derive a stable key from `(model, body)`.
+    pub fn record_mock(&self, signature: &str, response: &str) {
+        self.mock_store
+            .lock()
+            .insert(signature.to_string(), response.to_string());
+    }
+
+    /// Replay a previously recorded response for a signature, if any.
+    pub fn replay_mock(&self, signature: &str) -> Option<String> {
+        self.mock_store.lock().get(signature).cloned()
+    }
+
+    pub fn mock_count(&self) -> usize {
+        self.mock_store.lock().len()
+    }
+
+    // Eval from recorded session -------------------------------------------
+    /// Build and run an eval suite from a recorded session: every recorded
+    /// network call becomes a case asserting it completed with a success status,
+    /// turning an ad-hoc capture into a regression-checkable eval.
+    pub fn eval_from_session(&self, session: &RecordedSession) -> EvalResult {
+        let cases: Vec<EvalCase> = session
+            .traces
+            .iter()
+            .enumerate()
+            .map(|(i, t)| {
+                let ok = t.status > 0 && t.status < 400;
+                EvalCase {
+                    name: format!("{} {} {}", i + 1, t.method, t.url),
+                    expected: "success".to_string(),
+                    actual: if ok {
+                        "success".to_string()
+                    } else {
+                        format!("status {}", t.status)
+                    },
+                    match_mode: Some("exact".to_string()),
+                }
+            })
+            .collect();
+        self.eval_replay(&cases)
+    }
+}
+
+/// Derive a stable mock-store signature from a model name and request body.
+pub fn mock_signature(model: &str, body: &serde_json::Value) -> String {
+    let body_str = serde_json::to_string(body).unwrap_or_default();
+    format!("{model}::{:016x}", fnv1a(body_str.as_bytes()))
+}
+
+fn fnv1a(data: &[u8]) -> u64 {
+    let mut hash: u64 = 0xcbf29ce484222325;
+    for b in data {
+        hash ^= *b as u64;
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+async fn fetch_model_run(client: &reqwest::Client, ep: &ModelEndpoint) -> ModelRun {
+    let start = std::time::Instant::now();
+    let mut req = client.post(&ep.url).json(&ep.body);
+    if let Some(key) = &ep.api_key {
+        req = req.bearer_auth(key);
+    }
+    let (output, completion_tokens) = match req.send().await {
+        Ok(resp) => {
+            let json: serde_json::Value = resp.json().await.unwrap_or(serde_json::Value::Null);
+            let text = extract_completion(&json);
+            let ct = json
+                .get("usage")
+                .and_then(|u| u.get("completion_tokens"))
+                .and_then(|v| v.as_u64())
+                .map(|v| v as usize)
+                .unwrap_or_else(|| LlmStudio::count_tokens(&text));
+            (text, ct)
+        }
+        Err(e) => (format!("<error: {e}>"), 0),
+    };
+    let prompt_tokens = ep
+        .body
+        .get("messages")
+        .and_then(|m| m.as_array())
+        .map(|msgs| {
+            msgs.iter()
+                .filter_map(|m| m.get("content").and_then(|c| c.as_str()))
+                .map(LlmStudio::count_tokens)
+                .sum()
+        })
+        .unwrap_or(0);
+    ModelRun {
+        model: ep.model.clone(),
+        output,
+        prompt_tokens,
+        completion_tokens,
+        latency_ms: start.elapsed().as_secs_f64() * 1000.0,
+    }
+}
+
+/// Pull the assistant text out of an OpenAI/Anthropic-style completion response.
+fn extract_completion(json: &serde_json::Value) -> String {
+    if let Some(text) = json
+        .get("choices")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|c| {
+            c.get("message")
+                .and_then(|m| m.get("content"))
+                .and_then(|v| v.as_str())
+                .or_else(|| c.get("text").and_then(|v| v.as_str()))
+        })
+    {
+        return text.to_string();
+    }
+    if let Some(text) = json
+        .get("content")
+        .and_then(|c| c.as_array())
+        .and_then(|arr| arr.first())
+        .and_then(|c| c.get("text"))
+        .and_then(|v| v.as_str())
+    {
+        return text.to_string();
+    }
+    String::new()
+}
+
+/// Detect leaked PII / secrets (emails, API keys, JWTs) in free text.
+fn detect_pii(input: &str) -> Vec<InjectionFinding> {
+    let mut findings = Vec::new();
+    for token in input.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\'' | '(' | ')' | '<' | '>')) {
+        let t = token.trim();
+        if t.len() < 6 {
+            continue;
+        }
+        let (pattern, severity) = if is_email(t) {
+            ("pii:email", "medium")
+        } else if is_jwt(t) {
+            ("pii:jwt", "high")
+        } else if is_api_key(t) {
+            ("pii:api-key", "high")
+        } else {
+            continue;
+        };
+        findings.push(InjectionFinding {
+            pattern: pattern.to_string(),
+            severity: severity.to_string(),
+            excerpt: redact(t),
+            category: "pii".to_string(),
+        });
+    }
+    findings
+}
+
+fn is_email(t: &str) -> bool {
+    let at = match t.find('@') {
+        Some(i) if i > 0 => i,
+        _ => return false,
+    };
+    let domain = &t[at + 1..];
+    domain.contains('.') && !domain.starts_with('.') && !domain.ends_with('.')
+}
+
+fn is_jwt(t: &str) -> bool {
+    let parts: Vec<&str> = t.split('.').collect();
+    parts.len() == 3
+        && parts.iter().all(|p| {
+            p.len() >= 4
+                && p.chars()
+                    .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+        })
+        && (t.starts_with("eyJ") || t.starts_with("ey"))
+}
+
+fn is_api_key(t: &str) -> bool {
+    // Common vendor prefixes.
+    const PREFIXES: [&str; 6] = ["sk-", "sk_live_", "sk_test_", "pk_live_", "ghp_", "AKIA"];
+    if PREFIXES.iter().any(|p| t.starts_with(p)) && t.len() >= 12 {
+        return true;
+    }
+    // Long high-entropy alphanumeric run.
+    t.len() >= 32
+        && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && t.chars().any(|c| c.is_ascii_digit())
+        && t.chars().any(|c| c.is_ascii_alphabetic())
+}
+
+fn redact(t: &str) -> String {
+    if t.len() <= 6 {
+        return "***".to_string();
+    }
+    let head: String = t.chars().take(3).collect();
+    let tail: String = t.chars().rev().take(2).collect::<String>().chars().rev().collect();
+    format!("{head}***{tail}")
+}
+
+fn safe_slice(s: &str, start: usize, end: usize) -> String {
+    let start = start.min(s.len());
+    let end = end.min(s.len()).max(start);
+    let mut a = start;
+    while a > 0 && !s.is_char_boundary(a) {
+        a -= 1;
+    }
+    let mut b = end;
+    while b < s.len() && !s.is_char_boundary(b) {
+        b += 1;
+    }
+    s[a..b].to_string()
+}
+
+fn now_ms() -> u64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0)
 }
 
 fn tokenize_words(s: &str) -> Vec<String> {
@@ -887,5 +1267,81 @@ mod tests {
         assert!(violation.verdict.starts_with("VIOLATION"));
         let ok = e.deterministic_replay(&["a".into(), "a".into()], 0.0);
         assert!(ok.deterministic);
+    }
+
+    #[test]
+    fn test_pii_detection_in_scan() {
+        let e = AiEngine::new();
+        let findings = e.scan_injection(
+            "contact admin@example.com key sk-live_ABCDEF0123456789ABCDEF token eyJhbGc.eyJzdWI.sig123",
+        );
+        assert!(findings
+            .iter()
+            .any(|f| f.pattern == "pii:email" && f.category == "pii"));
+        assert!(findings.iter().any(|f| f.pattern == "pii:api-key"));
+        assert!(findings.iter().any(|f| f.pattern == "pii:jwt"));
+    }
+
+    #[test]
+    fn test_prompt_version_timeline() {
+        let e = AiEngine::new();
+        let v1 = e.record_prompt_version("greet", "You are helpful");
+        assert_eq!(v1.version, 1);
+        assert!(v1.diff_from_prev.is_none());
+        let v2 = e.record_prompt_version("greet", "You are a helpful assistant");
+        assert_eq!(v2.version, 2);
+        assert!(v2.diff_from_prev.is_some());
+        assert_eq!(e.prompt_timeline("greet").len(), 2);
+    }
+
+    #[test]
+    fn test_cost_per_experiment() {
+        let e = AiEngine::new();
+        e.log_cost_for_experiment("arm-a", "gpt-4o", 1000, 500);
+        e.log_cost_for_experiment("arm-b", "gpt-4o", 2000, 1000);
+        let by = e.cost_by_experiment();
+        assert_eq!(by.len(), 2);
+        assert!(by.get("arm-a").unwrap().cost_usd > 0.0);
+    }
+
+    #[test]
+    fn test_mock_store_and_fanout() {
+        let e = AiEngine::new();
+        let body = json!({ "model": "gpt-4o", "messages": [{"role":"user","content":"hi"}] });
+        let sig = mock_signature("gpt-4o", &body);
+        e.record_mock(&sig, "mocked reply");
+        assert_eq!(e.replay_mock(&sig).as_deref(), Some("mocked reply"));
+        let runs = e.compare_models_fanout(&[ModelEndpoint {
+            model: "gpt-4o".into(),
+            url: "http://127.0.0.1:0/never".into(),
+            api_key: None,
+            body,
+        }]);
+        assert_eq!(runs.len(), 1);
+        assert_eq!(runs[0].output, "mocked reply");
+    }
+
+    #[test]
+    fn test_eval_from_session() {
+        use crate::dx::test_generator::{NetworkTrace, RecordedSession};
+        let mut session = RecordedSession::new("Flow", "https://x");
+        session.add_trace(NetworkTrace {
+            method: "GET".into(),
+            url: "https://x/ok".into(),
+            headers: std::collections::HashMap::new(),
+            body: None,
+            status: 200,
+        });
+        session.add_trace(NetworkTrace {
+            method: "GET".into(),
+            url: "https://x/bad".into(),
+            headers: std::collections::HashMap::new(),
+            body: None,
+            status: 500,
+        });
+        let e = AiEngine::new();
+        let r = e.eval_from_session(&session);
+        assert_eq!(r.total, 2);
+        assert_eq!(r.passed, 1);
     }
 }

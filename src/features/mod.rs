@@ -9,7 +9,9 @@
 
 pub mod ai;
 pub mod backend;
+pub mod cdp_bridge;
 pub mod frontend;
+pub mod orchestrator;
 pub mod perf_features;
 pub mod qa;
 pub mod security;
@@ -21,6 +23,7 @@ use std::collections::HashMap;
 
 use ai::AiEngine;
 use backend::BackendEngine;
+use cdp_bridge::CdpBridge;
 use frontend::FrontendEngine;
 use perf_features::PerfEngine;
 use qa::QaEngine;
@@ -570,6 +573,7 @@ pub struct FeatureEngine {
     qa: QaEngine,
     ai: AiEngine,
     sla: SlaEngine,
+    cdp: CdpBridge,
 }
 
 impl Default for FeatureEngine {
@@ -594,6 +598,7 @@ impl FeatureEngine {
             qa: QaEngine::new(),
             ai: AiEngine::new(),
             sla: SlaEngine::new(),
+            cdp: CdpBridge::new(),
         }
     }
 
@@ -629,6 +634,11 @@ impl FeatureEngine {
 
     pub fn sla(&self) -> &SlaEngine {
         &self.sla
+    }
+
+    /// CDP capture bridge feeding real browser/network data into the engines.
+    pub fn cdp(&self) -> &CdpBridge {
+        &self.cdp
     }
 
     pub fn is_enabled(&self, id: FeatureId) -> bool {

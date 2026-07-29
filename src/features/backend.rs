@@ -9,8 +9,14 @@
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
-use crate::net::tamper::InterceptedRequest;
+use crate::app_state::AppState;
+use crate::net::tamper::{InterceptedRequest, InterceptedResponse};
 
 // ---------------------------------------------------------------------------
 // Shared request/response model
@@ -207,20 +213,6 @@ pub struct QueryCount {
     pub count: usize,
 }
 
-/// Backend specialist engine.
-pub struct BackendEngine {
-    // 1. API workbench history
-    history: Mutex<Vec<(ApiRequest, ApiResponse)>>,
-    // 2. Auth vault
-    vault: Mutex<HashMap<String, AuthScheme>>,
-    // 4. Webhook sink
-    webhooks: Mutex<Vec<WebhookEvent>>,
-    // 9. Mock routes
-    mocks: Mutex<Vec<MockRoute>>,
-    // 10. Chaos rules
-    chaos: Mutex<Vec<ChaosRule>>,
-}
-
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookEvent {
     pub method: String,
@@ -228,6 +220,71 @@ pub struct WebhookEvent {
     pub headers: HashMap<String, String>,
     pub body: String,
     pub received_ms: u64,
+}
+
+/// Combined IDOR/BOLA matrix result from sending one request across contexts.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdorMatrixReport {
+    pub probes: Vec<IdorProbe>,
+    pub findings: Vec<IdorFinding>,
+}
+
+/// Per-step result of an executed request chain.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainStepResult {
+    pub name: String,
+    pub status: u16,
+    pub latency_ms: f64,
+    pub captured: Vec<String>,
+}
+
+/// End-to-end request-chain execution result.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ChainRunResult {
+    pub steps: Vec<ChainStepResult>,
+    pub vars: HashMap<String, String>,
+    pub ok: bool,
+}
+
+/// A single cache access correlated to a DB table (for cache adjacency).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheOp {
+    pub key: String,
+    #[serde(default)]
+    pub table: Option<String>,
+    #[serde(default)]
+    pub hit: bool,
+}
+
+/// DB analysis with cache-key ↔ table adjacency layered alongside.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DbCacheReport {
+    pub db: DbReport,
+    /// cache key -> tables accessed alongside it.
+    pub cache_adjacency: BTreeMap<String, Vec<String>>,
+    pub cache_hits: usize,
+    pub cache_misses: usize,
+}
+
+/// Live localhost webhook sink listener handle.
+struct WebhookSinkHandle {
+    port: u16,
+    running: Arc<AtomicBool>,
+}
+
+/// Backend specialist engine.
+pub struct BackendEngine {
+    // 1. API workbench history
+    history: Mutex<Vec<(ApiRequest, ApiResponse)>>,
+    // 2. Auth vault (keyed by context_id, multi-context)
+    vault: Mutex<HashMap<String, AuthScheme>>,
+    // 4. Webhook sink
+    webhooks: Mutex<Vec<WebhookEvent>>,
+    webhook_sink: Mutex<Option<WebhookSinkHandle>>,
+    // 9. Mock routes
+    mocks: Mutex<Vec<MockRoute>>,
+    // 10. Chaos rules
+    chaos: Mutex<Vec<ChaosRule>>,
 }
 
 impl Default for BackendEngine {
@@ -242,6 +299,7 @@ impl BackendEngine {
             history: Mutex::new(Vec::new()),
             vault: Mutex::new(HashMap::new()),
             webhooks: Mutex::new(Vec::new()),
+            webhook_sink: Mutex::new(None),
             mocks: Mutex::new(Vec::new()),
             chaos: Mutex::new(Vec::new()),
         }
@@ -274,7 +332,26 @@ impl BackendEngine {
     }
 
     /// Send a request for real over HTTP and record it in the workbench history.
+    ///
+    /// Any registered chaos rule matching the URL is applied first: injected
+    /// latency is slept and a forced fault short-circuits the real request with a
+    /// synthetic error response (deterministic per request id — no fake RNG).
     pub fn send_blocking(&self, req: &ApiRequest) -> Result<ApiResponse, String> {
+        let request_id = format!("{} {}", req.method, req.url);
+        let chaos = self.apply_chaos(&req.url, &request_id);
+        if chaos.added_latency_ms > 0 {
+            std::thread::sleep(Duration::from_millis(chaos.added_latency_ms));
+        }
+        if let Some(status) = chaos.forced_status {
+            let resp = ApiResponse {
+                status,
+                headers: HashMap::new(),
+                body: "{\"thor_chaos\":\"injected fault\"}".to_string(),
+                latency_ms: chaos.added_latency_ms as f64,
+            };
+            self.history.lock().push((req.clone(), resp.clone()));
+            return Ok(resp);
+        }
         let rt = tokio::runtime::Builder::new_current_thread()
             .enable_all()
             .build()
@@ -339,6 +416,132 @@ impl BackendEngine {
         } else {
             false
         }
+    }
+
+    /// All stored auth context ids (sorted), for the multi-context IDOR matrix.
+    pub fn auth_contexts(&self) -> Vec<String> {
+        let mut v: Vec<String> = self.vault.lock().keys().cloned().collect();
+        v.sort();
+        v
+    }
+
+    /// Actually send `req` once per auth-vault `context_id`, then classify the
+    /// resulting status matrix for IDOR/BOLA. `owner_context` (if any) is the
+    /// legitimate owner of the resource; every other context receiving 2xx is a
+    /// broken-object-level-authorization finding.
+    pub fn run_idor_matrix(
+        &self,
+        req: &ApiRequest,
+        contexts: &[String],
+        owner_context: Option<&str>,
+    ) -> IdorMatrixReport {
+        let mut probes = Vec::new();
+        for ctx in contexts {
+            let mut r = req.clone();
+            let _ = self.apply_auth(ctx, &mut r);
+            let status = self.send_blocking(&r).map(|resp| resp.status).unwrap_or(0);
+            let is_owner = owner_context.map(|o| o == ctx).unwrap_or(false);
+            probes.push(IdorProbe {
+                identity: ctx.clone(),
+                resource: req.url.clone(),
+                is_owner,
+                status,
+            });
+        }
+        let findings = self.analyze_idor(&probes);
+        IdorMatrixReport { probes, findings }
+    }
+
+    /// Execute a request chain end-to-end: resolve variables, send each step for
+    /// real, capture response fields into the variable map, and thread them into
+    /// downstream steps.
+    pub fn run_chain(&self, steps: &[ChainStep]) -> Result<ChainRunResult, String> {
+        self.resolve_chain(steps)?;
+        let mut vars: HashMap<String, String> = HashMap::new();
+        let mut results = Vec::new();
+        let mut ok = true;
+        for step in steps {
+            let req = self.build_request(step.request.clone(), &vars);
+            let resp = self.send_blocking(&req)?;
+            let mut captured = Vec::new();
+            if let Ok(json) = serde_json::from_str::<serde_json::Value>(&resp.body) {
+                self.apply_captures(step, &json, &mut vars);
+                captured = step.captures.keys().cloned().collect();
+            }
+            if !(200..300).contains(&resp.status) {
+                ok = false;
+            }
+            results.push(ChainStepResult {
+                name: step.name.clone(),
+                status: resp.status,
+                latency_ms: resp.latency_ms,
+                captured,
+            });
+        }
+        Ok(ChainRunResult {
+            steps: results,
+            vars,
+            ok,
+        })
+    }
+
+    /// Convert recorded tamper-engine traffic history into replayable mock routes
+    /// (one per request/response pair). Returns the number of mocks added.
+    pub fn mock_from_tamper_history(
+        &self,
+        history: &[(InterceptedRequest, Option<InterceptedResponse>)],
+    ) -> usize {
+        let mut added = 0;
+        for (req, resp) in history {
+            if let Some(r) = resp {
+                self.add_mock(MockRoute {
+                    method: req.method.clone(),
+                    path_pattern: url_path(&req.url),
+                    status: r.status_code,
+                    body: r.body.clone().unwrap_or_default(),
+                });
+                added += 1;
+            }
+        }
+        added
+    }
+
+    // 4b. Live Webhook Sink -------------------------------------------------
+    /// Start a real localhost HTTP listener that records every inbound request
+    /// as a [`WebhookEvent`]. Pass `0` to bind an ephemeral port. Returns the
+    /// bound port. Any previous sink is stopped first.
+    pub fn start_webhook_sink(&self, port: u16) -> Result<u16, String> {
+        let mut slot = self.webhook_sink.lock();
+        if let Some(h) = slot.take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
+        let bound = listener
+            .local_addr()
+            .map_err(|e| e.to_string())?
+            .port();
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| e.to_string())?;
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = running.clone();
+        std::thread::spawn(move || webhook_sink_loop(listener, flag));
+        *slot = Some(WebhookSinkHandle {
+            port: bound,
+            running,
+        });
+        Ok(bound)
+    }
+
+    pub fn stop_webhook_sink(&self) {
+        if let Some(h) = self.webhook_sink.lock().take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn webhook_sink_port(&self) -> Option<u16> {
+        self.webhook_sink.lock().as_ref().map(|h| h.port)
     }
 
     // 3. Contract Validation ------------------------------------------------
@@ -734,6 +937,90 @@ impl BackendEngine {
             total_queries: queries.len(),
         }
     }
+
+    /// DB adjacency analysis with a cache-key ↔ table adjacency graph layered
+    /// alongside, so cache access can be reasoned about next to the queries it
+    /// fronts (hit/miss ratio + which tables each key shields).
+    pub fn analyze_db_cache(&self, queries: &[String], cache_ops: &[CacheOp]) -> DbCacheReport {
+        let db = self.analyze_db(queries);
+        let mut cache_adjacency: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut hits = 0usize;
+        let mut misses = 0usize;
+        for op in cache_ops {
+            if op.hit {
+                hits += 1;
+            } else {
+                misses += 1;
+            }
+            if let Some(table) = &op.table {
+                let e = cache_adjacency.entry(op.key.clone()).or_default();
+                if !e.contains(table) {
+                    e.push(table.clone());
+                }
+            }
+        }
+        DbCacheReport {
+            db,
+            cache_adjacency,
+            cache_hits: hits,
+            cache_misses: misses,
+        }
+    }
+}
+
+/// Extract the path (no scheme/host/query) from a URL, defaulting to `/`.
+fn url_path(url: &str) -> String {
+    let after = url.split("://").nth(1).unwrap_or(url);
+    let path = after.split('/').skip(1).collect::<Vec<_>>().join("/");
+    let path = path.split('?').next().unwrap_or("");
+    format!("/{path}")
+}
+
+/// Minimal blocking HTTP sink loop: records every inbound request as a
+/// [`WebhookEvent`] on the process-wide backend engine and replies `200 OK`.
+fn webhook_sink_loop(listener: TcpListener, running: Arc<AtomicBool>) {
+    while running.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, _addr)) => {
+                let mut buf = [0u8; 16384];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                if let Some(event) = parse_http_request(&raw) {
+                    AppState::global().features().backend().record_webhook(event);
+                }
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+/// Parse a raw HTTP/1.1 request into a [`WebhookEvent`].
+fn parse_http_request(raw: &str) -> Option<WebhookEvent> {
+    let (head, body) = raw.split_once("\r\n\r\n").unwrap_or((raw, ""));
+    let mut lines = head.lines();
+    let request_line = lines.next()?;
+    let mut parts = request_line.split_whitespace();
+    let method = parts.next()?.to_string();
+    let path = parts.next().unwrap_or("/").to_string();
+    let mut headers = HashMap::new();
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            headers.insert(k.trim().to_string(), v.trim().to_string());
+        }
+    }
+    Some(WebhookEvent {
+        method,
+        path,
+        headers,
+        body: body.to_string(),
+        received_ms: now_ms(),
+    })
 }
 
 // ---------------------------------------------------------------------------

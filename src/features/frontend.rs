@@ -265,6 +265,73 @@ pub struct ZIndexReport {
     pub max_z: i64,
 }
 
+// ---------------------------------------------------------------------------
+// 4b. Design Token Drift
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenDriftReport {
+    /// Used values that are NOT part of the canonical token set.
+    pub off_scale: Vec<String>,
+    /// Used values that match the canonical token set.
+    pub matched: Vec<String>,
+    /// Canonical tokens never referenced by the captured styles.
+    pub unused_tokens: Vec<String>,
+    /// Fraction of used values that are on-scale, in [0,1].
+    pub coverage: f64,
+}
+
+// ---------------------------------------------------------------------------
+// 5b. Accessibility Live Matrix (rule × node grid)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct A11yMatrixCell {
+    pub rule: String,
+    pub node: String,
+    pub violated: bool,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct A11yMatrix {
+    pub rules: Vec<String>,
+    pub nodes: Vec<String>,
+    pub cells: Vec<A11yMatrixCell>,
+    pub total_violations: usize,
+}
+
+// ---------------------------------------------------------------------------
+// 7b. Paint Heatmap (spatial regions from layout shifts)
+// ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LayoutShiftRect {
+    pub node: String,
+    pub score: f64,
+    pub x: f64,
+    pub y: f64,
+    pub width: f64,
+    pub height: f64,
+    #[serde(default)]
+    pub had_recent_input: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaintHeatmapRegion {
+    /// Grid cell label, e.g. "top-left", "center".
+    pub region: String,
+    pub score: f64,
+    pub count: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaintHeatmapReport {
+    pub regions: Vec<PaintHeatmapRegion>,
+    pub total_score: f64,
+    pub hottest_region: String,
+}
+
 /// Frontend specialist engine.
 pub struct FrontendEngine {
     snapshots: Mutex<Vec<StateSnapshot>>,
@@ -563,6 +630,53 @@ impl FrontendEngine {
         }
     }
 
+    /// Compare captured style values against a canonical design-token set,
+    /// flagging off-scale one-offs (drift), matched values, and unused tokens.
+    pub fn token_drift(
+        &self,
+        declarations: &[CssDeclaration],
+        canonical: &[String],
+    ) -> TokenDriftReport {
+        let report = self.extract_design_tokens(declarations);
+        let canon: std::collections::HashSet<String> =
+            canonical.iter().map(|c| c.trim().to_lowercase()).collect();
+        let used: Vec<String> = report
+            .colors
+            .iter()
+            .chain(report.font_sizes.iter())
+            .chain(report.spacing.iter())
+            .chain(report.radii.iter())
+            .map(|u| u.value.clone())
+            .collect();
+        let mut matched = Vec::new();
+        let mut off_scale = Vec::new();
+        for v in &used {
+            if canon.contains(&v.to_lowercase()) {
+                matched.push(v.clone());
+            } else {
+                off_scale.push(v.clone());
+            }
+        }
+        matched.sort();
+        matched.dedup();
+        off_scale.sort();
+        off_scale.dedup();
+        let used_set: std::collections::HashSet<String> =
+            used.iter().map(|v| v.to_lowercase()).collect();
+        let unused_tokens: Vec<String> = canonical
+            .iter()
+            .filter(|c| !used_set.contains(&c.trim().to_lowercase()))
+            .cloned()
+            .collect();
+        let total = (matched.len() + off_scale.len()).max(1);
+        TokenDriftReport {
+            coverage: matched.len() as f64 / total as f64,
+            off_scale,
+            matched,
+            unused_tokens,
+        }
+    }
+
     fn to_sorted_usage(map: HashMap<String, usize>) -> Vec<TokenUsage> {
         let mut v: Vec<TokenUsage> = map
             .into_iter()
@@ -579,6 +693,50 @@ impl FrontendEngine {
             Self::a11y_node(n, &mut violations);
         }
         violations
+    }
+
+    /// Build a rule × node accessibility matrix: for every captured node and
+    /// every audited rule, mark whether that node violates the rule.
+    pub fn a11y_matrix(&self, nodes: &[DomNode]) -> A11yMatrix {
+        let rules = vec![
+            "image-alt".to_string(),
+            "control-name".to_string(),
+            "form-label".to_string(),
+            "color-contrast".to_string(),
+        ];
+        let violations = self.accessibility_audit(nodes);
+        let mut node_selectors: Vec<String> = Vec::new();
+        for n in nodes {
+            Self::collect_selectors(n, &mut node_selectors);
+        }
+        node_selectors.dedup();
+        let mut cells = Vec::new();
+        for node in &node_selectors {
+            for rule in &rules {
+                let hit = violations
+                    .iter()
+                    .find(|v| &v.selector == node && &v.rule == rule);
+                cells.push(A11yMatrixCell {
+                    rule: rule.clone(),
+                    node: node.clone(),
+                    violated: hit.is_some(),
+                    message: hit.map(|v| v.message.clone()).unwrap_or_default(),
+                });
+            }
+        }
+        A11yMatrix {
+            rules,
+            nodes: node_selectors,
+            cells,
+            total_violations: violations.len(),
+        }
+    }
+
+    fn collect_selectors(n: &DomNode, out: &mut Vec<String>) {
+        out.push(Self::node_selector(n));
+        for c in &n.children {
+            Self::collect_selectors(c, out);
+        }
     }
 
     fn a11y_node(n: &DomNode, out: &mut Vec<A11yViolation>) {
@@ -714,6 +872,12 @@ impl FrontendEngine {
         self.snapshots.lock().clear();
     }
 
+    /// Restore (return) the recorded state at `index` so a caller can apply it
+    /// back into the running app (time-travel jump). `None` when out of range.
+    pub fn restore_state(&self, index: usize) -> Option<serde_json::Value> {
+        self.snapshots.lock().get(index).map(|s| s.state.clone())
+    }
+
     pub fn state_diff(&self, from: usize, to: usize) -> Vec<StateDiffEntry> {
         let snaps = self.snapshots.lock();
         match (snaps.get(from), snaps.get(to)) {
@@ -811,6 +975,58 @@ impl FrontendEngine {
             total_cls: total,
             contributors,
             rating: rating.to_string(),
+        }
+    }
+
+    /// Bucket layout shifts into a 3×3 spatial grid of the viewport, producing a
+    /// paint heatmap that shows *where* on the page instability concentrates.
+    pub fn paint_heatmap(
+        &self,
+        shifts: &[LayoutShiftRect],
+        viewport_w: f64,
+        viewport_h: f64,
+    ) -> PaintHeatmapReport {
+        let vw = viewport_w.max(1.0);
+        let vh = viewport_h.max(1.0);
+        let col_labels = ["left", "center", "right"];
+        let row_labels = ["top", "middle", "bottom"];
+        let mut region_score: BTreeMap<String, (f64, usize)> = BTreeMap::new();
+        let mut total = 0.0;
+        for s in shifts {
+            if s.had_recent_input {
+                continue;
+            }
+            let cx = s.x + s.width / 2.0;
+            let cy = s.y + s.height / 2.0;
+            let col = ((cx / vw) * 3.0).floor().clamp(0.0, 2.0) as usize;
+            let row = ((cy / vh) * 3.0).floor().clamp(0.0, 2.0) as usize;
+            let label = format!("{}-{}", row_labels[row], col_labels[col]);
+            let e = region_score.entry(label).or_insert((0.0, 0));
+            e.0 += s.score;
+            e.1 += 1;
+            total += s.score;
+        }
+        let mut regions: Vec<PaintHeatmapRegion> = region_score
+            .into_iter()
+            .map(|(region, (score, count))| PaintHeatmapRegion {
+                region,
+                score,
+                count,
+            })
+            .collect();
+        regions.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+        let hottest_region = regions
+            .first()
+            .map(|r| r.region.clone())
+            .unwrap_or_default();
+        PaintHeatmapReport {
+            regions,
+            total_score: total,
+            hottest_region,
         }
     }
 

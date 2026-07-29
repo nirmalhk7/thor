@@ -10,7 +10,7 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use crate::dx::test_generator::{ExportFormat, LocatorCandidate, RecordedSession, TestGenerator};
-use crate::load::{BrowserMetrics, PerformanceBudgets};
+use crate::load::{BrowserMetrics, PerformanceBudgets, ProtocolRunner, ThorScenario};
 
 // ---------------------------------------------------------------------------
 // 1. Resilient Locators
@@ -64,6 +64,22 @@ pub struct VisualDiff {
     pub pixel_diff_ratio: f64,
     pub perceptual_distance: u32,
     pub passed: bool,
+    /// Number of pixels excluded from comparison by `mask_regions`.
+    #[serde(default)]
+    pub masked_pixels: usize,
+}
+
+/// Rectangular pixel region to exclude from a visual-regression comparison,
+/// resolved from a selector's bounding box (row-major, `width`-strided buffer).
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MaskRegion {
+    /// Source selector this mask was resolved from (for provenance).
+    #[serde(default)]
+    pub selector: String,
+    pub x: usize,
+    pub y: usize,
+    pub width: usize,
+    pub height: usize,
 }
 
 // ---------------------------------------------------------------------------
@@ -130,6 +146,10 @@ pub struct TraceFrame {
     pub step: String,
     pub action: String,
     pub dom_digest: String,
+    /// Full captured DOM markup for this frame (enables time-travel replay, not
+    /// just change detection via the digest).
+    #[serde(default)]
+    pub dom_snapshot: String,
     pub timestamp_ms: u64,
 }
 
@@ -143,6 +163,38 @@ pub struct DeterminismReport {
     pub distinct_outputs: usize,
     pub deterministic: bool,
     pub majority_ratio: f64,
+}
+
+/// Outcome of replaying a scenario N times to surface flakiness.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FlakeReplayReport {
+    pub scenario: String,
+    pub requested_runs: usize,
+    /// Per-run pass (true) / fail (false) in execution order.
+    pub results: Vec<bool>,
+    pub errors: Vec<String>,
+    /// Underlying flake classification computed from `results`.
+    pub radar: FlakeReport,
+}
+
+/// Portable CI bundle manifest: the generated workflow plus the artifact paths a
+/// pipeline is expected to produce/consume.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CiBundleManifest {
+    pub workflow: String,
+    pub spec_path: String,
+    pub junit_path: String,
+    pub har_path: String,
+}
+
+/// CDP emulation script bundle that pins non-deterministic browser inputs
+/// (clock, RNG seed, timezone, locale, reduced motion) for reproducible runs.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DeterminismControls {
+    /// `Emulation.*` / `Runtime.evaluate` CDP command payloads (JSON).
+    pub cdp_commands: Vec<serde_json::Value>,
+    /// A single injectable JS bootstrap applied before page scripts run.
+    pub init_script: String,
 }
 
 // ---------------------------------------------------------------------------
@@ -305,6 +357,33 @@ impl QaEngine {
         }
     }
 
+    /// Replay a load scenario `n` times through the protocol runner, treating a
+    /// clean run (no budget violation / transport error) as a pass, and classify
+    /// the result with the flake radar. This exercises the *active* half of the
+    /// flake radar rather than accepting a caller-supplied result vector.
+    pub fn flake_radar_replay(&self, scenario: &ThorScenario, n: usize) -> FlakeReplayReport {
+        let runner = ProtocolRunner::new();
+        let mut results = Vec::with_capacity(n);
+        let mut errors = Vec::new();
+        for _ in 0..n {
+            match runner.run_blocking(scenario) {
+                Ok(_) => results.push(true),
+                Err(e) => {
+                    results.push(false);
+                    errors.push(e);
+                }
+            }
+        }
+        let radar = self.flake_radar(&scenario.name, &results);
+        FlakeReplayReport {
+            scenario: scenario.name.clone(),
+            requested_runs: n,
+            results,
+            errors,
+            radar,
+        }
+    }
+
     // 3. Visual Regression --------------------------------------------------
     /// Compare two equal-length pixel buffers (grayscale bytes) plus their dHash
     /// perceptual fingerprints. Returns pixel diff ratio, Hamming distance and a
@@ -328,6 +407,54 @@ impl QaEngine {
             pixel_diff_ratio,
             perceptual_distance,
             passed: pixel_diff_ratio <= threshold,
+            masked_pixels: 0,
+        }
+    }
+
+    /// Visual regression with masked regions: pixels covered by any
+    /// [`MaskRegion`] (e.g. resolved from a dynamic selector's bounding box) are
+    /// excluded from the diff so volatile content — timestamps, avatars, ads —
+    /// does not fail the comparison. `width` is the row stride of the grayscale
+    /// buffers.
+    pub fn visual_regression_masked(
+        &self,
+        baseline: &[u8],
+        candidate: &[u8],
+        width: usize,
+        threshold: f64,
+        mask_regions: &[MaskRegion],
+    ) -> VisualDiff {
+        if width == 0 || mask_regions.is_empty() {
+            return self.visual_regression(baseline, candidate, threshold);
+        }
+        let mut masked: Vec<bool> = vec![false; baseline.len().min(candidate.len())];
+        for region in mask_regions {
+            for row in region.y..region.y.saturating_add(region.height) {
+                let row_start = row * width;
+                for col in region.x..region.x.saturating_add(region.width) {
+                    let idx = row_start + col;
+                    if idx < masked.len() {
+                        masked[idx] = true;
+                    }
+                }
+            }
+        }
+        let masked_pixels = masked.iter().filter(|m| **m).count();
+        let compared = masked.len().saturating_sub(masked_pixels).max(1);
+        let diff_pixels = baseline
+            .iter()
+            .zip(candidate.iter())
+            .enumerate()
+            .filter(|(i, (a, b))| !masked[*i] && a.abs_diff(**b) > 8)
+            .count();
+        let size_penalty = baseline.len().abs_diff(candidate.len());
+        let pixel_diff_ratio = (diff_pixels + size_penalty) as f64 / compared as f64;
+        let perceptual_distance = (dhash(baseline) ^ dhash(candidate)).count_ones();
+        VisualDiff {
+            pixel_diff_ratio,
+            perceptual_distance,
+            passed: pixel_diff_ratio <= threshold,
+            masked_pixels,
         }
     }
 
@@ -475,7 +602,25 @@ impl QaEngine {
         TestGenerator::promote_to_test(session, ExportFormat::CiBundle)
     }
 
+    /// Emit a CI bundle manifest: the generated GitHub Actions workflow plus the
+    /// canonical artifact paths (spec, JUnit report, HAR) a run produces so the
+    /// pipeline and dashboards can wire them up deterministically.
+    pub fn export_ci_bundle_manifest(&self, session: &RecordedSession) -> CiBundleManifest {
+        let safe_name = session
+            .name
+            .to_lowercase()
+            .replace(|c: char| !c.is_alphanumeric(), "-");
+        CiBundleManifest {
+            workflow: TestGenerator::promote_to_test(session, ExportFormat::CiBundle),
+            spec_path: format!("tests/{safe_name}.spec.ts"),
+            junit_path: format!("test-results/{safe_name}.junit.xml"),
+            har_path: format!("test-results/{safe_name}.har"),
+        }
+    }
+
     // 10. Time-Travel Trace -------------------------------------------------
+    /// Record a trace frame, storing both a change-detection digest and the full
+    /// DOM markup so a frame can be replayed, not merely diffed.
     pub fn record_trace_frame(&self, test: &str, step: &str, action: &str, dom: &str) -> usize {
         let mut traces = self.traces.lock();
         let frames = traces.entry(test.to_string()).or_default();
@@ -485,6 +630,7 @@ impl QaEngine {
             step: step.to_string(),
             action: action.to_string(),
             dom_digest: format!("{:016x}", dhash(dom.as_bytes())),
+            dom_snapshot: dom.to_string(),
             timestamp_ms: now_ms(),
         });
         index
@@ -524,6 +670,51 @@ impl QaEngine {
             distinct_outputs: distinct,
             deterministic: distinct == 1,
             majority_ratio: majority as f64 / runs as f64,
+        }
+    }
+
+    /// Build a CDP emulation script bundle that pins the browser's
+    /// non-deterministic inputs (virtual time origin, RNG, timezone, locale,
+    /// reduced motion) so repeated runs are reproducible. The returned commands
+    /// are ready to feed to `Emulation.*` / `Page.addScriptToEvaluateOnNewDocument`.
+    pub fn determinism_controls(&self, seed: u64, epoch_ms: u64) -> DeterminismControls {
+        let init_script = concat!(
+            "(() => {\n",
+            "  // Thor determinism harness: pin RNG + clock.\n",
+            "  let __seed = __SEED__ >>> 0;\n",
+            "  Math.random = () => { __seed = (1103515245 * __seed + 12345) & 0x7fffffff; return __seed / 0x7fffffff; };\n",
+            "  const __base = __EPOCH__;\n",
+            "  const __RealDate = Date;\n",
+            "  Date.now = () => __base;\n",
+            "})();"
+        )
+        .replace("__SEED__", &seed.to_string())
+        .replace("__EPOCH__", &epoch_ms.to_string());
+        let cdp_commands = vec![
+            serde_json::json!({
+                "method": "Emulation.setTimezoneOverride",
+                "params": { "timezoneId": "UTC" }
+            }),
+            serde_json::json!({
+                "method": "Emulation.setLocaleOverride",
+                "params": { "locale": "en-US" }
+            }),
+            serde_json::json!({
+                "method": "Emulation.setEmulatedMedia",
+                "params": { "features": [{ "name": "prefers-reduced-motion", "value": "reduce" }] }
+            }),
+            serde_json::json!({
+                "method": "Emulation.setVirtualTimePolicy",
+                "params": { "policy": "pause", "initialVirtualTime": (epoch_ms as f64) / 1000.0 }
+            }),
+            serde_json::json!({
+                "method": "Page.addScriptToEvaluateOnNewDocument",
+                "params": { "source": init_script }
+            }),
+        ];
+        DeterminismControls {
+            cdp_commands,
+            init_script,
         }
     }
 
@@ -748,6 +939,68 @@ mod tests {
         let spec = e.authz_tests_to_playwright("https://x", &cases);
         assert!(spec.contains("toBeLessThan(300)"));
         assert!(spec.contains("toBeGreaterThanOrEqual(400)"));
+    }
+
+    #[test]
+    fn test_visual_regression_masked() {
+        let e = QaEngine::new();
+        // 4x4 grayscale; change only the top-left 2x2, then mask it out.
+        let base = vec![10u8; 16];
+        let mut cand = base.clone();
+        for row in 0..2 {
+            for col in 0..2 {
+                cand[row * 4 + col] = 200;
+            }
+        }
+        let masks = vec![MaskRegion {
+            selector: ".clock".into(),
+            x: 0,
+            y: 0,
+            width: 2,
+            height: 2,
+        }];
+        let masked = e.visual_regression_masked(&base, &cand, 4, 0.01, &masks);
+        assert_eq!(masked.masked_pixels, 4);
+        assert!(masked.passed, "masked diff should pass: {masked:?}");
+        // Without the mask the same change fails.
+        let unmasked = e.visual_regression(&base, &cand, 0.01);
+        assert!(!unmasked.passed);
+    }
+
+    #[test]
+    fn test_ci_bundle_manifest() {
+        let e = QaEngine::new();
+        let session = RecordedSession::new("Checkout Flow", "https://shop");
+        let m = e.export_ci_bundle_manifest(&session);
+        assert!(m.workflow.contains("playwright"));
+        assert!(m.spec_path.contains("checkout-flow"));
+        assert!(m.junit_path.ends_with(".junit.xml"));
+        assert!(m.har_path.ends_with(".har"));
+    }
+
+    #[test]
+    fn test_trace_frame_stores_dom_snapshot() {
+        let e = QaEngine::new();
+        e.record_trace_frame("t", "s", "click", "<button>Go</button>");
+        let frame = e.trace_frame_at("t", 0).unwrap();
+        assert_eq!(frame.dom_snapshot, "<button>Go</button>");
+        assert!(!frame.dom_digest.is_empty());
+    }
+
+    #[test]
+    fn test_determinism_controls() {
+        let e = QaEngine::new();
+        let c = e.determinism_controls(7, 1000);
+        assert!(c.init_script.contains("Math.random"));
+        assert!(c.init_script.contains("7"));
+        assert!(c
+            .cdp_commands
+            .iter()
+            .any(|cmd| cmd["method"] == "Emulation.setTimezoneOverride"));
+        assert!(c
+            .cdp_commands
+            .iter()
+            .any(|cmd| cmd["method"] == "Page.addScriptToEvaluateOnNewDocument"));
     }
 
     #[test]

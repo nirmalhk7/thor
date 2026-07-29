@@ -8,8 +8,15 @@
 
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
+use serde_json::json;
 use std::collections::BTreeMap;
+use std::io::{Read, Write};
+use std::net::TcpListener;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Duration;
 
+use crate::app_state::AppState;
 use crate::dx::decoder::DecoderStudio;
 use crate::dx::test_generator::{NetworkTrace, RecordedSession, TestGenerator};
 
@@ -222,11 +229,18 @@ pub struct OobInteraction {
     pub detail: String,
 }
 
+/// Live localhost OOB listener handle.
+struct OobSinkHandle {
+    port: u16,
+    running: Arc<AtomicBool>,
+}
+
 /// Security specialist engine.
 pub struct SecurityEngine {
     oob_domain: String,
     oob_counter: Mutex<u64>,
     oob_interactions: Mutex<Vec<OobInteraction>>,
+    oob_sink: Mutex<Option<OobSinkHandle>>,
 }
 
 impl Default for SecurityEngine {
@@ -241,6 +255,7 @@ impl SecurityEngine {
             oob_domain: "oob.thor.local".to_string(),
             oob_counter: Mutex::new(0),
             oob_interactions: Mutex::new(Vec::new()),
+            oob_sink: Mutex::new(None),
         }
     }
 
@@ -399,6 +414,65 @@ impl SecurityEngine {
                 });
             }
         }
+        // CSP content weaknesses (only when a policy is actually present).
+        if let Some(csp) = lower.get("content-security-policy") {
+            let c = csp.to_lowercase();
+            if c.contains("unsafe-inline") {
+                score -= 10;
+                findings.push(HeaderFinding {
+                    header: "content-security-policy".into(),
+                    present: true,
+                    severity: "medium".into(),
+                    recommendation: "CSP allows 'unsafe-inline' — weakens XSS mitigation".into(),
+                });
+            }
+            if c.contains("unsafe-eval") {
+                score -= 10;
+                findings.push(HeaderFinding {
+                    header: "content-security-policy".into(),
+                    present: true,
+                    severity: "medium".into(),
+                    recommendation: "CSP allows 'unsafe-eval' — enables string-to-code".into(),
+                });
+            }
+            let wildcard_source = c.split(';').any(|d| {
+                let d = d.trim();
+                d.ends_with(" *") || d.ends_with(":*") || d.split_whitespace().any(|t| t == "*")
+            });
+            if wildcard_source {
+                score -= 5;
+                findings.push(HeaderFinding {
+                    header: "content-security-policy".into(),
+                    present: true,
+                    severity: "low".into(),
+                    recommendation: "CSP uses a wildcard (*) source — tighten allowed origins".into(),
+                });
+            }
+        }
+        // CORS analysis: wildcard ACAO (with credentials) is a critical misconfig.
+        if let Some(acao) = lower.get("access-control-allow-origin") {
+            let creds = lower
+                .get("access-control-allow-credentials")
+                .map(|v| v.eq_ignore_ascii_case("true"))
+                .unwrap_or(false);
+            if acao.trim() == "*" && creds {
+                score -= 20;
+                findings.push(HeaderFinding {
+                    header: "access-control-allow-origin".into(),
+                    present: true,
+                    severity: "high".into(),
+                    recommendation:
+                        "CORS: wildcard ACAO with Allow-Credentials — reflects any origin".into(),
+                });
+            } else if acao.trim() == "*" {
+                findings.push(HeaderFinding {
+                    header: "access-control-allow-origin".into(),
+                    present: true,
+                    severity: "low".into(),
+                    recommendation: "CORS: wildcard ACAO exposes the endpoint to any origin".into(),
+                });
+            }
+        }
         let score = score.max(0) as u32;
         let grade = match score {
             90..=100 => "A",
@@ -457,6 +531,27 @@ impl SecurityEngine {
         })
     }
 
+    /// Locally verify an HS256 JWT signature against a candidate `secret` using a
+    /// pure-Rust HMAC-SHA256 (no network, no external crates). Returns `Ok(true)`
+    /// when the recomputed signature matches the token's signature segment.
+    pub fn verify_jwt_hmac(&self, jwt: &str, secret: &str) -> Result<bool, String> {
+        let parts: Vec<&str> = jwt.trim().split('.').collect();
+        if parts.len() != 3 {
+            return Err("invalid JWT structure".into());
+        }
+        let decoded = DecoderStudio::decode_jwt(jwt)?;
+        if !decoded.algorithm.eq_ignore_ascii_case("HS256") {
+            return Err(format!(
+                "local verify supports HS256 only (token alg={})",
+                decoded.algorithm
+            ));
+        }
+        let signing_input = format!("{}.{}", parts[0], parts[1]);
+        let mac = hmac_sha256(secret.as_bytes(), signing_input.as_bytes());
+        let expected = base64_url_no_pad(&mac);
+        Ok(constant_time_eq(expected.as_bytes(), parts[2].as_bytes()))
+    }
+
     // 5. Promote to Finding -------------------------------------------------
     /// Build a Markdown finding document from observed request/response traces,
     /// reusing the Universal Test Generator's finding exporter.
@@ -499,6 +594,32 @@ impl SecurityEngine {
                 },
             )
             .collect()
+    }
+
+    /// Scope-filtered surface crawl: only (method, url) pairs whose host is in
+    /// `host_allowlist` (or a subdomain of an allowlisted host) are templatized.
+    /// An empty allowlist admits everything.
+    pub fn crawl_surface_scoped(
+        &self,
+        discovered: &[(String, String)],
+        host_allowlist: &[String],
+    ) -> Vec<SurfaceEndpoint> {
+        let in_scope = |url: &str| {
+            if host_allowlist.is_empty() {
+                return true;
+            }
+            let host = host_of(url);
+            host_allowlist.iter().any(|h| {
+                let h = h.to_lowercase();
+                host == h || host.ends_with(&format!(".{h}"))
+            })
+        };
+        let filtered: Vec<(String, String)> = discovered
+            .iter()
+            .filter(|(_, url)| in_scope(url))
+            .cloned()
+            .collect();
+        self.crawl_surface(&filtered)
     }
 
     // 7. Storage Auditor ----------------------------------------------------
@@ -593,6 +714,26 @@ impl SecurityEngine {
                 mutated: template.replace("FUZZ", payload),
             })
             .collect()
+    }
+
+    /// Consent-gated fuzzing: refuse to generate active attack payloads against a
+    /// target that is not private/local (authorized local testing only, per the
+    /// `net/consent` scope boundary). `target_url` is the endpoint under test.
+    pub fn build_fuzz_cases_gated(
+        &self,
+        template: &str,
+        category: FuzzCategory,
+        target_url: &str,
+    ) -> Result<Vec<FuzzCase>, String> {
+        if !crate::net::consent::is_private_or_local_url(target_url) {
+            return Err(format!(
+                "Fuzzing blocked: {target_url} is not private/local (authorized local targets only)"
+            ));
+        }
+        if crate::net::consent::is_blocked_abuse_target(target_url) {
+            return Err("Fuzzing blocked: metadata / link-local abuse target".into());
+        }
+        Ok(self.build_fuzz_cases(template, category))
     }
 
     // 9. CSRF Analyzer ------------------------------------------------------
@@ -778,6 +919,82 @@ impl SecurityEngine {
     pub fn all_oob_interactions(&self) -> Vec<OobInteraction> {
         self.oob_interactions.lock().clone()
     }
+
+    /// Start a real localhost HTTP loopback listener for out-of-band interaction
+    /// detection (blind SSRF/RCE). Callbacks are correlated to the OOB token that
+    /// appears in the request path or `Host` header. Pass `0` for an ephemeral
+    /// port; returns the bound port.
+    pub fn start_oob_listener(&self, port: u16) -> Result<u16, String> {
+        let mut slot = self.oob_sink.lock();
+        if let Some(h) = slot.take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
+        let bound = listener.local_addr().map_err(|e| e.to_string())?.port();
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
+        let running = Arc::new(AtomicBool::new(true));
+        let flag = running.clone();
+        std::thread::spawn(move || oob_listener_loop(listener, flag));
+        *slot = Some(OobSinkHandle {
+            port: bound,
+            running,
+        });
+        Ok(bound)
+    }
+
+    pub fn stop_oob_listener(&self) {
+        if let Some(h) = self.oob_sink.lock().take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn oob_listener_port(&self) -> Option<u16> {
+        self.oob_sink.lock().as_ref().map(|h| h.port)
+    }
+
+    /// Build a full promote-to-finding bundle: a Markdown report, a HAR-like JSON
+    /// entry list, and a reproducible cURL script — everything needed to file the
+    /// finding and reproduce it.
+    pub fn promote_to_finding_bundle(
+        &self,
+        title: &str,
+        target: &str,
+        traces: Vec<NetworkTrace>,
+    ) -> serde_json::Value {
+        let markdown = self.promote_to_finding(title, target, traces.clone());
+        let mut session = RecordedSession::new(title, target);
+        session.traces = traces.clone();
+        let curl = TestGenerator::export_curl(&session);
+        let entries: Vec<serde_json::Value> = traces
+            .iter()
+            .map(|t| {
+                json!({
+                    "request": {
+                        "method": t.method,
+                        "url": t.url,
+                        "headers": t.headers,
+                        "postData": t.body,
+                    },
+                    "response": { "status": t.status },
+                })
+            })
+            .collect();
+        let har = json!({
+            "log": {
+                "version": "1.2",
+                "creator": { "name": "Thor", "version": "0.1.1" },
+                "entries": entries,
+            }
+        });
+        json!({
+            "title": title,
+            "target": target,
+            "markdown": markdown,
+            "curl": curl,
+            "har": har,
+        })
+    }
 }
 
 fn templatize_path(path: &str) -> String {
@@ -816,6 +1033,226 @@ fn now_ms() -> u64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as u64)
         .unwrap_or(0)
+}
+
+/// Extract the lowercased host of a URL (no scheme/port/path).
+fn host_of(url: &str) -> String {
+    let after = url.split("://").nth(1).unwrap_or(url);
+    after
+        .split('/')
+        .next()
+        .unwrap_or("")
+        .split('@')
+        .last()
+        .unwrap_or("")
+        .split(':')
+        .next()
+        .unwrap_or("")
+        .to_lowercase()
+}
+
+fn constant_time_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b.iter()) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
+/// URL-safe base64 encoding without padding (JWT signature format).
+fn base64_url_no_pad(data: &[u8]) -> String {
+    const CHARS: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789-_";
+    let mut out = String::new();
+    for chunk in data.chunks(3) {
+        let b = [
+            chunk[0],
+            *chunk.get(1).unwrap_or(&0),
+            *chunk.get(2).unwrap_or(&0),
+        ];
+        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | (b[2] as u32);
+        out.push(CHARS[((n >> 18) & 63) as usize] as char);
+        out.push(CHARS[((n >> 12) & 63) as usize] as char);
+        if chunk.len() > 1 {
+            out.push(CHARS[((n >> 6) & 63) as usize] as char);
+        }
+        if chunk.len() > 2 {
+            out.push(CHARS[(n & 63) as usize] as char);
+        }
+    }
+    out
+}
+
+/// Pure-Rust SHA-256 (FIPS 180-4).
+fn sha256(data: &[u8]) -> [u8; 32] {
+    const K: [u32; 64] = [
+        0x428a2f98, 0x71374491, 0xb5c0fbcf, 0xe9b5dba5, 0x3956c25b, 0x59f111f1, 0x923f82a4,
+        0xab1c5ed5, 0xd807aa98, 0x12835b01, 0x243185be, 0x550c7dc3, 0x72be5d74, 0x80deb1fe,
+        0x9bdc06a7, 0xc19bf174, 0xe49b69c1, 0xefbe4786, 0x0fc19dc6, 0x240ca1cc, 0x2de92c6f,
+        0x4a7484aa, 0x5cb0a9dc, 0x76f988da, 0x983e5152, 0xa831c66d, 0xb00327c8, 0xbf597fc7,
+        0xc6e00bf3, 0xd5a79147, 0x06ca6351, 0x14292967, 0x27b70a85, 0x2e1b2138, 0x4d2c6dfc,
+        0x53380d13, 0x650a7354, 0x766a0abb, 0x81c2c92e, 0x92722c85, 0xa2bfe8a1, 0xa81a664b,
+        0xc24b8b70, 0xc76c51a3, 0xd192e819, 0xd6990624, 0xf40e3585, 0x106aa070, 0x19a4c116,
+        0x1e376c08, 0x2748774c, 0x34b0bcb5, 0x391c0cb3, 0x4ed8aa4a, 0x5b9cca4f, 0x682e6ff3,
+        0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7,
+        0xc67178f2,
+    ];
+    let mut h: [u32; 8] = [
+        0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
+        0x5be0cd19,
+    ];
+    let mut msg = data.to_vec();
+    let bit_len = (data.len() as u64) * 8;
+    msg.push(0x80);
+    while msg.len() % 64 != 56 {
+        msg.push(0);
+    }
+    msg.extend_from_slice(&bit_len.to_be_bytes());
+
+    for block in msg.chunks(64) {
+        let mut w = [0u32; 64];
+        for (i, word) in w.iter_mut().enumerate().take(16) {
+            let j = i * 4;
+            *word = u32::from_be_bytes([block[j], block[j + 1], block[j + 2], block[j + 3]]);
+        }
+        for i in 16..64 {
+            let s0 = w[i - 15].rotate_right(7) ^ w[i - 15].rotate_right(18) ^ (w[i - 15] >> 3);
+            let s1 = w[i - 2].rotate_right(17) ^ w[i - 2].rotate_right(19) ^ (w[i - 2] >> 10);
+            w[i] = w[i - 16]
+                .wrapping_add(s0)
+                .wrapping_add(w[i - 7])
+                .wrapping_add(s1);
+        }
+        let mut a = h[0];
+        let mut b = h[1];
+        let mut c = h[2];
+        let mut d = h[3];
+        let mut e = h[4];
+        let mut f = h[5];
+        let mut g = h[6];
+        let mut hh = h[7];
+        for i in 0..64 {
+            let s1 = e.rotate_right(6) ^ e.rotate_right(11) ^ e.rotate_right(25);
+            let ch = (e & f) ^ ((!e) & g);
+            let t1 = hh
+                .wrapping_add(s1)
+                .wrapping_add(ch)
+                .wrapping_add(K[i])
+                .wrapping_add(w[i]);
+            let s0 = a.rotate_right(2) ^ a.rotate_right(13) ^ a.rotate_right(22);
+            let maj = (a & b) ^ (a & c) ^ (b & c);
+            let t2 = s0.wrapping_add(maj);
+            hh = g;
+            g = f;
+            f = e;
+            e = d.wrapping_add(t1);
+            d = c;
+            c = b;
+            b = a;
+            a = t1.wrapping_add(t2);
+        }
+        h[0] = h[0].wrapping_add(a);
+        h[1] = h[1].wrapping_add(b);
+        h[2] = h[2].wrapping_add(c);
+        h[3] = h[3].wrapping_add(d);
+        h[4] = h[4].wrapping_add(e);
+        h[5] = h[5].wrapping_add(f);
+        h[6] = h[6].wrapping_add(g);
+        h[7] = h[7].wrapping_add(hh);
+    }
+    let mut out = [0u8; 32];
+    for (i, word) in h.iter().enumerate() {
+        out[i * 4..i * 4 + 4].copy_from_slice(&word.to_be_bytes());
+    }
+    out
+}
+
+/// HMAC-SHA256 (RFC 2104).
+fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+    let mut block_key = [0u8; 64];
+    if key.len() > 64 {
+        let hashed = sha256(key);
+        block_key[..32].copy_from_slice(&hashed);
+    } else {
+        block_key[..key.len()].copy_from_slice(key);
+    }
+    let mut ipad = [0x36u8; 64];
+    let mut opad = [0x5cu8; 64];
+    for i in 0..64 {
+        ipad[i] ^= block_key[i];
+        opad[i] ^= block_key[i];
+    }
+    let mut inner = Vec::with_capacity(64 + message.len());
+    inner.extend_from_slice(&ipad);
+    inner.extend_from_slice(message);
+    let inner_hash = sha256(&inner);
+    let mut outer = Vec::with_capacity(96);
+    outer.extend_from_slice(&opad);
+    outer.extend_from_slice(&inner_hash);
+    sha256(&outer)
+}
+
+/// Minimal OOB loopback listener loop: records each callback as an
+/// [`OobInteraction`] correlated by the token found in the path or Host header.
+fn oob_listener_loop(listener: TcpListener, running: Arc<AtomicBool>) {
+    while running.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, addr)) => {
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                let (token, path) = oob_token_from_request(&raw);
+                AppState::global()
+                    .features()
+                    .security()
+                    .record_oob(OobInteraction {
+                        token,
+                        protocol: "http".into(),
+                        source_ip: addr.ip().to_string(),
+                        received_ms: now_ms(),
+                        detail: format!("HTTP callback {path}"),
+                    });
+                let _ = stream.write_all(
+                    b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
+                );
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+/// Extract an OOB correlation token from a raw HTTP request: prefer the first
+/// path segment, fall back to the leftmost Host label.
+fn oob_token_from_request(raw: &str) -> (String, String) {
+    let (head, _) = raw.split_once("\r\n\r\n").unwrap_or((raw, ""));
+    let mut lines = head.lines();
+    let request_line = lines.next().unwrap_or("");
+    let path = request_line
+        .split_whitespace()
+        .nth(1)
+        .unwrap_or("/")
+        .to_string();
+    let first_seg = path.trim_start_matches('/').split(['/', '?']).next().unwrap_or("");
+    if !first_seg.is_empty() {
+        return (first_seg.to_string(), path);
+    }
+    for line in lines {
+        if let Some((k, v)) = line.split_once(':') {
+            if k.trim().eq_ignore_ascii_case("host") {
+                let host = v.trim().split(':').next().unwrap_or("");
+                let label = host.split('.').next().unwrap_or("");
+                if !label.is_empty() {
+                    return (label.to_string(), path);
+                }
+            }
+        }
+    }
+    ("unknown".to_string(), path)
 }
 
 #[cfg(test)]

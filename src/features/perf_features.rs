@@ -79,6 +79,34 @@ pub struct WaterfallReport {
     pub total_bytes: u64,
 }
 
+/// A resource with its initiator, for blocking-chain (request dependency)
+/// reconstruction.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct InitiatedResource {
+    pub url: String,
+    #[serde(default)]
+    pub initiator: Option<String>,
+    pub start_ms: f64,
+    pub total_ms: f64,
+    #[serde(default)]
+    pub render_blocking: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockingChain {
+    /// Ordered URLs from a root request down to the deepest dependent.
+    pub chain: Vec<String>,
+    pub cumulative_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BlockingChainReport {
+    /// initiator url -> resources it initiated.
+    pub edges: BTreeMap<String, Vec<String>>,
+    pub longest_chain: BlockingChain,
+    pub critical_path_ms: f64,
+}
+
 // ---------------------------------------------------------------------------
 // 4. Memory Leak Hunter
 // ---------------------------------------------------------------------------
@@ -351,6 +379,58 @@ impl PerfEngine {
         }
     }
 
+    /// Reconstruct the request blocking-chain (initiator graph) from resources
+    /// carrying an `initiator` URL, then find the longest cumulative-latency
+    /// root→leaf path — the network critical path.
+    pub fn blocking_chain(&self, resources: &[InitiatedResource]) -> BlockingChainReport {
+        use std::collections::HashMap;
+        let dur: HashMap<&str, f64> = resources
+            .iter()
+            .map(|r| (r.url.as_str(), r.total_ms))
+            .collect();
+        let mut edges: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        let mut children: HashMap<String, Vec<String>> = HashMap::new();
+        let known: std::collections::HashSet<&str> =
+            resources.iter().map(|r| r.url.as_str()).collect();
+        for r in resources {
+            if let Some(init) = &r.initiator {
+                edges.entry(init.clone()).or_default().push(r.url.clone());
+                children
+                    .entry(init.clone())
+                    .or_default()
+                    .push(r.url.clone());
+            }
+        }
+        // Roots: resources whose initiator is unknown/absent.
+        let roots: Vec<&InitiatedResource> = resources
+            .iter()
+            .filter(|r| {
+                r.initiator
+                    .as_deref()
+                    .map(|i| !known.contains(i))
+                    .unwrap_or(true)
+            })
+            .collect();
+        let mut best: Vec<String> = Vec::new();
+        let mut best_ms = 0.0f64;
+        for root in roots {
+            let mut path = Vec::new();
+            let ms = longest_chain(&root.url, &children, &dur, &mut path);
+            if ms > best_ms {
+                best_ms = ms;
+                best = path;
+            }
+        }
+        BlockingChainReport {
+            edges,
+            longest_chain: BlockingChain {
+                chain: best,
+                cumulative_ms: best_ms,
+            },
+            critical_path_ms: best_ms,
+        }
+    }
+
     // 4. Memory Leak Hunter -------------------------------------------------
     pub fn detect_leak(&self, samples: &[HeapSample]) -> LeakReport {
         if samples.len() < 2 {
@@ -442,6 +522,86 @@ impl PerfEngine {
             avg_latency_ms: avg,
             p95_latency_ms: hist.percentile(95.0),
         }
+    }
+
+    /// Seed synthetic monitor checks from a recorded session: each network trace
+    /// becomes an uptime probe (success = status < 400) against its URL, using
+    /// the recorded status. Returns the number of checks recorded.
+    pub fn synthetic_from_session(
+        &self,
+        session: &crate::dx::test_generator::RecordedSession,
+    ) -> usize {
+        let mut count = 0;
+        for (i, trace) in session.traces.iter().enumerate() {
+            self.record_synthetic(SyntheticCheck {
+                target: trace.url.clone(),
+                success: trace.status > 0 && trace.status < 400,
+                // Deterministic spacing proxy so summaries are reproducible.
+                latency_ms: 20.0 + (i as f64 % 10.0) * 3.0,
+                timestamp_ms: i as u64,
+            });
+            count += 1;
+        }
+        count
+    }
+
+    /// Export a folded-stack profile as speedscope-compatible JSON (evented
+    /// profile), so a flame graph can be opened directly in speedscope.app.
+    pub fn promote_to_profile(&self, folded: &[String], name: &str) -> serde_json::Value {
+        // Build a frame table + open/close event pairs from folded stacks.
+        let mut frames: Vec<String> = Vec::new();
+        let mut frame_index = std::collections::HashMap::new();
+        let mut events = Vec::new();
+        let mut at: u64 = 0;
+        let mut intern = |frame: &str,
+                          frames: &mut Vec<String>,
+                          idx: &mut std::collections::HashMap<String, usize>|
+         -> usize {
+            if let Some(i) = idx.get(frame) {
+                *i
+            } else {
+                let i = frames.len();
+                frames.push(frame.to_string());
+                idx.insert(frame.to_string(), i);
+                i
+            }
+        };
+        for line in folded {
+            let (stack, value) = match line.rsplit_once(' ') {
+                Some((s, v)) => (s, v.trim().parse::<u64>().unwrap_or(0)),
+                None => continue,
+            };
+            let stack_frames: Vec<usize> = stack
+                .split(';')
+                .filter(|f| !f.is_empty())
+                .map(|f| intern(f, &mut frames, &mut frame_index))
+                .collect();
+            for &f in &stack_frames {
+                events.push(serde_json::json!({ "type": "O", "frame": f, "at": at }));
+            }
+            at += value;
+            for &f in stack_frames.iter().rev() {
+                events.push(serde_json::json!({ "type": "C", "frame": f, "at": at }));
+            }
+        }
+        let shared_frames: Vec<serde_json::Value> = frames
+            .iter()
+            .map(|f| serde_json::json!({ "name": f }))
+            .collect();
+        serde_json::json!({
+            "$schema": "https://www.speedscope.app/file-format-schema.json",
+            "shared": { "frames": shared_frames },
+            "profiles": [{
+                "type": "evented",
+                "name": name,
+                "unit": "none",
+                "startValue": 0,
+                "endValue": at,
+                "events": events,
+            }],
+            "name": name,
+            "exporter": "Thor",
+        })
     }
 
     // 6. RUM vs Lab ---------------------------------------------------------
@@ -655,6 +815,31 @@ impl PerfEngine {
         out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
         out
     }
+}
+
+/// Longest cumulative-latency path from `node` through the initiator graph.
+fn longest_chain(
+    node: &str,
+    children: &std::collections::HashMap<String, Vec<String>>,
+    dur: &std::collections::HashMap<&str, f64>,
+    path: &mut Vec<String>,
+) -> f64 {
+    path.push(node.to_string());
+    let self_ms = dur.get(node).copied().unwrap_or(0.0);
+    let mut best_child_ms = 0.0;
+    let mut best_child_path: Vec<String> = Vec::new();
+    if let Some(kids) = children.get(node) {
+        for k in kids {
+            let mut cp = Vec::new();
+            let ms = longest_chain(k, children, dur, &mut cp);
+            if ms > best_child_ms {
+                best_child_ms = ms;
+                best_child_path = cp;
+            }
+        }
+    }
+    path.extend(best_child_path);
+    self_ms + best_child_ms
 }
 
 fn parse_max_age(cache_control: &str) -> Option<u64> {
