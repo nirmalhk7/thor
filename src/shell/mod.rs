@@ -354,8 +354,17 @@ pub(crate) fn content_hotkey_script() -> &'static str {
 
             function sendIpc(msg) {
                 try {
+                    var value = String(msg);
+                    if (window.ipc && typeof window.ipc.postMessage === 'function') {
+                        window.ipc.postMessage(value);
+                        return;
+                    }
+                    if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc) {
+                        window.webkit.messageHandlers.ipc.postMessage(value);
+                        return;
+                    }
                     window.__thorIpcQueue = window.__thorIpcQueue || [];
-                    window.__thorIpcQueue.push(String(msg));
+                    window.__thorIpcQueue.push(value);
                 } catch (e) {}
             }
 
