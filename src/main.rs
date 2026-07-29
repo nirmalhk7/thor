@@ -1,3 +1,6 @@
+#![allow(deprecated)]
+#![allow(unexpected_cfgs)]
+
 use mimalloc::MiMalloc;
 
 #[global_allocator]
@@ -15,6 +18,7 @@ pub mod net;
 pub mod network;
 pub mod paths;
 pub mod shell;
+pub mod mcp;
 
 fn main() -> anyhow::Result<()> {
     println!("============================================================");
@@ -23,6 +27,7 @@ fn main() -> anyhow::Result<()> {
     let _rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    let _guard = _rt.enter();
     println!("⚡ [Thor Main Log] Tokio runtime active.");
     println!("⚡ [Thor Main Log] Delegating execution to native shell on main OS thread...");
     println!("============================================================");

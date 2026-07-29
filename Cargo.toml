@@ -1,7 +1,10 @@
 [package]
 name = "thor"
-version = "0.1.1"
+version = "0.1.2"
 edition = "2021"
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cargo_clippy)', 'cfg(devtools)'] }
 
 [dependencies]
 mimalloc = "0.1"
@@ -26,6 +29,14 @@ futures = "0.3"
 thiserror = "2"
 rcgen = "0.13"
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+tokio-tungstenite = { version = "0.21", features = ["rustls-tls-native-roots"] }
+axum = "0.7"
+tower-http = { version = "0.5", features = ["cors", "trace"] }
+tower = "0.5"
+tokio-stream = { version = "0.1", features = ["sync"] }
+
+[features]
+legacy-wry = []
 
 [lib]
 name = "thor"

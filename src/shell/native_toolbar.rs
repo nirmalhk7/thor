@@ -466,6 +466,7 @@ pub enum ChromeToolMode {
     Memory,
     WebVitals,
     Sla,
+    Idor,
 }
 
 impl ChromeToolMode {
@@ -484,6 +485,7 @@ impl ChromeToolMode {
             "trigger_memory_compaction" => Some(Self::Memory),
             "show_web_vitals" => Some(Self::WebVitals),
             "show_sla_metrics" => Some(Self::Sla),
+            "run_idor_matrix" | "idor" => Some(Self::Idor),
             _ => None,
         }
     }
@@ -862,6 +864,10 @@ impl NativeToolbar {
             ChromeToolMode::Sla => {
                 self.set_status("Honest M1 capability readout");
                 self.place_row(0.35, &[], 200.0, "Show", 48.0);
+            }
+            ChromeToolMode::Idor => {
+                self.set_status("Run IDOR Matrix Scan");
+                self.place_row(0.40, &[], 180.0, "Scan", 52.0);
             }
         }
         self.raise();

@@ -69,7 +69,7 @@ pub struct TabHistoryEntry {
 /// an explicit privacy wipe (also exposed via Cmd+Shift+K).
 #[derive(Debug, Clone, Default)]
 pub struct TabHistoryTracker {
-    history_by_tab: HashMap<String, Vec<TabHistoryEntry>>,
+    history_by_tab: HashMap<String, std::collections::VecDeque<TabHistoryEntry>>,
 }
 
 impl TabHistoryTracker {
@@ -92,33 +92,30 @@ impl TabHistoryTracker {
         let entries = self.history_by_tab.entry(tab_id.to_string()).or_default();
         
         // Avoid duplicate consecutive entry for same URL
-        if let Some(last) = entries.last() {
+        if let Some(last) = entries.back() {
             if last.url == url {
                 return;
             }
         }
 
         let entry_title = if title.is_empty() { url.to_string() } else { title.to_string() };
-        entries.push(TabHistoryEntry {
+        entries.push_back(TabHistoryEntry {
             url: url.to_string(),
             title: entry_title,
             timestamp: now,
         });
 
-        // Cap per-tab history to 100 items
+        // Cap per-tab history to 100 items with O(1) pop_front
         if entries.len() > 100 {
-            entries.remove(0);
+            entries.pop_front();
         }
     }
 
     pub fn get_history_for_tab(&self, tab_id: &str) -> Vec<TabHistoryEntry> {
         self.history_by_tab
             .get(tab_id)
-            .cloned()
+            .map(|deque| deque.iter().rev().cloned().collect())
             .unwrap_or_default()
-            .into_iter()
-            .rev()
-            .collect()
     }
 
     /// Drop all visit history for a tab. Intended to run on tab close (privacy).
@@ -295,6 +292,16 @@ impl SettingsRegistry {
                 Some("👤".into()),
                 "Security",
                 Some("toggle_profile".into()),
+            ),
+            PaletteItem::new(
+                "set_idor",
+                "Run IDOR Matrix Scan on Active Target",
+                PaletteItemType::Setting,
+                "Thor://security/idor",
+                Some("Level 2 Identity Diff".into()),
+                Some("🕵️".into()),
+                "Security",
+                Some("run_idor_matrix".into()),
             ),
             PaletteItem::new(
                 "set_locust",
@@ -637,12 +644,9 @@ pub fn read_chrome_bookmarks_json() -> Option<String> {
 }
 
 /// Parse raw Chrome Bookmarks JSON string into a structured list of PaletteItems
-pub fn parse_chrome_bookmarks(json_str: &str) -> Vec<PaletteItem> {
+pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_json::Error> {
     let mut items = Vec::new();
-    let parsed: serde_json::Value = match serde_json::from_str(json_str) {
-        Ok(v) => v,
-        Err(_) => return get_default_bookmarks(),
-    };
+    let parsed: serde_json::Value = serde_json::from_str(json_str)?;
 
     fn extract_nodes(node: &serde_json::Value, folder_path: &str, items: &mut Vec<PaletteItem>) {
         let name = node["name"].as_str().unwrap_or("");
@@ -708,23 +712,23 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Vec<PaletteItem> {
     }
 
     if items.is_empty() {
-        get_default_bookmarks()
+        Ok(items)
     } else {
-        items
+        Ok(items)
     }
 }
 
 /// Command palette mode selected by hotkey.
 ///
-/// - [`CmdPaletteMode::BookmarksAndTabHistory`] — **Cmd+K**: open tabs, per-tab
+/// - [`CmdPaletteMode::BookmarksAndTabHistory`] — **Sites (Cmd+K)**: open tabs, per-tab
 ///   visit history, and Thor bookmarks (see [`build_cmd_k_items`]).
-/// - [`CmdPaletteMode::SettingsMenu`] — **Cmd+Shift+K**: settings / devtools /
+/// - [`CmdPaletteMode::SettingsMenu`] — **Toolbox (Cmd+Shift+K)**: settings / devtools /
 ///   security / extensions from [`SettingsRegistry`] only (no bookmarks).
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum CmdPaletteMode {
-    /// Cmd+K: open tabs + tab history + bookmarks.
+    /// Sites (Cmd+K): open tabs + tab history + bookmarks.
     BookmarksAndTabHistory,
-    /// Cmd+Shift+K: settings registry only.
+    /// Toolbox (Cmd+Shift+K): settings registry only.
     SettingsMenu,
 }
 
@@ -987,10 +991,13 @@ fn eq_prepared(s: &str, query: &PreparedQuery) -> bool {
 #[inline]
 fn starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
     let q_len = query.lower_bytes.len();
-    if s.len() < q_len {
-        return false;
+    if q_len == 0 {
+        return true;
     }
     if s.is_ascii() && query.is_ascii {
+        if s.len() < q_len {
+            return false;
+        }
         let s_bytes = &s.as_bytes()[..q_len];
         let q_bytes = &query.lower_bytes[..];
         for i in 0..q_len {
@@ -1007,10 +1014,13 @@ fn starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
 #[inline]
 fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
     let q_len = query.lower_bytes.len();
-    if s.len() < q_len {
-        return false;
+    if q_len == 0 {
+        return true;
     }
     if s.is_ascii() && query.is_ascii {
+        if s.len() < q_len {
+            return false;
+        }
         let s_bytes = s.as_bytes();
         let q_bytes = &query.lower_bytes[..];
         let first_byte = q_bytes[0];
@@ -1055,10 +1065,10 @@ fn contains_prepared(haystack: &str, query: &PreparedQuery) -> bool {
     if q_len == 0 {
         return true;
     }
-    if haystack.len() < q_len {
-        return false;
-    }
     if haystack.is_ascii() && query.is_ascii {
+        if haystack.len() < q_len {
+            return false;
+        }
         let h_bytes = haystack.as_bytes();
         let q_bytes = &query.lower_bytes[..];
         let first_byte = q_bytes[0];
@@ -1090,10 +1100,10 @@ fn is_subsequence_prepared(haystack: &str, query: &PreparedQuery) -> bool {
     if q_len == 0 {
         return true;
     }
-    if q_len > haystack.len() {
-        return false;
-    }
     if haystack.is_ascii() && query.is_ascii {
+        if q_len > haystack.len() {
+            return false;
+        }
         let h_bytes = haystack.as_bytes();
         let q_bytes = &query.lower_bytes[..];
         let mut q_idx = 0;
@@ -1138,11 +1148,9 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_chrome_bookmarks_parser_default_fallback() {
+    fn test_chrome_bookmarks_parser_invalid_json() {
         let items = parse_chrome_bookmarks("invalid json");
-        assert!(!items.is_empty());
-        assert_eq!(items[0].category, "Bookmarks");
-        assert!(items.iter().any(|it| it.title.contains("GitHub")));
+        assert!(items.is_err());
     }
 
     #[test]
@@ -1160,7 +1168,7 @@ mod tests {
             }
         }"#;
 
-        let items = parse_chrome_bookmarks(json_str);
+        let items = parse_chrome_bookmarks(json_str).unwrap();
         assert_eq!(items.len(), 2);
         assert_eq!(items[0].title, "Rust Docs");
         assert_eq!(items[1].title, "Thor Repo");

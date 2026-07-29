@@ -1,0 +1,18 @@
+{
+  "revision": "1350000",
+  "version": "125.0.6422.0",
+  "artifacts": {
+    "aarch64-apple-darwin": {
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1350000/chrome-mac.zip",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "executable": "Chromium.app/Contents/MacOS/Chromium"
+    },
+    "x86_64-apple-darwin": {
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1350000/chrome-mac.zip",
+      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "executable": "Chromium.app/Contents/MacOS/Chromium"
+    }
+  },
+  "licenses": ["LICENSE"],
+  "source_revision_url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main"
+}

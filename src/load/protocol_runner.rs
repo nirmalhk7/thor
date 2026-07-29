@@ -25,7 +25,6 @@ impl ProtocolRunner {
         Self::default()
     }
 
-    /// Execute load test scenario asynchronously with configured VUs across specified duration
     pub async fn run(&self, scenario: &ThorScenario) -> Result<LoadMetrics, String> {
         let collector = Arc::new(MetricsCollector::new());
         let vus = scenario.vus.max(1);
@@ -33,6 +32,14 @@ impl ProtocolRunner {
         let end_time = Instant::now() + duration;
 
         let mut handles = Vec::new();
+        
+        let interval = scenario.target_rps.map(|rps| {
+            if rps > 0 {
+                Duration::from_secs_f64((vus as f64) / (rps as f64))
+            } else {
+                Duration::from_millis(0)
+            }
+        });
 
         for vu_idx in 0..vus {
             let client = self.client.clone();
@@ -40,19 +47,28 @@ impl ProtocolRunner {
             let collector = Arc::clone(&collector);
 
             let handle = tokio::spawn(async move {
-                // Optional ramp-up delay staggered per VU
                 if scenario.ramp_up_secs > 0 && vus > 1 {
                     let stagger_ms = (scenario.ramp_up_secs * 1000) / (vus as u64);
                     let delay = Duration::from_millis(stagger_ms * (vu_idx as u64));
                     sleep(delay).await;
                 }
 
+                let mut next_wake = tokio::time::Instant::now();
                 while Instant::now() < end_time {
                     for step in &scenario.steps {
                         if Instant::now() >= end_time {
                             break;
                         }
                         Self::execute_step(&client, step, &scenario, &collector).await;
+                    }
+                    if let Some(inv) = interval {
+                        next_wake += inv;
+                        let now = tokio::time::Instant::now();
+                        if next_wake > now {
+                            tokio::time::sleep_until(next_wake).await;
+                        } else {
+                            next_wake = now;
+                        }
                     }
                 }
             });
@@ -156,29 +172,31 @@ impl ProtocolRunner {
             }
             ScenarioStep::WebSocketConnect { url, messages } => {
                 let start = Instant::now();
-                // Perform HTTP Upgrade check or probe for WS endpoint
-                let ws_http_url = url.replace("ws://", "http://").replace("wss://", "https://");
-                let mut req = client.get(&ws_http_url);
-                for (k, v) in &scenario.headers {
-                    req = req.header(k, v);
-                }
-                match req.send().await {
-                    Ok(resp) => {
-                        let status = resp.status().as_u16();
-                        let latency = start.elapsed().as_secs_f64() * 1000.0;
-                        let payload_bytes = messages.iter().map(|m| m.len() as u64).sum();
-                        collector.record_sample(status, latency, payload_bytes, status < 500);
+                
+                // We use connect_async to handle actual WS connection
+                if let Ok((mut ws_stream, resp)) = tokio_tungstenite::connect_async(url.clone()).await {
+                    let mut payload_bytes = 0;
+                    use futures::{SinkExt, StreamExt};
+                    for msg in messages {
+                        if let Ok(_) = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(msg.clone())).await {
+                            payload_bytes += msg.len() as u64;
+                            if let Some(Ok(m)) = ws_stream.next().await {
+                                payload_bytes += m.into_data().len() as u64;
+                            }
+                        }
                     }
-                    Err(_) => {
-                        let latency = start.elapsed().as_secs_f64() * 1000.0;
-                        collector.record_sample(0, latency, 0, false);
-                    }
+                    let _ = ws_stream.close(None).await;
+                    let status = resp.status().as_u16();
+                    let latency = start.elapsed().as_secs_f64() * 1000.0;
+                    collector.record_sample(status, latency, payload_bytes, status < 500);
+                } else {
+                    let latency = start.elapsed().as_secs_f64() * 1000.0;
+                    collector.record_sample(0, latency, 0, false);
                 }
             }
             ScenarioStep::Click { .. }
             | ScenarioStep::Fill { .. }
             | ScenarioStep::CustomScript { .. } => {
-                // DOM steps are simulated gracefully in Protocol Runner mode as 5ms virtual steps
                 sleep(Duration::from_millis(5)).await;
                 collector.record_sample(200, 5.0, 0, true);
             }

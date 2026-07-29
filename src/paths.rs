@@ -55,3 +55,19 @@ pub fn thor_data_dir() -> PathBuf {
 pub fn thor_chromium_profile_dir() -> PathBuf {
     thor_data_dir().join("ChromiumProfile")
 }
+
+/// Returns the path to the bundled Chromium executable relative to the current executable.
+pub fn thor_bundled_chromium_path() -> PathBuf {
+    let mut exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
+    
+    // If we're inside Thor.app/Contents/MacOS/thor, pop to Thor.app/Contents
+    exe_path.pop(); // remove 'thor' executable name
+    exe_path.pop(); // remove 'MacOS'
+    
+    exe_path
+        .join("Frameworks")
+        .join("Chromium.app")
+        .join("Contents")
+        .join("MacOS")
+        .join("Chromium")
+}

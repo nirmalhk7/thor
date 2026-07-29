@@ -26,7 +26,8 @@ use super::{
 
 #[cfg(target_os = "macos")]
 use super::{
-    open_tool_in_omnibar_chromium, run_omnibar_tool_go_chromium, setup_macos_app_menu,
+    open_tool_in_omnibar_chromium, run_omnibar_tool_go_chromium, setup_macos_app_icon,
+    setup_macos_app_menu,
 };
 
 #[cfg(target_os = "macos")]
@@ -36,7 +37,10 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
     println!("[Thor Shell] Initializing Chromium dual-window shell...");
 
     #[cfg(target_os = "macos")]
-    setup_macos_app_menu();
+    {
+        setup_macos_app_menu();
+        setup_macos_app_icon();
+    }
 
     let _ = AppState::global();
 
@@ -75,6 +79,13 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
             .map_err(|e| anyhow::anyhow!("initial Chromium tab: {e}"))?;
         println!("⚡ [Thor] Initial Chromium tab ready (dual-window)");
     }
+
+    let runtime_for_mcp = tabs.borrow().runtime.clone();
+    tokio::spawn(async move {
+        let (engine, handle) = crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
+        tokio::spawn(engine.run());
+        crate::mcp::server::start_mcp_server(handle).await;
+    });
 
     #[cfg(target_os = "macos")]
     let toolbar_ref: Rc<RefCell<Option<native_toolbar::NativeToolbar>>> =
@@ -449,3 +460,6 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
         _ => {}
     }
 }
+
+pub enum TabState { Active, Frozen, Discarded, Restoring, McpControlled, LocustRunning }
+

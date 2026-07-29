@@ -47,6 +47,7 @@ pub struct InterceptedResponse {
 }
 
 /// Rule for automatic matching & modifying traffic on the fly
+/// Rule for automatic matching & modifying traffic on the fly
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TamperRule {
     pub id: String,
@@ -55,104 +56,193 @@ pub struct TamperRule {
     pub match_header_key: Option<String>,
     pub replace_header_key: String,
     pub replace_header_value: String,
+    pub mock_status: Option<u16>,
+    pub mock_body: Option<String>,
+    pub delay_ms: Option<u64>,
+}
+
+/// Result outcome of running a request through TrafficTamperEngine
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub enum TamperOutcome {
+    /// Pass request through (potentially with modified headers)
+    Forward(InterceptedRequest),
+    /// Auto-mock response stubbed by TamperRule
+    Mock(InterceptedResponse),
+    /// Request paused waiting for manual forward/drop in UI
+    Pause,
+}
+
+use std::sync::atomic::{AtomicBool, Ordering};
+
+#[derive(Debug, Default)]
+struct TamperEngineInner {
+    interception_enabled: AtomicBool,
+    pending_interceptions: RwLock<Vec<InterceptedRequest>>,
+    history: RwLock<Vec<(InterceptedRequest, Option<InterceptedResponse>)>>,
+    rules: RwLock<Vec<TamperRule>>,
 }
 
 /// Central Interceptor & Repeater engine for Thor
 #[derive(Debug, Clone, Default)]
 pub struct TrafficTamperEngine {
-    interception_enabled: Arc<RwLock<bool>>,
-    pending_interceptions: Arc<RwLock<Vec<InterceptedRequest>>>,
-    history: Arc<RwLock<Vec<(InterceptedRequest, Option<InterceptedResponse>)>>>,
-    rules: Arc<RwLock<Vec<TamperRule>>>,
+    inner: Arc<TamperEngineInner>,
 }
 
 impl TrafficTamperEngine {
     pub fn new() -> Self {
         Self {
-            interception_enabled: Arc::new(RwLock::new(false)),
-            pending_interceptions: Arc::new(RwLock::new(Vec::new())),
-            history: Arc::new(RwLock::new(Vec::new())),
-            rules: Arc::new(RwLock::new(Vec::new())),
+            inner: Arc::new(TamperEngineInner::default()),
         }
     }
 
     /// Toggle live traffic interception state
     pub fn set_interception_enabled(&self, enabled: bool) {
-        if let Ok(mut lock) = self.interception_enabled.write() {
-            *lock = enabled;
-        }
+        self.inner.interception_enabled.store(enabled, Ordering::Release);
     }
 
     pub fn is_interception_enabled(&self) -> bool {
-        *self.interception_enabled.read().unwrap_or_else(|e| e.into_inner())
+        self.inner.interception_enabled.load(Ordering::Acquire)
     }
 
     /// Process an outgoing request through rules and interception pipeline
-    pub fn process_outgoing_request(&self, mut req: InterceptedRequest) -> Option<InterceptedRequest> {
+    pub fn process_outgoing_request(&self, req: InterceptedRequest) -> Option<InterceptedRequest> {
+        match self.evaluate_tamper_outcome(req) {
+            TamperOutcome::Forward(r) => Some(r),
+            TamperOutcome::Mock(_) | TamperOutcome::Pause => None,
+        }
+    }
+
+    /// Process an outgoing request returning detailed TamperOutcome enum
+    pub fn evaluate_tamper_outcome(&self, mut req: InterceptedRequest) -> TamperOutcome {
         // Apply match & replace rules
-        if let Ok(rules) = self.rules.read() {
-            for rule in rules.iter().filter(|r| r.enabled) {
-                if req.url.contains(&rule.target_url_pattern) {
-                    req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
-                    req.is_modified = true;
+        let rules = self.inner.rules.read().unwrap_or_else(|e| e.into_inner());
+        for rule in rules.iter().filter(|r| r.enabled) {
+            if req.url.contains(&rule.target_url_pattern) {
+                let mut match_ok = true;
+                if let Some(ref header_key) = rule.match_header_key {
+                    if !req.headers.contains_key(header_key) {
+                        match_ok = false;
+                    }
+                }
+                if match_ok {
+                    if !rule.replace_header_key.is_empty() {
+                        req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
+                        req.is_modified = true;
+                    }
+
+                    // Check for automatic response mocking
+                    if rule.mock_status.is_some() || rule.mock_body.is_some() {
+                        let status_code = rule.mock_status.unwrap_or(200);
+                        let mock_resp = InterceptedResponse {
+                            request_id: req.id.clone(),
+                            timestamp: req.timestamp,
+                            status_code,
+                            headers: [("content-type".to_string(), "application/json".to_string())].into_iter().collect(),
+                            body: rule.mock_body.clone(),
+                            duration_ms: rule.delay_ms.unwrap_or(0),
+                        };
+                        self.record_history(req.clone(), Some(mock_resp.clone()));
+                        return TamperOutcome::Mock(mock_resp);
+                    }
                 }
             }
         }
 
         // If interception is active, queue request for manual review/modification
         if self.is_interception_enabled() {
-            if let Ok(mut pending) = self.pending_interceptions.write() {
-                pending.push(req);
-            }
-            None // Paused for user editing
+            let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+            pending.push(req);
+            TamperOutcome::Pause
         } else {
-            Some(req)
+            TamperOutcome::Forward(req)
         }
     }
 
     /// Get all pending intercepted requests waiting for manual tampering
     pub fn get_pending_requests(&self) -> Vec<InterceptedRequest> {
-        self.pending_interceptions.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner.pending_interceptions.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Forward a pending request (with optional manual edits)
     pub fn forward_request(&self, request_id: &str, edited_req: Option<InterceptedRequest>) -> Option<InterceptedRequest> {
-        if let Ok(mut pending) = self.pending_interceptions.write() {
-            if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
-                let req = pending.remove(pos);
-                return Some(edited_req.unwrap_or(req));
-            }
+        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+            let req = pending.remove(pos);
+            return Some(edited_req.unwrap_or(req));
         }
         None
     }
 
     /// Drop/cancel an intercepted request without forwarding
     pub fn drop_request(&self, request_id: &str) -> bool {
-        if let Ok(mut pending) = self.pending_interceptions.write() {
-            if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
-                pending.remove(pos);
-                return true;
-            }
+        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+        if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+            let req = pending.remove(pos);
+            self.record_history(req, None);
+            return true;
         }
         false
     }
 
-    /// Record completed request/response pair into history for Repeater/Inspector
-    pub fn record_history(&self, req: InterceptedRequest, resp: Option<InterceptedResponse>) {
-        if let Ok(mut hist) = self.history.write() {
-            hist.push((req, resp));
+    /// Record completed request/response pair into history for Repeater/Inspector (with SEC-027 secret redaction)
+    pub fn record_history(&self, mut req: InterceptedRequest, mut resp: Option<InterceptedResponse>) {
+        for (k, v) in req.headers.iter_mut() {
+            let k_lower = k.to_lowercase();
+            if k_lower == "authorization" || k_lower == "cookie" || k_lower == "x-api-key" {
+                *v = "[REDACTED]".to_string();
+            }
         }
+        if let Some(ref mut res) = resp {
+            for (k, v) in res.headers.iter_mut() {
+                let k_lower = k.to_lowercase();
+                if k_lower == "set-cookie" || k_lower == "authorization" {
+                    *v = "[REDACTED]".to_string();
+                }
+            }
+        }
+        let mut hist = self.inner.history.write().unwrap_or_else(|e| e.into_inner());
+        hist.push((req, resp));
     }
 
     pub fn get_history(&self) -> Vec<(InterceptedRequest, Option<InterceptedResponse>)> {
-        self.history.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner.history.read().unwrap_or_else(|e| e.into_inner()).clone()
     }
 
     /// Add automated tamper rule
     pub fn add_rule(&self, rule: TamperRule) {
-        if let Ok(mut rules) = self.rules.write() {
+        if let Ok(mut rules) = self.inner.rules.write() {
             rules.push(rule);
         }
+    }
+
+    /// Retrieve a specific request by ID from pending or history
+    pub fn get_request_by_id(&self, request_id: &str) -> Option<InterceptedRequest> {
+        if let Ok(pending) = self.inner.pending_interceptions.read() {
+            if let Some(req) = pending.iter().find(|r| r.id == request_id) {
+                return Some(req.clone());
+            }
+        }
+        if let Ok(hist) = self.inner.history.read() {
+            if let Some((req, _)) = hist.iter().find(|(r, _)| r.id == request_id) {
+                return Some(req.clone());
+            }
+        }
+        None
+    }
+
+    /// Retrieve the most recent recorded or intercepted request
+    pub fn get_latest_request(&self) -> Option<InterceptedRequest> {
+        if let Ok(pending) = self.inner.pending_interceptions.read() {
+            if let Some(req) = pending.last() {
+                return Some(req.clone());
+            }
+        }
+        if let Ok(hist) = self.inner.history.read() {
+            if let Some((req, _)) = hist.last() {
+                return Some(req.clone());
+            }
+        }
+        None
     }
 }
 
@@ -201,6 +291,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "X-Thor-Injected".to_string(),
             replace_header_value: "true".to_string(),
+            mock_status: None,
+            mock_body: None,
+            delay_ms: None,
         });
 
         let req = InterceptedRequest {

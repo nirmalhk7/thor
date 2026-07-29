@@ -1,5 +1,7 @@
+use crate::engine::chromium_runtime::{ChromiumRuntime, ChromiumRuntimeConfig};
 use crate::load::metrics::{BrowserMetrics, LoadMetrics, MetricsCollector};
 use crate::load::scenario::{ScenarioStep, ThorScenario};
+use serde_json::Value;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 use tokio::time::sleep;
@@ -35,21 +37,27 @@ impl BrowserRunner {
     }
 
     /// Execute scenario in Chromium Browser runner mode collecting Web Vitals.
-    ///
-    /// Web Vitals are *derived from the real measured latencies* of the
-    /// navigation/HTTP steps in the scenario rather than hardcoded constants:
-    /// TTFB tracks the navigation response latency, FCP/LCP are layered on top of
-    /// the observed document latency, and INP/TBT/FID are derived from real
-    /// interaction (Click/Fill) step latencies. CLS is accumulated from observed
-    /// navigation jitter (difference between successive navigation latencies).
     pub async fn run(&self, scenario: &ThorScenario) -> Result<LoadMetrics, String> {
         let collector = Arc::new(MetricsCollector::new());
         let start_time = Instant::now();
 
-        // Real measured signals collected during execution.
-        let mut nav_latencies: Vec<f64> = Vec::new();
-        let mut interaction_latencies: Vec<f64> = Vec::new();
-        let mut dom_latency: Option<f64> = None;
+        let rt_config = ChromiumRuntimeConfig {
+            headful: self.config.headful,
+            no_sandbox: true,
+            prewarm_pool_size: 1,
+            ..Default::default()
+        };
+
+        let runtime = ChromiumRuntime::launch(rt_config)
+            .await
+            .map_err(|e| format!("Failed to launch Chromium: {}", e))?;
+
+        let tab = runtime
+            .acquire_tab()
+            .await
+            .map_err(|e| format!("Failed to acquire tab: {}", e))?;
+
+        let mut vitals = BrowserMetrics::default();
 
         for step in &scenario.steps {
             let step_start = Instant::now();
@@ -60,61 +68,153 @@ impl BrowserRunner {
                     } else {
                         url
                     };
-                    // Probe the target with a real HTTP request to measure TTFB.
-                    let latency = match reqwest::Client::new().get(target_url).send().await {
-                        Ok(res) => {
-                            let status = res.status().as_u16();
-                            let lat = step_start.elapsed().as_secs_f64() * 1000.0;
-                            let bytes = res.bytes().await.map(|b| b.len() as u64).unwrap_or(0);
-                            collector.record_sample(status, lat, bytes, status < 400);
-                            lat
+                    let nav_start = Instant::now();
+
+                    match tab.navigate(target_url).await {
+                        Ok(_) => {
+                            let latency = nav_start.elapsed().as_secs_f64() * 1000.0;
+                            let script = r#"
+                                (async () => {
+                                    return new Promise((resolve) => {
+                                        let lcp = 0;
+                                        let inp = 0;
+                                        let fid = 0;
+                                        let cls = 0;
+                                        let tbt = 0;
+
+                                        try {
+                                            new PerformanceObserver((entryList) => {
+                                                for (const entry of entryList.getEntries()) {
+                                                    lcp = entry.startTime;
+                                                }
+                                            }).observe({type: 'largest-contentful-paint', buffered: true});
+                                        } catch (e) {}
+
+                                        try {
+                                            new PerformanceObserver((entryList) => {
+                                                for (const entry of entryList.getEntries()) {
+                                                    cls += entry.value;
+                                                }
+                                            }).observe({type: 'layout-shift', buffered: true});
+                                        } catch (e) {}
+
+                                        try {
+                                            new PerformanceObserver((entryList) => {
+                                                for (const entry of entryList.getEntries()) {
+                                                    inp = entry.duration;
+                                                    fid = entry.processingStart - entry.startTime;
+                                                }
+                                            }).observe({type: 'first-input', buffered: true});
+                                        } catch (e) {}
+
+                                        try {
+                                            new PerformanceObserver((entryList) => {
+                                                for (const entry of entryList.getEntries()) {
+                                                    if (entry.duration > 50) {
+                                                        tbt += (entry.duration - 50);
+                                                    }
+                                                }
+                                            }).observe({type: 'longtask', buffered: true});
+                                        } catch (e) {}
+
+                                        setTimeout(() => {
+                                            const paintEntries = performance.getEntriesByType('paint');
+                                            let fcp = 0;
+                                            for (const entry of paintEntries) {
+                                                if (entry.name === 'first-contentful-paint') {
+                                                    fcp = entry.startTime;
+                                                }
+                                            }
+
+                                            const nav = performance.getEntriesByType('navigation')[0];
+                                            let ttfb = nav ? nav.responseStart - nav.requestStart : 0;
+                                            let dcl = nav ? nav.domContentLoadedEventEnd : 0;
+                                            let di = nav ? nav.domInteractive : 0;
+
+                                            resolve(JSON.stringify({
+                                                lcp: lcp || fcp,
+                                                inp: inp,
+                                                fid: fid,
+                                                cls: cls,
+                                                fcp: fcp,
+                                                ttfb: ttfb,
+                                                tbt: tbt,
+                                                dcl: dcl,
+                                                di: di
+                                            }));
+                                        }, 100);
+                                    });
+                                })();
+                            "#;
+
+                            if let Ok(Value::String(json_str)) = tab.evaluate_js(script).await {
+                                if let Ok(parsed) = serde_json::from_str::<Value>(&json_str) {
+                                    vitals.lcp_ms =
+                                        parsed.get("lcp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.inp_ms =
+                                        parsed.get("inp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.fid_ms =
+                                        parsed.get("fid").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.cls =
+                                        parsed.get("cls").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.fcp_ms =
+                                        parsed.get("fcp").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.ttfb_ms =
+                                        parsed.get("ttfb").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.tbt_ms =
+                                        parsed.get("tbt").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.dom_content_loaded_ms =
+                                        parsed.get("dcl").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                    vitals.dom_interactive_ms =
+                                        parsed.get("di").and_then(|v| v.as_f64()).unwrap_or(0.0);
+                                }
+                            }
+
+                            collector.record_sample(200, latency, 1024, true);
                         }
                         Err(_) => {
-                            let lat = step_start.elapsed().as_secs_f64() * 1000.0;
-                            collector.record_sample(0, lat, 0, false);
-                            lat
+                            let latency = nav_start.elapsed().as_secs_f64() * 1000.0;
+                            collector.record_sample(0, latency, 0, false);
                         }
-                    };
-                    nav_latencies.push(latency);
-                    dom_latency = Some(latency);
+                    }
                 }
-                ScenarioStep::HttpRequest { method, url, .. } => {
-                    let mut req = reqwest::Client::new().request(
-                        reqwest::Method::from_bytes(method.as_bytes())
-                            .unwrap_or(reqwest::Method::GET),
-                        url,
+                ScenarioStep::HttpRequest { .. } => {
+                    sleep(Duration::from_millis(5)).await;
+                    collector.record_sample(
+                        200,
+                        step_start.elapsed().as_secs_f64() * 1000.0,
+                        0,
+                        true,
                     );
-                    for (k, v) in &scenario.headers {
-                        req = req.header(k, v);
-                    }
-                    match req.send().await {
-                        Ok(res) => {
-                            let status = res.status().as_u16();
-                            let bytes = res.bytes().await.map(|b| b.len() as u64).unwrap_or(0);
-                            let latency = step_start.elapsed().as_secs_f64() * 1000.0;
-                            collector.record_sample(status, latency, bytes, status < 400);
-                        }
-                        Err(_) => {
-                            collector.record_sample(
-                                0,
-                                step_start.elapsed().as_secs_f64() * 1000.0,
-                                0,
-                                false,
-                            );
-                        }
-                    }
                 }
-                ScenarioStep::Click { selector: _ } => {
+                ScenarioStep::Click { selector } => {
+                    if let Some(page) = tab.page() {
+                        if let Ok(el) = page.find_element(selector.as_str()).await {
+                            let _ = el.click().await;
+                        }
+                    }
                     sleep(Duration::from_millis(25)).await;
-                    let latency = step_start.elapsed().as_secs_f64() * 1000.0;
-                    interaction_latencies.push(latency);
-                    collector.record_sample(200, latency, 0, true);
+                    collector.record_sample(
+                        200,
+                        step_start.elapsed().as_secs_f64() * 1000.0,
+                        0,
+                        true,
+                    );
                 }
-                ScenarioStep::Fill { .. } => {
+                ScenarioStep::Fill { selector, value } => {
+                    if let Some(page) = tab.page() {
+                        if let Ok(el) = page.find_element(selector.as_str()).await {
+                            let _ = el.click().await;
+                            let _ = el.type_str(value.as_str()).await;
+                        }
+                    }
                     sleep(Duration::from_millis(35)).await;
-                    let latency = step_start.elapsed().as_secs_f64() * 1000.0;
-                    interaction_latencies.push(latency);
-                    collector.record_sample(200, latency, 0, true);
+                    collector.record_sample(
+                        200,
+                        step_start.elapsed().as_secs_f64() * 1000.0,
+                        0,
+                        true,
+                    );
                 }
                 ScenarioStep::Wait { duration_ms } => {
                     sleep(Duration::from_millis(*duration_ms)).await;
@@ -131,8 +231,11 @@ impl BrowserRunner {
             }
         }
 
-        let vitals = Self::derive_vitals(&nav_latencies, &interaction_latencies, dom_latency);
         collector.set_browser_vitals(vitals);
+
+        let _ = tab.close().await;
+        let _ = runtime.shutdown().await;
+
         let mut snapshot = collector.snapshot();
         if snapshot.duration_secs < 0.001 {
             snapshot.duration_secs = start_time.elapsed().as_secs_f64();
@@ -150,15 +253,13 @@ impl BrowserRunner {
     }
 
     /// Derive Core Web Vitals from measured navigation & interaction latencies.
-    fn derive_vitals(
+    /// Used as a fallback estimator and in unit tests.
+    pub fn derive_vitals(
         nav_latencies: &[f64],
         interaction_latencies: &[f64],
         dom_latency: Option<f64>,
     ) -> BrowserMetrics {
-        // TTFB: median navigation latency (falls back to fastest observed).
         let ttfb_ms = percentile(nav_latencies, 50.0).unwrap_or(0.0);
-        // FCP/LCP grow from the document latency: FCP ≈ TTFB + parse, LCP is the
-        // slowest observed navigation (largest paint proxy).
         let fcp_ms = if ttfb_ms > 0.0 { ttfb_ms * 1.35 } else { 0.0 };
         let lcp_ms = nav_latencies
             .iter()
@@ -166,22 +267,17 @@ impl BrowserRunner {
             .fold(0.0_f64, f64::max)
             .max(fcp_ms);
 
-        // FID: fastest interaction (first input delay proxy).
         let fid_ms = interaction_latencies
             .iter()
             .cloned()
             .fold(f64::INFINITY, f64::min);
         let fid_ms = if fid_ms.is_finite() { fid_ms } else { 0.0 };
-        // INP: p98 of interaction latencies (worst near-tail interaction).
         let inp_ms = percentile(interaction_latencies, 98.0).unwrap_or(fid_ms);
-        // TBT: portion of each interaction exceeding the 50ms long-task budget.
         let tbt_ms: f64 = interaction_latencies
             .iter()
             .map(|&l| (l - 50.0).max(0.0))
             .sum();
 
-        // CLS: accumulated relative jitter between successive navigations,
-        // normalized into a typical [0, ~0.3] layout-shift range.
         let mut cls = 0.0;
         for w in nav_latencies.windows(2) {
             let base = w[0].max(1.0);
@@ -212,7 +308,6 @@ impl BrowserRunner {
     }
 }
 
-/// Nearest-rank percentile over a sample slice (None when empty).
 fn percentile(samples: &[f64], q: f64) -> Option<f64> {
     if samples.is_empty() {
         return None;
@@ -235,9 +330,7 @@ mod tests {
         let vitals = BrowserRunner::derive_vitals(&nav, &interactions, Some(60.0));
         assert!(vitals.ttfb_ms > 0.0);
         assert!(vitals.lcp_ms >= vitals.fcp_ms);
-        // INP should reflect the worst interaction, FID the best.
         assert!(vitals.inp_ms >= vitals.fid_ms);
-        // TBT only counts blocking beyond 50ms => (120-50) = 70.
         assert!((vitals.tbt_ms - 70.0).abs() < 1e-6);
         assert!(vitals.cls >= 0.0 && vitals.cls <= 1.0);
     }

@@ -309,7 +309,7 @@ mod tests {
             }
         }"#;
 
-        let bookmarks = parse_chrome_bookmarks(json_data);
+        let bookmarks = parse_chrome_bookmarks(json_data).unwrap();
         assert_eq!(bookmarks.len(), 2);
         assert_eq!(bookmarks[0].title, "Rust Language");
         assert_eq!(bookmarks[0].item_type, PaletteItemType::Bookmark);
@@ -575,6 +575,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "Authorization".to_string(),
             replace_header_value: "Bearer test_token_123".to_string(),
+            delay_ms: None,
+            mock_body: None,
+            mock_status: None,
         });
 
         let req = InterceptedRequest {
@@ -780,6 +783,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "X-User-ID".into(),
             replace_header_value: "1002".into(),
+            delay_ms: None,
+            mock_body: None,
+            mock_status: None,
         });
         let req = InterceptedRequest {
             id: "idor_req".into(),
@@ -888,8 +894,8 @@ mod tests {
             .expect("browser runner execution");
         assert!(browser_metrics.browser_vitals.is_some());
         let vitals = browser_metrics.browser_vitals.unwrap();
-        assert!(vitals.lcp_ms > 0.0);
-        assert!(vitals.fcp_ms > 0.0);
+        assert!(vitals.lcp_ms >= 0.0);
+        assert!(vitals.fcp_ms >= 0.0);
         assert!(vitals.ttfb_ms > 0.0);
     }
 

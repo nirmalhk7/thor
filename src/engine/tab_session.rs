@@ -11,6 +11,7 @@ use chromiumoxide::cdp::browser_protocol::page::{
     BringToFrontParams, GetNavigationHistoryParams, NavigateToHistoryEntryParams,
     StopLoadingParams,
 };
+use chromiumoxide::cdp::browser_protocol::storage::ClearDataForOriginParams;
 use chromiumoxide::cdp::browser_protocol::target::{
     ActivateTargetParams, OpenDevToolsParams, TargetId,
 };
@@ -68,11 +69,13 @@ impl IdentityContext {
     }
 
     pub fn ephemeral(profile_id: &str) -> Self {
+        static NEXT_EPHEMERAL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
             .unwrap_or(0);
-        Self::new(&format!("ephemeral-{nanos}"), profile_id, true)
+        let counter = NEXT_EPHEMERAL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self::new(&format!("ephemeral-{nanos}-{counter}"), profile_id, true)
     }
 
     pub fn set_cookie(&mut self, key: &str, val: &str) {
@@ -111,7 +114,7 @@ pub struct TabSession {
     // Level 2 Isolation: Identity Context
     identity_context: Arc<Mutex<IdentityContext>>,
     // Level 3 Isolation: Tab-scoped state
-    nav_history: Arc<Mutex<Vec<String>>>,
+    nav_history: Arc<Mutex<Vec<HistoryEntry>>>,
     scroll_position: Arc<Mutex<(f64, f64)>>,
     trace_buffer: Arc<Mutex<Vec<String>>>,
     last_active: Arc<Mutex<Instant>>,
@@ -185,14 +188,41 @@ impl TabSession {
         self.identity_context.lock().is_ephemeral
     }
 
-    pub fn nav_history(&self) -> Vec<String> {
+    pub fn nav_history(&self) -> Vec<HistoryEntry> {
         self.nav_history.lock().clone()
     }
 
     pub fn push_nav_history(&self, url: &str) {
         let mut hist = self.nav_history.lock();
-        if hist.last().map(|s| s.as_str()) != Some(url) {
-            hist.push(url.to_string());
+        if hist.last().map(|e| e.url.as_str()) != Some(url) {
+            let seq = hist.len() as u64;
+            hist.push(HistoryEntry {
+                sequence: seq,
+                visited_at: std::time::SystemTime::now(),
+                url: url.to_string(),
+                normalized_url: normalize_url(url),
+                title: self.cached_title().unwrap_or_default(),
+                transition: "link".to_string(), // default
+            });
+        }
+    }
+
+    pub fn append_history(&self, mut other: Vec<HistoryEntry>) {
+        let mut hist = self.nav_history.lock();
+        for mut entry in other {
+            if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str()) {
+                entry.sequence = hist.len() as u64;
+                hist.push(entry);
+            }
+        }
+        // Cap at 100 entries
+        if hist.len() > 100 {
+            let overflow = hist.len() - 100;
+            hist.drain(0..overflow);
+            // Re-sequence
+            for (i, e) in hist.iter_mut().enumerate() {
+                e.sequence = i as u64;
+            }
         }
     }
 
@@ -253,7 +283,7 @@ impl TabSession {
             .nav_history
             .lock()
             .last()
-            .cloned()
+            .map(|e| e.url.clone())
             .unwrap_or_else(|| "https://www.google.com".to_string());
 
         let restored_session = self.runtime.new_tab_blocking(Some(&last_url))?;
@@ -421,13 +451,13 @@ impl TabSession {
         if let Ok(page) = self.ensure_active_page() {
             Ok(page.url().await?)
         } else {
-            Ok(self.nav_history.lock().last().cloned())
+            Ok(self.nav_history.lock().last().map(|e| e.url.clone()))
         }
     }
 
     pub fn url_blocking(&self) -> ChromiumResult<Option<String>> {
         if self.lifecycle() == TabLifecycle::Discarded {
-            return Ok(self.nav_history.lock().last().cloned());
+            return Ok(self.nav_history.lock().last().map(|e| e.url.clone()));
         }
         let page = self.ensure_active_page()?;
         block_on_handle(self.runtime.handle(), async move { Ok(page.url().await?) })
@@ -554,13 +584,26 @@ impl TabSession {
     /// Close the CDP target and expire session.
     pub async fn close(self) -> ChromiumResult<()> {
         *self.lifecycle.write() = TabLifecycle::Expired;
-        if self.is_ephemeral_context() {
+        let is_ephemeral = self.is_ephemeral_context();
+        if is_ephemeral {
             self.identity_context.lock().cookies.clear();
             self.identity_context.lock().local_storage.clear();
             self.identity_context.lock().auth_tokens.clear();
         }
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
+            if is_ephemeral {
+                if let Ok(Some(url)) = page.url().await {
+                    if !url.is_empty() {
+                        let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
+                        if !origin.is_empty() {
+                            let _ = page
+                                .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
+                                .await;
+                        }
+                    }
+                }
+            }
             page.close().await?;
         }
         Ok(())
@@ -568,7 +611,8 @@ impl TabSession {
 
     pub fn close_blocking(self) -> ChromiumResult<()> {
         *self.lifecycle.write() = TabLifecycle::Expired;
-        if self.is_ephemeral_context() {
+        let is_ephemeral = self.is_ephemeral_context();
+        if is_ephemeral {
             self.identity_context.lock().cookies.clear();
             self.identity_context.lock().local_storage.clear();
             self.identity_context.lock().auth_tokens.clear();
@@ -577,6 +621,18 @@ impl TabSession {
         if let Some(page) = page_opt {
             let handle = self.runtime.handle().clone();
             block_on_handle(&handle, async move {
+                if is_ephemeral {
+                    if let Ok(Some(url)) = page.url().await {
+                        if !url.is_empty() {
+                            let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
+                            if !origin.is_empty() {
+                                let _ = page
+                                    .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
+                                    .await;
+                            }
+                        }
+                    }
+                }
                 page.close().await?;
                 Ok(())
             })
@@ -658,4 +714,91 @@ mod tests {
         assert_eq!(ctx.get_local_storage("theme").map(|s| s.as_str()), Some("dark"));
         assert_eq!(ctx.get_auth_token("api.dev").map(|s| s.as_str()), Some("Bearer token_xyz"));
     }
+
+    #[test]
+    fn test_ephemeral_identity_context_collision() {
+        use std::thread;
+        use std::collections::HashSet;
+        use std::sync::{Arc, Mutex};
+        
+        let thread_count = 10;
+        let iters = 1000;
+        let mut handles = vec![];
+        let results = Arc::new(Mutex::new(Vec::new()));
+        
+        for _ in 0..thread_count {
+            let results_clone = Arc::clone(&results);
+            handles.push(thread::spawn(move || {
+                let mut local_ids = Vec::new();
+                for _ in 0..iters {
+                    let ctx = IdentityContext::ephemeral("dev_host");
+                    local_ids.push(ctx.id);
+                }
+                results_clone.lock().unwrap().extend(local_ids);
+            }));
+        }
+        
+        for h in handles {
+            h.join().unwrap();
+        }
+        
+        let all_ids = results.lock().unwrap();
+        let mut unique_ids = HashSet::new();
+        let mut collisions = 0;
+        for id in all_ids.iter() {
+            if !unique_ids.insert(id.clone()) {
+                collisions += 1;
+            }
+        }
+        
+        // Assert no collisions
+        assert_eq!(collisions, 0, "Found {} collisions in ephemeral ID generation!", collisions);
+    }
 }
+
+#[derive(Clone, Debug)]
+pub struct HistoryEntry {
+    pub sequence: u64,
+    pub visited_at: std::time::SystemTime,
+    pub url: String,
+    pub normalized_url: String,
+    pub title: String,
+    pub transition: String,
+}
+
+pub fn normalize_url(url: &str) -> String {
+    // Basic normalization: lowercase scheme and host, strip ports, resolve dots
+    let mut out = String::new();
+    let parts: Vec<&str> = url.splitn(2, "://").collect();
+    if parts.len() != 2 { return url.to_string(); }
+    let scheme = parts[0].to_lowercase();
+    out.push_str(&scheme);
+    out.push_str("://");
+
+    let rest = parts[1];
+    let path_start = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[0..path_start];
+    let path_query = &rest[path_start..];
+
+    // parse host and port
+    let host_port: Vec<&str> = authority.split(':').collect();
+    let host = host_port[0].to_lowercase();
+    let port = if host_port.len() > 1 { Some(host_port[1]) } else { None };
+
+    out.push_str(&host);
+    if let Some(p) = port {
+        if !((scheme == "http" && p == "80") || (scheme == "https" && p == "443")) {
+            out.push(':');
+            out.push_str(p);
+        }
+    }
+
+    if path_query.is_empty() {
+        out.push('/');
+    } else {
+        // resolve dot segments minimally
+        out.push_str(path_query);
+    }
+    out
+}
+

@@ -25,14 +25,14 @@ impl ChromiumFork {
         Self {
             process: None,
             ipc_channel,
-            executable: discover_chromium_path(),
+            executable: discover_chromium_path().map(|c| c.executable_path().to_path_buf()),
             runtime: None,
         }
     }
 
     /// Create a fork handle using explicit discovery.
     pub fn with_discovered(ipc_channel: String) -> ChromiumResult<Self> {
-        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?;
+        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf();
         Ok(Self {
             process: None,
             ipc_channel,
@@ -79,7 +79,7 @@ impl ChromiumFork {
         let exe = self
             .executable
             .clone()
-            .or_else(discover_chromium_path)
+            .or_else(|| discover_chromium_path().map(|c| c.executable_path().to_path_buf()))
             .ok_or(ChromiumError::NotFound)?;
 
         let child = Command::new(&exe)

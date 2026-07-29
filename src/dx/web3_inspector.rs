@@ -1,5 +1,4 @@
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
 
 /// EVM / Solana JSON-RPC Request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -145,24 +144,24 @@ impl Web3Inspector {
     /// Decode 4-byte ABI selector from raw EVM calldata hex (e.g. `0xa9059cbb...`)
     pub fn decode_abi_selector(calldata_hex: &str) -> Option<AbiSelectorMatch> {
         let clean = calldata_hex.trim().strip_prefix("0x").unwrap_or(calldata_hex.trim());
-        if clean.len() < 8 {
+        if clean.len() < 8 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
 
         let selector = format!("0x{}", &clean[..8].to_lowercase());
         let data = &clean[8..];
 
-        let mut known_map: HashMap<&str, (&str, &str, Vec<(&str, &str)>)> = HashMap::new();
-        known_map.insert("0xa9059cbb", ("transfer", "transfer(address,uint256)", vec![("to", "address"), ("value", "uint256")]));
-        known_map.insert("0x095ea7b3", ("approve", "approve(address,uint256)", vec![("spender", "address"), ("value", "uint256")]));
-        known_map.insert("0x70a08231", ("balanceOf", "balanceOf(address)", vec![("account", "address")]));
-        known_map.insert("0x23b872dd", ("transferFrom", "transferFrom(address,address,uint256)", vec![("from", "address"), ("to", "address"), ("value", "uint256")]));
-        known_map.insert("0x38ed1739", ("swapExactTokensForTokens", "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)", vec![("amountIn", "uint256"), ("amountOutMin", "uint256")]));
-        known_map.insert("0x18c974f0", ("swapExactETHForTokens", "swapExactETHForTokens(uint256,address[],address,uint256)", vec![("amountOutMin", "uint256")]));
-        known_map.insert("0xd058711f", ("deposit", "deposit()", vec![]));
-        known_map.insert("0x2e1a7d4d", ("withdraw", "withdraw(uint256)", vec![("wad", "uint256")]));
-
-        let (func_name, sig, param_defs) = known_map.get(selector.as_str())?;
+        let (func_name, sig_owned, param_defs): (&str, String, &[(&str, &str)]) = match selector.as_str() {
+            "0xa9059cbb" => ("transfer", "transfer(address,uint256)".into(), &[("to", "address"), ("value", "uint256")]),
+            "0x095ea7b3" => ("approve", "approve(address,uint256)".into(), &[("spender", "address"), ("value", "uint256")]),
+            "0x70a08231" => ("balanceOf", "balanceOf(address)".into(), &[("account", "address")]),
+            "0x23b872dd" => ("transferFrom", "transferFrom(address,address,uint256)".into(), &[("from", "address"), ("to", "address"), ("value", "uint256")]),
+            "0x38ed1739" => ("swapExactTokensForTokens", "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)".into(), &[("amountIn", "uint256"), ("amountOutMin", "uint256")]),
+            "0x18c974f0" => ("swapExactETHForTokens", "swapExactETHForTokens(uint256,address[],address,uint256)".into(), &[("amountOutMin", "uint256")]),
+            "0xd058711f" => ("deposit", "deposit()".into(), &[]),
+            "0x2e1a7d4d" => ("withdraw", "withdraw(uint256)".into(), &[("wad", "uint256")]),
+            _ => ("unknown", format!("{}(bytes)", selector), &[]),
+        };
 
         let mut params = Vec::new();
         for (i, (p_name, p_type)) in param_defs.iter().enumerate() {
@@ -184,7 +183,7 @@ impl Web3Inspector {
         Some(AbiSelectorMatch {
             selector,
             function_name: func_name.to_string(),
-            signature: sig.to_string(),
+            signature: sig_owned,
             params,
         })
     }
@@ -192,13 +191,12 @@ impl Web3Inspector {
     /// EIP-55 Checksum Validator for Ethereum Addresses
     pub fn validate_eip55_checksum(address: &str) -> Eip55Status {
         let clean = address.trim().strip_prefix("0x").unwrap_or(address.trim());
-        if clean.len() != 40 || !clean.chars().all(|c| c.is_ascii_hexdigit()) {
+        if clean.len() != 40 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
             return Eip55Status::NotAnAddress;
         }
 
         let lower = clean.to_lowercase();
         let hash = keccak256(lower.as_bytes());
-        let hash_hex = hex::encode(hash);
 
         let mut expected = String::with_capacity(42);
         expected.push_str("0x");
@@ -207,7 +205,8 @@ impl Web3Inspector {
             if c.is_numeric() {
                 expected.push(c);
             } else {
-                let hash_nibble = u8::from_str_radix(&hash_hex[i..i + 1], 16).unwrap_or(0);
+                let byte = hash[i / 2];
+                let hash_nibble = if i % 2 == 0 { (byte >> 4) & 0x0F } else { byte & 0x0F };
                 if hash_nibble >= 8 {
                     expected.push(c.to_ascii_uppercase());
                 } else {
@@ -227,11 +226,17 @@ impl Web3Inspector {
 
 // Simple hex encoder module helper
 mod hex {
+    const HEX_CHARS: &[u8; 16] = b"0123456789abcdef";
+
+    #[allow(dead_code)]
     pub fn encode(data: impl AsRef<[u8]>) -> String {
-        data.as_ref()
-            .iter()
-            .map(|b| format!("{:02x}", b))
-            .collect()
+        let bytes = data.as_ref();
+        let mut out = String::with_capacity(bytes.len() * 2);
+        for &b in bytes {
+            out.push(HEX_CHARS[(b >> 4) as usize] as char);
+            out.push(HEX_CHARS[(b & 0x0f) as usize] as char);
+        }
+        out
     }
 }
 

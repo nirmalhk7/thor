@@ -5,6 +5,7 @@ use serde::{Deserialize, Serialize};
 pub struct LlmCostEstimate {
     pub model: String,
     pub prompt_tokens: usize,
+    pub cached_prompt_tokens: usize,
     pub completion_tokens: usize,
     pub total_tokens: usize,
     pub input_cost_usd: f64,
@@ -12,49 +13,51 @@ pub struct LlmCostEstimate {
     pub total_cost_usd: f64,
 }
 
-/// Model pricing per 1,000 tokens
+/// Model pricing per 1,000,000 tokens
 #[derive(Debug, Clone)]
 pub struct LlmModelPricing {
     pub model_name: &'static str,
-    pub input_price_per_1k: f64,
-    pub output_price_per_1k: f64,
+    pub input_price_per_1m: f64,
+    pub cache_read_price_per_1m: f64,
+    pub output_price_per_1m: f64,
 }
 
 pub const KNOWN_MODELS: &[LlmModelPricing] = &[
     LlmModelPricing {
-        model_name: "gpt-4",
-        input_price_per_1k: 0.03,
-        output_price_per_1k: 0.06,
+        model_name: "claude-3.7-sonnet",
+        input_price_per_1m: 3.00,
+        cache_read_price_per_1m: 0.30,
+        output_price_per_1m: 15.00,
+    },
+    LlmModelPricing {
+        model_name: "deepseek-r1",
+        input_price_per_1m: 0.55,
+        cache_read_price_per_1m: 0.14,
+        output_price_per_1m: 2.19,
     },
     LlmModelPricing {
         model_name: "gpt-4o",
-        input_price_per_1k: 0.0025,
-        output_price_per_1k: 0.01,
+        input_price_per_1m: 2.50,
+        cache_read_price_per_1m: 1.25,
+        output_price_per_1m: 10.00,
+    },
+    LlmModelPricing {
+        model_name: "gemini-2.0-flash",
+        input_price_per_1m: 0.10,
+        cache_read_price_per_1m: 0.025,
+        output_price_per_1m: 0.40,
     },
     LlmModelPricing {
         model_name: "claude-3.5-sonnet",
-        input_price_per_1k: 0.003,
-        output_price_per_1k: 0.015,
-    },
-    LlmModelPricing {
-        model_name: "claude-3-opus",
-        input_price_per_1k: 0.015,
-        output_price_per_1k: 0.075,
-    },
-    LlmModelPricing {
-        model_name: "gemini-1.5-pro",
-        input_price_per_1k: 0.00125,
-        output_price_per_1k: 0.005,
-    },
-    LlmModelPricing {
-        model_name: "gemini-1.5-flash",
-        input_price_per_1k: 0.000075,
-        output_price_per_1k: 0.0003,
+        input_price_per_1m: 3.00,
+        cache_read_price_per_1m: 0.30,
+        output_price_per_1m: 15.00,
     },
     LlmModelPricing {
         model_name: "llama-3-70b",
-        input_price_per_1k: 0.0007,
-        output_price_per_1k: 0.0009,
+        input_price_per_1m: 0.70,
+        cache_read_price_per_1m: 0.70,
+        output_price_per_1m: 0.90,
     },
 ];
 
@@ -67,6 +70,9 @@ pub struct SseStreamMetrics {
     pub tokens_per_sec: f64,
     pub accumulated_text: String,
     pub is_complete: bool,
+    pub tool_calls: Vec<String>,
+    pub finish_reason: Option<String>,
+    pub error: Option<String>,
 }
 
 /// SSE Stream Parser for tracking TTFT and streaming throughput
@@ -78,6 +84,10 @@ pub struct SseStreamParser {
     total_tokens: usize,
     accumulated_text: String,
     is_complete: bool,
+    buffer: String,
+    tool_calls: Vec<String>,
+    finish_reason: Option<String>,
+    error: Option<String>,
 }
 
 impl SseStreamParser {
@@ -89,48 +99,95 @@ impl SseStreamParser {
             total_tokens: 0,
             accumulated_text: String::new(),
             is_complete: false,
+            buffer: String::new(),
+            tool_calls: Vec::new(),
+            finish_reason: None,
+            error: None,
         }
     }
 
-    /// Process a raw SSE chunk string (e.g. `data: {"choices":[{"delta":{"content":"Hello"}}]}`)
+    /// Process a raw SSE chunk string across OpenAI, Anthropic, Gemini, and Ollama formats
     pub fn feed_chunk(&mut self, chunk_raw: &str, current_time_ms: u64) -> SseStreamMetrics {
         self.total_chunks += 1;
+        self.buffer.push_str(chunk_raw);
 
-        // Parse content delta from SSE data frame
-        for line in chunk_raw.lines() {
+        // Process full lines from the buffer
+        while let Some(pos) = self.buffer.find('\n') {
+            let line = self.buffer[..pos].to_string();
+            self.buffer.drain(..=pos);
             let trimmed = line.trim();
-            if trimmed == "data: [DONE]" {
+            if trimmed == "data: [DONE]" || trimmed.contains("\"type\":\"message_stop\"") {
                 self.is_complete = true;
                 continue;
             }
 
-            if let Some(payload) = trimmed.strip_prefix("data: ") {
-                if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload) {
-                    // OpenAI / generic format check: choices[0].delta.content or choices[0].text
-                    let content_delta = val["choices"][0]["delta"]["content"]
-                        .as_str()
-                        .or_else(|| val["choices"][0]["text"].as_str())
-                        .or_else(|| val["delta"]["text"].as_str())
-                        .or_else(|| val["content"].as_str());
+            let payload_str = if let Some(p) = trimmed.strip_prefix("data: ") {
+                p
+            } else {
+                trimmed
+            };
 
-                    if let Some(text) = content_delta {
-                        if !text.is_empty() {
-                            if self.first_token_time_ms.is_none() {
-                                self.first_token_time_ms = Some(current_time_ms);
-                            }
-                            let chunk_tokens = LlmStudio::count_tokens(text);
-                            self.total_tokens += chunk_tokens;
+            if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload_str) {
+                // OpenAI / generic delta content
+                let mut text_delta = val["choices"][0]["delta"]["content"].as_str()
+                    .or_else(|| val["choices"][0]["text"].as_str())
+                    .or_else(|| val["delta"]["text"].as_str())
+                    .or_else(|| val["content"].as_str());
+
+                // Anthropic Messages API: {"type":"content_block_delta", "delta":{"type":"text_delta","text":"..."}}
+                if text_delta.is_none() && val["type"] == "content_block_delta" {
+                    text_delta = val["delta"]["text"].as_str();
+                }
+
+                // Ollama Native Stream: {"response":"..."}
+                if text_delta.is_none() {
+                    text_delta = val["response"].as_str();
+                }
+
+                // Gemini REST Stream: candidates[0].content.parts[0].text
+                if text_delta.is_none() {
+                    text_delta = val["candidates"][0]["content"]["parts"][0]["text"].as_str();
+                }
+
+                if let Some(text) = text_delta {
+                    if !text.is_empty() {
+                        if self.first_token_time_ms.is_none() {
+                            self.first_token_time_ms = Some(current_time_ms);
+                        }
+                        let chunk_tokens = LlmStudio::count_tokens(text);
+                        self.total_tokens += chunk_tokens;
+                        if self.accumulated_text.len() < 10_000_000 {
                             self.accumulated_text.push_str(text);
                         }
                     }
-                } else if !payload.is_empty() && payload != "[DONE]" {
-                    // Raw string payload
-                    if self.first_token_time_ms.is_none() {
-                        self.first_token_time_ms = Some(current_time_ms);
+                }
+
+                if let Some(calls) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+                    for call in calls {
+                        if let Some(fn_name) = call["function"]["name"].as_str() {
+                            self.tool_calls.push(fn_name.to_string());
+                        }
                     }
-                    let chunk_tokens = LlmStudio::count_tokens(payload);
-                    self.total_tokens += chunk_tokens;
-                    self.accumulated_text.push_str(payload);
+                }
+
+                if let Some(reason) = val["choices"][0]["finish_reason"].as_str() {
+                    self.finish_reason = Some(reason.to_string());
+                    self.is_complete = true;
+                }
+
+                if let Some(err) = val["error"]["message"].as_str() {
+                    self.error = Some(err.to_string());
+                }
+
+            } else if !payload_str.is_empty() && payload_str != "[DONE]" && payload_str.starts_with("data:") {
+                // Raw string payload
+                if self.first_token_time_ms.is_none() {
+                    self.first_token_time_ms = Some(current_time_ms);
+                }
+                let chunk_tokens = LlmStudio::count_tokens(payload_str);
+                self.total_tokens += chunk_tokens;
+                if self.accumulated_text.len() < 10_000_000 {
+                    self.accumulated_text.push_str(payload_str);
                 }
             }
         }
@@ -157,33 +214,69 @@ impl SseStreamParser {
             tokens_per_sec,
             accumulated_text: self.accumulated_text.clone(),
             is_complete: self.is_complete,
+            tool_calls: self.tool_calls.clone(),
+            finish_reason: self.finish_reason.clone(),
+            error: self.error.clone(),
         }
     }
+}
+
+/// Local AI Provider status detection
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalLlmEndpoint {
+    pub provider: String,
+    pub base_url: String,
+    pub is_available: bool,
+    pub detected_models: Vec<String>,
 }
 
 /// AI / LLM Specialist Lens
 pub struct LlmStudio;
 
 impl LlmStudio {
+    /// Export clean context for AI with secrets redacted
+    pub fn clean_context_export(raw_context: &str, secrets: &[&str]) -> String {
+        let mut clean = raw_context.to_string();
+        for secret in secrets {
+            if !secret.is_empty() {
+                clean = clean.replace(secret, "[REDACTED]");
+            }
+        }
+        clean
+    }
+
     /// BPE heuristic token counter (~4 chars or 0.75 words per token)
     pub fn count_tokens(text: &str) -> usize {
         if text.is_empty() {
             return 0;
         }
-        let char_count = text.chars().count();
+        let char_count = if text.is_ascii() {
+            text.len()
+        } else {
+            text.chars().count()
+        };
         let word_count = text.split_whitespace().count();
 
-        // Blend character-based and word-based estimation
         let char_estimate = (char_count as f64 / 4.0).ceil() as usize;
         let word_estimate = ((word_count as f64) / 0.75).ceil() as usize;
 
         char_estimate.max(word_estimate).max(1)
     }
 
-    /// Estimate API cost for given model and token counts
+    /// Estimate API cost with optional prompt caching discount
     pub fn estimate_cost(
         model_name: &str,
         prompt_tokens: usize,
+        completion_tokens: usize,
+    ) -> LlmCostEstimate {
+        Self::estimate_cost_with_caching(model_name, prompt_tokens, 0, completion_tokens)
+    }
+
+    /// Estimate API cost considering cached prompt tokens
+    pub fn estimate_cost_with_caching(
+        model_name: &str,
+        prompt_tokens: usize,
+        cached_prompt_tokens: usize,
         completion_tokens: usize,
     ) -> LlmCostEstimate {
         let name_lower = model_name.to_lowercase();
@@ -193,19 +286,68 @@ impl LlmStudio {
             .or_else(|| KNOWN_MODELS.iter().find(|m| name_lower.contains(m.model_name)))
             .unwrap_or(&KNOWN_MODELS[0]);
 
-        let input_cost_usd = (prompt_tokens as f64 / 1000.0) * pricing.input_price_per_1k;
-        let output_cost_usd = (completion_tokens as f64 / 1000.0) * pricing.output_price_per_1k;
+        let uncached_prompt = prompt_tokens.saturating_sub(cached_prompt_tokens);
+        let input_cost_usd = ((uncached_prompt as f64 / 1_000_000.0) * pricing.input_price_per_1m)
+            + ((cached_prompt_tokens as f64 / 1_000_000.0) * pricing.cache_read_price_per_1m);
+        let output_cost_usd = (completion_tokens as f64 / 1_000_000.0) * pricing.output_price_per_1m;
         let total_cost_usd = input_cost_usd + output_cost_usd;
 
         LlmCostEstimate {
             model: pricing.model_name.to_string(),
             prompt_tokens,
+            cached_prompt_tokens,
             completion_tokens,
             total_tokens: prompt_tokens + completion_tokens,
             input_cost_usd,
             output_cost_usd,
             total_cost_usd,
         }
+    }
+
+    /// Probe local Ollama and vLLM developer endpoints
+    pub async fn probe_local_llm_endpoints() -> Vec<LocalLlmEndpoint> {
+        let client = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_millis(500))
+            .build()
+            .unwrap_or_default();
+
+        let mut results = Vec::new();
+
+        // 1. Probe Ollama on localhost:11434
+        if let Ok(res) = client.get("http://localhost:11434/api/tags").send().await {
+            if res.status().is_success() {
+                if let Ok(val) = res.json::<serde_json::Value>().await {
+                    let models = val["models"]
+                        .as_array()
+                        .map(|arr| {
+                            arr.iter()
+                                .filter_map(|m| m["name"].as_str().map(|s| s.to_string()))
+                                .collect()
+                        })
+                        .unwrap_or_default();
+                    results.push(LocalLlmEndpoint {
+                        provider: "Ollama".to_string(),
+                        base_url: "http://localhost:11434".to_string(),
+                        is_available: true,
+                        detected_models: models,
+                    });
+                }
+            }
+        }
+
+        // 2. Probe vLLM / LocalAI on localhost:8000
+        if let Ok(res) = client.get("http://localhost:8000/v1/models").send().await {
+            if res.status().is_success() {
+                results.push(LocalLlmEndpoint {
+                    provider: "vLLM".to_string(),
+                    base_url: "http://localhost:8000".to_string(),
+                    is_available: true,
+                    detected_models: vec!["vllm-local".to_string()],
+                });
+            }
+        }
+
+        results
     }
 }
 

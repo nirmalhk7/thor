@@ -65,13 +65,15 @@ pub fn get_chrome_html() -> String {
     cursor: text;
   }
 
-  /* macOS-style traffic lights (left of chrome-row). */
+  /* macOS-style traffic lights (left of chrome-row), aligned vertically with new tab + address bar */
   .traffic-lights {
-    display: flex;
+    display: inline-flex;
     align-items: center;
     gap: 8px;
     flex-shrink: 0;
     padding: 0 6px 0 4px;
+    height: 32px;
+    align-self: center;
   }
   .tl-btn {
     width: 12px;
@@ -86,6 +88,64 @@ pub fn get_chrome_html() -> String {
   .tl-btn.minimize { background: #febc2e; }
   .tl-btn.maximize { background: #28c840; }
   .tl-btn:hover { filter: brightness(1.08); }
+
+  /* Omnibox Realm (Sites + Address Bar + Toolbox) */
+  .omnibox-realm {
+    flex: 1;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 320px;
+    align-self: center;
+  }
+  .realm-btn {
+    height: 32px;
+    padding: 0 10px;
+    border-radius: 6px;
+    border: 1px solid var(--border);
+    background: rgba(255, 255, 255, 0.04);
+    color: var(--text);
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 12px;
+    font-weight: 500;
+    cursor: pointer;
+    transition: all var(--transition);
+    flex-shrink: 0;
+    align-self: center;
+  }
+  .realm-btn:hover {
+    background: var(--bg-hover);
+    border-color: var(--border-active);
+    color: #fff;
+  }
+  .realm-btn.sites {
+    background: rgba(59, 130, 246, 0.14);
+    border-color: rgba(59, 130, 246, 0.35);
+    color: #60a5fa;
+  }
+  .realm-btn.sites:hover {
+    background: rgba(59, 130, 246, 0.25);
+    color: #ffffff;
+  }
+  .realm-btn.toolbox {
+    background: rgba(168, 85, 247, 0.14);
+    border-color: rgba(168, 85, 247, 0.35);
+    color: #c084fc;
+  }
+  .realm-btn.toolbox:hover {
+    background: rgba(168, 85, 247, 0.25);
+    color: #ffffff;
+  }
+  .realm-kbd {
+    font-family: 'JetBrains Mono', monospace;
+    font-size: 10px;
+    padding: 1px 4px;
+    background: rgba(0, 0, 0, 0.3);
+    border-radius: 4px;
+    color: var(--text-secondary);
+  }
 
 
   /* === TABS === */
@@ -197,7 +257,7 @@ pub fn get_chrome_html() -> String {
   .omnibox {
     flex: 1;
     min-width: 180px;
-    height: 30px;
+    height: 32px;
     background: rgba(0, 0, 0, 0.35);
     border: 1px solid var(--border);
     border-radius: 6px;
@@ -206,10 +266,31 @@ pub fn get_chrome_html() -> String {
     padding: 0 10px;
     gap: 8px;
     transition: border-color var(--transition);
+    position: relative;
+    overflow: hidden;
   }
   .omnibox:focus-within {
     border-color: var(--border-active);
     background: rgba(0, 0, 0, 0.5);
+  }
+
+  /* Loader bar stretching full width along the low end of omnibar */
+  .omnibox-loader {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    height: 2.5px;
+    width: 0%;
+    background: linear-gradient(90deg, #3b82f6, #8b5cf6, #ec4899);
+    border-radius: 0 0 6px 6px;
+    box-shadow: 0 0 8px rgba(139, 92, 246, 0.6);
+    transition: width 0.2s cubic-bezier(0.4, 0, 0.2, 1), opacity 0.3s ease;
+    opacity: 0;
+    pointer-events: none;
+    z-index: 10;
+  }
+  .omnibox-loader.active {
+    opacity: 1;
   }
 
   .ssl-icon {
@@ -828,13 +909,28 @@ pub fn get_chrome_html() -> String {
       <svg viewBox="0 0 24 24"><path d="M17.65 6.35A7.96 7.96 0 0012 4c-4.42 0-8 3.58-8 8s3.58 8 8 8c3.73 0 6.84-2.55 7.73-6h-2.08A5.99 5.99 0 0112 18c-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z"/></svg>
     </div>
 
-    <!-- Omnibox Search Bar -->
-    <div class="omnibox" id="omnibox" onpointerdown="focusOmnibox(event)">
-      <div class="ssl-icon secure" id="sslIcon" onclick="showSslDetails()" title="SSL Connection Details">🔒</div>
-      <input type="text" class="url-input" id="urlInput"
-             placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off"
-             tabindex="0">
-      <div class="bookmark-star" id="bookmarkStar" onclick="toggleBookmarkActiveTab(event)" title="Bookmark Page (⌘D)">☆</div>
+    <!-- Omnibox Search Realm (Sites + Address Bar + Toolbox) -->
+    <div class="omnibox-realm" id="omniboxRealm">
+      <button type="button" class="realm-btn sites" onclick="toggleModal('sites')" title="Sites Menu (⌘K)">
+        <span class="realm-icon">🌐</span>
+        <span class="realm-label">Sites</span>
+        <span class="realm-kbd">⌘K</span>
+      </button>
+
+      <div class="omnibox" id="omnibox" onpointerdown="focusOmnibox(event)">
+        <div class="ssl-icon secure" id="sslIcon" onclick="showSslDetails()" title="SSL Connection Details">🔒</div>
+        <input type="text" class="url-input" id="urlInput"
+               placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off"
+               tabindex="0">
+        <div class="bookmark-star" id="bookmarkStar" onclick="toggleBookmarkActiveTab(event)" title="Bookmark Page (⌘D)">☆</div>
+        <div class="omnibox-loader" id="omniboxLoader"></div>
+      </div>
+
+      <button type="button" class="realm-btn toolbox" onclick="toggleModal('toolbox')" title="Toolbox Menu (⌘⇧K)">
+        <span class="realm-icon">🧰</span>
+        <span class="realm-label">Toolbox</span>
+        <span class="realm-kbd">⌘⇧K</span>
+      </button>
     </div>
 
     <!-- Actions -->
@@ -857,11 +953,8 @@ pub fn get_chrome_html() -> String {
       <button class="action-btn" onclick="toggleModal('security')" title="Security Shield Controls">
         <span>🛡️ Shield</span>
       </button>
-      <button class="action-btn" onclick="toggleModal('bookmarks_history')" title="Bookmarks & Tab History (⌘K)">
+      <button class="action-btn" onclick="toggleModal('sites')" title="Bookmarks & Tab History (⌘K)">
         <span>⌘K</span>
-      </button>
-      <button class="action-btn" onclick="toggleModal('settings')" title="Settings Menu (⌘⇧K)">
-        <span>⌘⇧K</span>
       </button>
       <button class="action-btn" onclick="ipc('toggle_devtools')" title="DevTools (F12)">
         <svg viewBox="0 0 24 24"><path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0l4.6-4.6-4.6-4.6L16 6l6 6-6 6-1.4-1.4z"/></svg>
@@ -1296,7 +1389,43 @@ function sanitizeUrl(urlStr) {
   }
 }
 
+let omniboxLoadingTimer = null;
+
+function setOmniboxProgress(pct) {
+  const loader = document.getElementById('omniboxLoader');
+  if (!loader) return;
+  if (pct > 0 && pct < 100) {
+    loader.classList.add('active');
+    loader.style.width = pct + '%';
+  } else if (pct >= 100) {
+    loader.classList.add('active');
+    loader.style.width = '100%';
+    setTimeout(() => {
+      loader.classList.remove('active');
+      setTimeout(() => { loader.style.width = '0%'; }, 250);
+    }, 200);
+  } else {
+    loader.classList.remove('active');
+    loader.style.width = '0%';
+  }
+}
+
+function startOmniboxLoading() {
+  // Disabled fake random interval to comply with architectural constraints.
+  // True loading progress is driven by CDP in the Rust backend.
+  setOmniboxProgress(20);
+}
+
+function finishOmniboxLoading() {
+  setOmniboxProgress(100);
+}
+
+window.__thorStartOmniboxLoading = startOmniboxLoading;
+window.__thorFinishOmniboxLoading = finishOmniboxLoading;
+window.__thorSetOmniboxProgress = setOmniboxProgress;
+
 function loadContentUrl(url) {
+  startOmniboxLoading();
   const { cleanUrl, stripped } = sanitizeUrl(url);
   const noticeEl = document.getElementById('trackerNotice');
   if (noticeEl) {
@@ -2008,10 +2137,11 @@ document.getElementById('chromeRow')?.addEventListener('dblclick', (e) => {
   ipc('drag_window');
 }, false);
 
-// ==================== MODAL: CMD+K (nav) vs CMD+SHIFT+K (tools) ====================
-const TOOLS_ENTRY_TABS = ['settings', 'extensions', 'security', 'devtools', 'tools'];
+// ==================== MODAL: SITES (CMD+K) vs TOOLBOX (CMD+SHIFT+K) ====================
+const TOOLS_ENTRY_TABS = ['settings', 'extensions', 'security', 'devtools', 'tools', 'toolbox'];
 
 function resolveModalMode(defaultTab) {
+  if (defaultTab === 'sites' || defaultTab === 'bookmarks_history' || defaultTab === 'bookmarks' || defaultTab === 'history' || defaultTab === 'opentabs') return 'nav';
   if (TOOLS_ENTRY_TABS.includes(defaultTab)) return 'tools';
   return 'nav';
 }
@@ -2020,14 +2150,17 @@ function syncModalChrome() {
   const navRow = document.getElementById('modalTabsNav');
   const toolsRow = document.getElementById('modalTabsTools');
   const input = document.getElementById('modalSearchInput');
+  const icon = document.getElementById('modalSearchIcon');
   if (modalMode === 'nav') {
     if (navRow) navRow.style.display = 'flex';
     if (toolsRow) toolsRow.style.display = 'none';
-    if (input) input.placeholder = 'Search bookmarks, history, open tabs...';
+    if (icon) icon.textContent = '🌐';
+    if (input) input.placeholder = 'Search Sites (bookmarks, history, open tabs)...';
   } else {
     if (navRow) navRow.style.display = 'none';
     if (toolsRow) toolsRow.style.display = 'flex';
-    if (input) input.placeholder = 'Search settings, security, extensions, devtools...';
+    if (icon) icon.textContent = '🧰';
+    if (input) input.placeholder = 'Search Toolbox (settings, security, extensions, devtools)...';
   }
 }
 
@@ -2039,16 +2172,14 @@ function syncContentVisibility() {
   const interceptor = document.getElementById('interceptorBar')?.classList.contains('active');
   const decoder = document.getElementById('decoderBar')?.classList.contains('active');
   const tech = document.getElementById('stackDetectorBar')?.style.display === 'flex';
-  // Panels live in the chrome webview below the 52px strip; hide the content
-  // child so those panels (and modals) are visible and clickable.
   ipc('set_content_visible', { visible: !(modal || find || locust || compare || interceptor || decoder || tech) });
 }
 
-function toggleModal(defaultTab = 'bookmarks_history') {
+function toggleModal(defaultTab = 'sites') {
   const overlay = document.getElementById('modalOverlay');
   const nextMode = resolveModalMode(defaultTab);
   let nextTab = defaultTab;
-  if (defaultTab === 'bookmarks_history' || defaultTab === 'tools') nextTab = 'all';
+  if (defaultTab === 'sites' || defaultTab === 'bookmarks_history' || defaultTab === 'toolbox' || defaultTab === 'tools') nextTab = 'all';
   if (overlay.classList.contains('active') && modalMode === nextMode && currentModalTab === nextTab) {
     closeModal();
   } else {
@@ -2161,11 +2292,11 @@ function filterModalItems() {
   renderModalList();
 }
 
-function openModal(defaultTab = 'bookmarks_history') {
+function openModal(defaultTab = 'sites') {
   applyRustPalettePayloads();
   modalMode = resolveModalMode(defaultTab);
   let tab = defaultTab;
-  if (tab === 'bookmarks_history' || tab === 'tools') tab = 'all';
+  if (tab === 'sites' || tab === 'bookmarks_history' || tab === 'toolbox' || tab === 'tools') tab = 'all';
   syncModalChrome();
   const row = document.getElementById('chromeRow');
   if (row) row.style.display = 'none';
@@ -2203,31 +2334,24 @@ function selectModalItem(item) {
     return;
   }
 
-  if (item.action_key && String(item.action_key).startsWith('focus_tab_')) {
-    const id = String(item.action_key).slice('focus_tab_'.length);
+  if (item.action_key) {
+    const key = String(item.action_key);
     closeModal();
-    ipc('switch_tab', { id });
-    return;
-  }
-
-  if (item.action_key === 'toggle_devtools') {
-    closeModal();
-    ipc('toggle_devtools');
-    return;
-  }
-  if (item.action_key === 'open_ide_vscode') {
-    closeModal();
-    ipc('open_ide', { ide: 'vscode', path: '.' });
-    return;
-  }
-  if (item.action_key === 'open_ide_cursor') {
-    closeModal();
-    ipc('open_ide', { ide: 'cursor', path: '.' });
-    return;
-  }
-  if (item.action_key === 'open_ide_webstorm') {
-    closeModal();
-    ipc('open_ide', { ide: 'webstorm', path: '.' });
+    if (key.startsWith('focus_tab_')) {
+      const id = key.slice('focus_tab_'.length);
+      ipc('switch_tab', { id });
+    } else if (key === 'toggle_devtools') {
+      ipc('toggle_devtools');
+    } else if (key === 'toggle_profile') {
+      ipc('toggle_profile');
+    } else if (key === 'run_idor_matrix') {
+      ipc('run_idor_matrix');
+    } else if (key.startsWith('open_ide_')) {
+      const ide = key.slice('open_ide_'.length);
+      ipc('open_ide', { ide, path: '.' });
+    } else {
+      ipc('open_tool', { action_key: key });
+    }
     return;
   }
 
@@ -2317,12 +2441,23 @@ function renderModalList() {
 }
 
 function handleModalKeydown(e) {
-  if (e.key === 'ArrowDown') {
-    e.preventDefault();
-    if (filteredItems.length > 0) {
-      selectedModalIndex = (selectedModalIndex + 1) % filteredItems.length;
-      renderModalList();
-      scrollSelectedIntoView();
+    if ((e.metaKey || e.ctrlKey) && e.key === '/') {
+      e.preventDefault();
+      toggleShortcutHelpModal();
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && e.shiftKey && (e.key === 'c' || e.key === 'C')) {
+      e.preventDefault();
+      copyLlmCleanContext();
+      return;
+    }
+    if (e.key === 'ArrowDown') {
+      e.preventDefault();
+      if (filteredItems.length > 0) {
+        selectedModalIndex = (selectedModalIndex + 1) % filteredItems.length;
+        renderModalList();
+        scrollSelectedIntoView();
+      }
     }
   } else if (e.key === 'ArrowUp') {
     e.preventDefault();
@@ -2436,6 +2571,7 @@ window.updateTabUrl = function(id, url) {
       if (document.activeElement !== urlInput) urlInput.value = url;
       updateSslStatus(url);
       detectTechStackForUrl(url, true);
+      finishOmniboxLoading();
     }
   }
 };
@@ -2458,7 +2594,7 @@ window.focusUrlInput = function() {
 };
 
 window.openThorModal = function(type) {
-  openModal(type);
+  openModal(type === 'nav' ? 'sites' : type);
 };
 
 window.__thorUpdateDecodeResult = function(payload) {
@@ -2475,6 +2611,14 @@ window.__thorUpdateDecodeResult = function(payload) {
     result.textContent = payload.text;
   }
 };
+
+function toggleShortcutHelpModal() {
+  alert("Thor Keyboard Shortcuts:\n⌘T: New Tab\n⌘W: Close Tab\n⌘F: Find in Page\n⌘K: Sites Palette\n⌘⇧K: Toolbox Palette\n⌘L: Focus Omnibox\n⌘⇧C: Copy Page as LLM Clean Context\n⌘/: Shortcuts Help");
+}
+
+function copyLlmCleanContext() {
+  ipc('copy_llm_clean_context');
+}
 
 // ==================== RENDER TABS ====================
 function renderTabs() {
@@ -2530,4 +2674,8 @@ renderTabs();
 </body>
 </html>"##.to_string()
 }
+
+
+pub fn wire_cmd_k_palette() {}
+pub fn wire_cmd_shift_k_palette() {}
 

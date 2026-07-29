@@ -13,6 +13,22 @@ use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::thread;
 
+/// The source of the Chromium executable.
+#[derive(Debug, Clone)]
+pub enum ChromiumSource {
+    Bundled(PathBuf),
+    DevelopmentOverride(PathBuf),
+}
+
+impl ChromiumSource {
+    pub fn executable_path(&self) -> &Path {
+        match self {
+            Self::Bundled(p) => p.as_path(),
+            Self::DevelopmentOverride(p) => p.as_path(),
+        }
+    }
+}
+
 use anyhow::anyhow;
 use chromiumoxide::browser::{Browser, BrowserConfig, BrowserConfigBuilder};
 use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
@@ -88,35 +104,53 @@ pub fn default_thor_profile_dir() -> PathBuf {
 }
 
 /// Resolve the Chromium/Chrome binary path.
-pub fn discover_chromium_path() -> Option<PathBuf> {
-    if let Ok(path) = std::env::var(THOR_CHROMIUM_PATH_ENV) {
-        let p = PathBuf::from(path);
-        if p.is_file() || p.exists() {
-            return Some(p);
-        }
+pub fn discover_chromium_path() -> Option<ChromiumSource> {
+    #[cfg(not(debug_assertions))]
+    {
+        Some(ChromiumSource::Bundled(crate::paths::thor_bundled_chromium_path()))
     }
 
-    for candidate in common_chromium_candidates() {
-        if candidate.is_file() || candidate.exists() {
-            return Some(candidate);
+    #[cfg(debug_assertions)]
+    {
+        if let Ok(path) = std::env::var(THOR_CHROMIUM_PATH_ENV) {
+            let p = PathBuf::from(path);
+            if p.is_file() || p.exists() {
+                return Some(ChromiumSource::DevelopmentOverride(p));
+            }
         }
-    }
 
-    for name in [
-        "google-chrome-stable",
-        "google-chrome",
-        "chromium",
-        "chromium-browser",
-        "chrome",
-        "msedge",
-        "microsoft-edge",
-    ] {
-        if let Some(p) = path_lookup(name) {
-            return Some(p);
+        let local_cache = crate::paths::thor_data_dir()
+            .join("ChromiumCache")
+            .join("Chromium.app")
+            .join("Contents")
+            .join("MacOS")
+            .join("Chromium");
+        if local_cache.is_file() || local_cache.exists() {
+            return Some(ChromiumSource::DevelopmentOverride(local_cache));
         }
-    }
 
-    None
+        for candidate in common_chromium_candidates() {
+            if candidate.is_file() || candidate.exists() {
+                return Some(ChromiumSource::DevelopmentOverride(candidate));
+            }
+        }
+
+        for name in [
+            "google-chrome-stable",
+            "google-chrome",
+            "chromium",
+            "chromium-browser",
+            "chrome",
+            "msedge",
+            "microsoft-edge",
+        ] {
+            if let Some(p) = path_lookup(name) {
+                return Some(ChromiumSource::DevelopmentOverride(p));
+            }
+        }
+
+        None
+    }
 }
 
 /// Candidate install locations (platform-specific). Documented fallback list.
@@ -197,7 +231,7 @@ fn path_lookup(name: &str) -> Option<PathBuf> {
 fn build_browser_config(cfg: &ChromiumRuntimeConfig) -> ChromiumResult<(BrowserConfig, PathBuf)> {
     let executable = match &cfg.executable {
         Some(p) => p.clone(),
-        None => discover_chromium_path().ok_or(ChromiumError::NotFound)?,
+        None => discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf(),
     };
 
     let mut builder: BrowserConfigBuilder = BrowserConfig::builder()
@@ -522,7 +556,7 @@ mod tests {
         let _ = std::fs::remove_file(&fake);
         let _ = std::fs::remove_dir(&dir);
 
-        assert_eq!(found.as_deref(), Some(fake.as_path()));
+        assert_eq!(found.map(|s| s.executable_path().to_path_buf()).as_deref(), Some(fake.as_path()));
     }
 
     #[test]
@@ -544,7 +578,7 @@ mod tests {
     #[test]
     #[ignore = "requires a live Chrome/Chromium install"]
     fn live_launch_smoke() {
-        let path = discover_chromium_path().expect("Chrome not installed");
+        let path = discover_chromium_path().expect("Chrome not installed").executable_path().to_path_buf();
         let cfg = ChromiumRuntimeConfig {
             executable: Some(path),
             headful: false,
@@ -559,5 +593,45 @@ mod tests {
         rt.close_tab_blocking(tab).expect("close tab");
         Arc::clone(&rt).shutdown_blocking().expect("shutdown");
         let _ = Duration::from_millis(1);
+    }
+
+    #[test]
+    fn test_concurrent_tab_id_generation() {
+        use std::thread;
+        use std::sync::{Arc, Mutex};
+        
+        let thread_count = 10;
+        let iters_per_thread = 100_000; // 1,000,000 total IDs
+        let mut handles = vec![];
+        let results = Arc::new(Mutex::new(Vec::with_capacity(thread_count * iters_per_thread)));
+        
+        for _ in 0..thread_count {
+            let results_clone = Arc::clone(&results);
+            handles.push(thread::spawn(move || {
+                let mut local_ids = Vec::with_capacity(iters_per_thread);
+                for _ in 0..iters_per_thread {
+                    local_ids.push(crate::engine::chromium_runtime::next_tab_id().0);
+                }
+                results_clone.lock().unwrap().extend(local_ids);
+            }));
+        }
+        
+        for h in handles {
+            h.join().unwrap();
+        }
+        
+        let all_ids = results.lock().unwrap();
+        assert_eq!(all_ids.len(), thread_count * iters_per_thread, "Should generate 1,000,000 IDs");
+        
+        // Use a boolean array for fast unique check if IDs are sequential, 
+        // or a HashSet since memory is fine (1M elements in HashSet is ~16MB).
+        // A vec with sort and dedup is faster.
+        let mut sorted_ids = all_ids.clone();
+        sorted_ids.sort_unstable();
+        let original_len = sorted_ids.len();
+        sorted_ids.dedup();
+        let dedup_len = sorted_ids.len();
+        
+        assert_eq!(original_len, dedup_len, "Found {} collisions in Tab ID generation!", original_len - dedup_len);
     }
 }

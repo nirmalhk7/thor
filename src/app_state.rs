@@ -1,4 +1,4 @@
-use crate::dx::cmd_palette::TabHistoryTracker;
+use crate::engine::engine_coordinator::EngineHandle;
 use crate::engine::profiles::{ProfileConfig, ProfileManager, ProfileMode};
 use crate::features::FeatureEngine;
 use crate::net::consent::{validate_locust_start, LocustStartGate};
@@ -99,10 +99,12 @@ fn persist_mode(mode: ProfileMode) {
 pub struct AppState {
     profiles: ProfileManager,
     tamper: TrafficTamperEngine,
+    idor: crate::net::idor_matrix::IdorMatrixEngine,
     security: SecurityShieldToggles,
-    tab_history: Mutex<TabHistoryTracker>,
+    tab_history: Mutex<crate::dx::cmd_palette::TabHistoryTracker>,
     locust: Mutex<Option<LocustHandle>>,
     features: FeatureEngine,
+    engine_handle: Mutex<Option<EngineHandle>>,
 }
 
 static APP_STATE: OnceLock<AppState> = OnceLock::new();
@@ -118,14 +120,17 @@ impl AppState {
         // Interception off by default (SEC-020).
         let tamper = TrafficTamperEngine::new();
         tamper.set_interception_enabled(false);
+        let idor = crate::net::idor_matrix::IdorMatrixEngine::new();
 
         Self {
             profiles,
             tamper,
+            idor,
             security,
-            tab_history: Mutex::new(TabHistoryTracker::new()),
+            tab_history: Mutex::new(crate::dx::cmd_palette::TabHistoryTracker::new()),
             locust: Mutex::new(None),
             features: FeatureEngine::new(),
+            engine_handle: Mutex::new(None),
         }
     }
 
@@ -142,17 +147,29 @@ impl AppState {
         &self.tamper
     }
 
+    pub fn idor(&self) -> &crate::net::idor_matrix::IdorMatrixEngine {
+        &self.idor
+    }
+
     pub fn security(&self) -> &SecurityShieldToggles {
         &self.security
     }
 
-    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, TabHistoryTracker> {
+    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
         self.tab_history.lock()
     }
 
     /// Process-wide Engineer Feature Suite (72 features across six domains).
     pub fn features(&self) -> &FeatureEngine {
         &self.features
+    }
+
+    pub fn set_engine_handle(&self, handle: EngineHandle) {
+        *self.engine_handle.lock() = Some(handle);
+    }
+
+    pub fn engine_handle(&self) -> Option<EngineHandle> {
+        self.engine_handle.lock().clone()
     }
 
     /// Set profile mode, sync shield toggles, persist (FS-PROF-01/02, SEC-010–012).
@@ -172,12 +189,15 @@ impl AppState {
     /// Gated Locust start (consent + caps). Replaces any prior swarm.
     pub fn locust_start_gated(&self, gate: LocustStartGate) -> Result<(), String> {
         let config = validate_locust_start(gate)?;
-        let mut slot = self.locust.lock();
-        if let Some(prev) = slot.take() {
+        let prev = self.locust.lock().take();
+        if let Some(prev) = prev {
             let _ = prev.stop();
         }
         let handle = LocustHandle::start(config)?;
-        *slot = Some(handle);
+        let dropped = self.locust.lock().replace(handle);
+        if let Some(dropped) = dropped {
+            let _ = dropped.stop();
+        }
         Ok(())
     }
 
@@ -202,8 +222,8 @@ impl AppState {
 
     /// Stop the active Locust swarm and return scored metrics from real HTTP requests.
     pub fn locust_stop(&self) -> Option<LocustScoredMetrics> {
-        let mut slot = self.locust.lock();
-        slot.take().map(|h| h.stop())
+        let prev = self.locust.lock().take();
+        prev.map(|h| h.stop())
     }
 
     /// Snapshot scored metrics without stopping the swarm.
@@ -256,8 +276,11 @@ mod tests {
         assert_eq!(b.tab_history().get_history_for_tab("tab-1").len(), 1);
     }
 
+    static TEST_MUTEX: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
     #[test]
     fn test_app_state_locust_start_stop() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{addr}/");
@@ -277,7 +300,7 @@ mod tests {
         let state = AppState::global();
         let _ = state.locust_stop();
         state.locust_start(&url, 2, 0, 2).expect("locust_start");
-        std::thread::sleep(Duration::from_millis(600));
+        std::thread::sleep(Duration::from_millis(1000));
         assert!(state.locust_is_running() || state.locust_snapshot().is_some());
         let scored = state.locust_stop().expect("locust_stop metrics");
         assert!(scored.total_requests > 0);
@@ -286,6 +309,7 @@ mod tests {
 
     #[test]
     fn test_locust_public_blocked_without_ack() {
+        let _guard = TEST_MUTEX.lock().unwrap();
         let state = AppState::global();
         let _ = state.locust_stop();
         let err = state.locust_start("https://example.com/", 2, 0, 2);

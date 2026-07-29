@@ -3,28 +3,30 @@ use std::collections::HashSet;
 /// Default Tracking Parameter Stripper & Security Anti-Tracking Shield
 pub struct SecurityShield;
 
+const TRACKING_PARAMS: &[&str] = &[
+    "utm_source",
+    "utm_medium",
+    "utm_campaign",
+    "utm_term",
+    "utm_content",
+    "gclid",
+    "fbclid",
+    "msclkid",
+    "yclid",
+    "mc_eid",
+    "_hsenc",
+    "dclid",
+    "ref_",
+    "s_kwcid",
+    "si",
+    "igshid",
+    "ttclid",
+];
+
 impl SecurityShield {
     /// List of known tracking parameters to strip automatically from all URLs
     pub fn tracking_parameters() -> HashSet<&'static str> {
-        let mut set = HashSet::new();
-        set.insert("utm_source");
-        set.insert("utm_medium");
-        set.insert("utm_campaign");
-        set.insert("utm_term");
-        set.insert("utm_content");
-        set.insert("gclid");
-        set.insert("fbclid");
-        set.insert("msclkid");
-        set.insert("yclid");
-        set.insert("mc_eid");
-        set.insert("_hsenc");
-        set.insert("dclid");
-        set.insert("ref_");
-        set.insert("s_kwcid");
-        set.insert("si"); // YouTube tracking ID
-        set.insert("igshid"); // Instagram tracking ID
-        set.insert("ttclid"); // TikTok tracking ID
-        set
+        TRACKING_PARAMS.iter().copied().collect()
     }
 
     /// Checks whether a parameter key is a tracking parameter (including any starting with utm_)
@@ -33,27 +35,15 @@ impl SecurityShield {
         if key_lower.starts_with("utm_") {
             return true;
         }
-        let tracker_set = Self::tracking_parameters();
-        tracker_set.contains(key_lower.as_str())
+        TRACKING_PARAMS.contains(&key_lower.as_str())
     }
 
-    /// Strips tracking parameters from a URL string, returning the sanitized URL and whether any params were stripped.
-    pub fn sanitize_url(url_str: &str) -> (String, bool) {
-        if !url_str.contains('?') {
-            return (url_str.to_string(), false);
+    /// Helper to strip tracking parameters from a URL path or fragment component containing a `?`.
+    fn sanitize_query_string(url_part: &str) -> (String, bool) {
+        if !url_part.contains('?') {
+            return (url_part.to_string(), false);
         }
-
-        // Separate hash fragment if present
-        let (url_without_hash, fragment) = match url_str.rsplit_once('#') {
-            Some((before, hash)) => (before, Some(hash)),
-            None => (url_str, None),
-        };
-
-        if !url_without_hash.contains('?') {
-            return (url_str.to_string(), false);
-        }
-
-        let parts: Vec<&str> = url_without_hash.splitn(2, '?').collect();
+        let parts: Vec<&str> = url_part.splitn(2, '?').collect();
         let base = parts[0];
         let query = parts[1];
 
@@ -64,7 +54,7 @@ impl SecurityShield {
             if pair.is_empty() {
                 continue;
             }
-            let key = pair.split('=').next().unwrap_or("");
+            let key = pair.split('=').next().unwrap_or("").trim_start_matches('?');
             if Self::is_tracking_parameter(key) {
                 stripped = true;
             } else {
@@ -73,16 +63,49 @@ impl SecurityShield {
         }
 
         if !stripped {
+            return (url_part.to_string(), false);
+        }
+
+        if clean_params.is_empty() {
+            (base.to_string(), true)
+        } else {
+            (format!("{}?{}", base, clean_params.join("&")), true)
+        }
+    }
+
+    /// Strips tracking parameters from a URL string, returning the sanitized URL and whether any params were stripped.
+    pub fn sanitize_url(url_str: &str) -> (String, bool) {
+        if !url_str.contains('?') {
             return (url_str.to_string(), false);
         }
 
-        let clean_query_url = if clean_params.is_empty() {
-            base.to_string()
-        } else {
-            format!("{}?{}", base, clean_params.join("&"))
+        // Separate hash fragment if present (must use split_once to avoid truncating multiple hashes)
+        let (url_without_hash, fragment) = match url_str.split_once('#') {
+            Some((before, hash)) => (before, Some(hash)),
+            None => (url_str, None),
         };
 
-        let clean_url = match fragment {
+        let (clean_query_url, query_stripped) = Self::sanitize_query_string(url_without_hash);
+
+        let (clean_fragment, frag_stripped) = match fragment {
+            Some(frag) => {
+                if frag.contains('?') {
+                    let (c, s) = Self::sanitize_query_string(frag);
+                    (Some(c), s)
+                } else {
+                    (Some(frag.to_string()), false)
+                }
+            }
+            None => (None, false),
+        };
+
+        let stripped = query_stripped || frag_stripped;
+        
+        if !stripped {
+            return (url_str.to_string(), false);
+        }
+
+        let clean_url = match clean_fragment {
             Some(frag) => format!("{}#{}", clean_query_url, frag),
             None => clean_query_url,
         };

@@ -8,11 +8,34 @@ pub struct TechBadge {
     pub icon: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub enum RenderingMode {
+    Ssr,
+    Csr,
+    Hybrid,
+    Unknown,
+}
+
+impl Default for RenderingMode {
+    fn default() -> Self {
+        Self::Unknown
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct DevComponentLocation {
+    pub component_name: String,
+    pub file_path: String,
+    pub line: u32,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct DetectedStack {
     pub url: String,
     pub badges: Vec<TechBadge>,
     pub server_header: Option<String>,
+    pub rendering_mode: RenderingMode,
+    pub dev_components: Vec<DevComponentLocation>,
 }
 
 pub struct TechStackDetector;
@@ -20,7 +43,7 @@ pub struct TechStackDetector;
 impl TechStackDetector {
     /// Detect tech stack from URL, meta generator tag, HTML content snippet, or response server header
     pub fn detect(url: &str, html_snippet: &str, server_header: Option<&str>) -> DetectedStack {
-        let mut headers = HashMap::new();
+        let mut headers = HashMap::with_capacity(server_header.map_or(0, |_| 1));
         if let Some(srv) = server_header {
             headers.insert("server".to_string(), srv.to_string());
         }
@@ -241,14 +264,67 @@ impl TechStackDetector {
             }
         }
 
-        // Default fallback if no specific framework detected
+        // Determine Rendering Mode (SSR vs CSR vs Hybrid)
+        let rendering_mode = if html_lower.contains("__next_data__")
+            || html_lower.contains("__nuxt")
+            || html_lower.contains("window.__initial_state__")
+            || html_lower.contains("data-reactroot")
+        {
+            RenderingMode::Ssr
+        } else if html_lower.contains("id=\"root\"")
+            || html_lower.contains("id=\"app\"")
+            || html_lower.contains("<div id=\"app\"></div>")
+        {
+            RenderingMode::Csr
+        } else if badges.iter().any(|b| b.category == "Framework") {
+            RenderingMode::Hybrid
+        } else {
+            RenderingMode::Unknown
+        };
+
+        // Extract IDE component file locations (e.g. data-source-file="src/App.tsx:42")
+        let mut dev_components = Vec::new();
+        for marker in &["data-source-file=\"", "data-file=\"", "_jsxFileName=\""] {
+            let mut search_idx = 0;
+            while let Some(pos) = html_snippet[search_idx..].find(marker) {
+                let start = search_idx + pos + marker.len();
+                if let Some(end) = html_snippet[start..].find('"') {
+                    let raw_val = &html_snippet[start..start + end];
+                    let parts: Vec<&str> = raw_val.split(':').collect();
+                    let file_path = parts.first().unwrap_or(&raw_val).to_string();
+                    let line: u32 = parts.get(1).and_then(|s| s.parse().ok()).unwrap_or(1);
+                    let comp_name = std::path::Path::new(&file_path)
+                        .file_name()
+                        .and_then(|s| s.to_str())
+                        .unwrap_or("Component")
+                        .to_string();
+
+                    dev_components.push(DevComponentLocation {
+                        component_name: comp_name,
+                        file_path,
+                        line,
+                    });
+                }
+                search_idx = start;
+                if dev_components.len() >= 10 {
+                    break;
+                }
+            }
+        }
+
         if badges.is_empty() {
-            if url_lower.contains("github") {
-                badges.push(TechBadge { name: "Ruby / Go / React".into(), category: "Stack".into(), icon: "🐙".into() });
-            } else if url_lower.contains("google") {
-                badges.push(TechBadge { name: "C++ / Closure / Go".into(), category: "Stack".into(), icon: "🔍".into() });
+            if url_lower.contains("github.com") {
+                badges.push(TechBadge {
+                    name: "Ruby / Go / React".into(),
+                    category: "Stack".into(),
+                    icon: "🐙".into(),
+                });
             } else {
-                badges.push(TechBadge { name: "HTML5 / JavaScript".into(), category: "Stack".into(), icon: "⚡".into() });
+                badges.push(TechBadge {
+                    name: "HTML5 / JavaScript".into(),
+                    category: "Web".into(),
+                    icon: "🌐".into(),
+                });
             }
         }
 
@@ -256,6 +332,8 @@ impl TechStackDetector {
             url: url.to_string(),
             badges,
             server_header,
+            rendering_mode,
+            dev_components,
         }
     }
 }

@@ -143,6 +143,21 @@ impl BookmarkStore {
         Ok(bookmark)
     }
 
+    /// Add multiple bookmarks in a single transaction to prevent O(N^2) I/O overhead.
+    pub fn add_batch(&mut self, bookmarks: impl IntoIterator<Item = Bookmark>) -> io::Result<usize> {
+        let mut added = 0;
+        for bookmark in bookmarks {
+            if !self.bookmarks.iter().any(|b| b.url == bookmark.url) {
+                self.bookmarks.push(bookmark);
+                added += 1;
+            }
+        }
+        if added > 0 {
+            self.persist()?;
+        }
+        Ok(added)
+    }
+
     pub fn add_bookmark(&mut self, bookmark: Bookmark) -> io::Result<Bookmark> {
         if let Some(existing) = self.bookmarks.iter().find(|b| b.url == bookmark.url) {
             return Ok(existing.clone());
@@ -175,7 +190,7 @@ impl BookmarkStore {
     /// Import from Chrome Bookmarks JSON (roots/bookmark_bar/…).
     /// Skips URLs already present. Returns count newly added.
     pub fn import_chrome_json(&mut self, chrome_json: &str) -> io::Result<usize> {
-        let parsed = parse_chrome_bookmarks(chrome_json);
+        let parsed = parse_chrome_bookmarks(chrome_json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let mut added = 0;
         for item in parsed {
             if item.item_type != PaletteItemType::Bookmark {
@@ -238,12 +253,42 @@ impl BookmarkStore {
         if let Some(parent) = self.path.parent() {
             fs::create_dir_all(parent)?;
         }
+
+        let lock_path = self.path.with_extension("lock");
+        let mut retries = 0;
+        
+        loop {
+            match fs::OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+                Ok(_) => break,
+                Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
+                    if retries > 50 {
+                        // Stale lock, break it
+                        let _ = fs::remove_file(&lock_path);
+                    } else {
+                        std::thread::sleep(std::time::Duration::from_millis(10));
+                        retries += 1;
+                    }
+                }
+                Err(e) => return Err(e),
+            }
+        }
+
         let file = BookmarkFile {
             bookmarks: self.bookmarks.clone(),
         };
-        let json = serde_json::to_string_pretty(&file)
-            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-        fs::write(&self.path, json)
+        
+        let write_result = (|| -> io::Result<()> {
+            let json = serde_json::to_string_pretty(&file)
+                .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+            
+            let temp_path = self.path.with_extension("tmp");
+            fs::write(&temp_path, json)?;
+            fs::rename(&temp_path, &self.path)?;
+            Ok(())
+        })();
+
+        let _ = fs::remove_file(&lock_path);
+        write_result
     }
 }
 

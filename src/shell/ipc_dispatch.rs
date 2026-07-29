@@ -157,6 +157,9 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 match_header_key: None,
                 replace_header_key: key,
                 replace_header_value: val,
+                mock_status: None,
+                mock_body: None,
+                delay_ms: None,
             });
             DispatchResult::Message("tamper:rule_added".into())
         }
@@ -198,6 +201,22 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 DispatchResult::Message("bookmark:added".into())
             } else {
                 DispatchResult::Err("Failed to save bookmark".into())
+            }
+        }
+        "run_idor_matrix" => {
+            let req_id = payload["request_id"].as_str();
+            let req = match req_id {
+                Some(id) => state.tamper().get_request_by_id(id),
+                None => state.tamper().get_latest_request(),
+            };
+            if let Some(r) = req {
+                let idor_engine = state.idor().clone();
+                let rt = tokio::runtime::Handle::current();
+                let result = rt.block_on(idor_engine.run_matrix(&r, vec![]));
+                let json = serde_json::to_string(&result).unwrap_or_default();
+                DispatchResult::Message(format!("idor:matrix_result:{}", json))
+            } else {
+                DispatchResult::Err("No request available to run IDOR matrix scan".into())
             }
         }
         "remove_bookmark" => {
