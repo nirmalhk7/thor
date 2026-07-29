@@ -9,11 +9,13 @@
 
 use criterion::{black_box, criterion_group, criterion_main, Criterion};
 
+use thor::devtools::parse_web_vitals;
 use thor::dx::llm_studio::LlmStudio;
 use thor::dx::test_generator::TestGenerator;
+use thor::features::backend::BackendEngine;
 use thor::features::security::SecurityEngine;
 use thor::features::sla::{self, FeaturePathResult};
-use thor::features::FeatureRegistry;
+use thor::features::{FeatureEngine, FeatureRegistry};
 use thor::load::LatencyHistogram;
 
 #[global_allocator]
@@ -89,6 +91,35 @@ fn bench_response_diff(c: &mut Criterion) {
     });
 }
 
+fn bench_feature_invoke_routing(c: &mut Criterion) {
+    let engine = FeatureEngine::new();
+    c.bench_function("feature_invoke_routing", |b| {
+        b.iter(|| black_box(engine.invoke(black_box("webhook-sink")).unwrap()))
+    });
+}
+
+fn bench_cdp_parse_web_vitals(c: &mut Criterion) {
+    c.bench_function("cdp_parse_web_vitals", |b| {
+        b.iter(|| black_box(parse_web_vitals(black_box(sla::SAMPLE_WEB_VITALS_JSON)).unwrap()))
+    });
+}
+
+fn bench_webhook_sink_record(c: &mut Criterion) {
+    let engine = BackendEngine::new();
+    let event = sla::sample_webhook_event();
+    c.bench_function("webhook_sink_record", |b| {
+        b.iter(|| engine.record_webhook(black_box(event.clone())))
+    });
+}
+
+fn bench_idor_matrix(c: &mut Criterion) {
+    let engine = BackendEngine::new();
+    let probes = sla::idor_probes();
+    c.bench_function("idor_matrix_4ctx", |b| {
+        b.iter(|| black_box(engine.analyze_idor(black_box(&probes))))
+    });
+}
+
 /// Print a pass/fail SLA summary using the shared measurement harness.
 fn sla_summary(_c: &mut Criterion) {
     println!("\n============================================================");
@@ -127,6 +158,10 @@ criterion_group!(
     bench_playwright_export,
     bench_llm_cost,
     bench_response_diff,
+    bench_feature_invoke_routing,
+    bench_cdp_parse_web_vitals,
+    bench_webhook_sink_record,
+    bench_idor_matrix,
     sla_summary,
 );
 criterion_main!(benches);

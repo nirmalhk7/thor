@@ -365,10 +365,12 @@ mod tests {
 use std::hint::black_box;
 use std::time::{Duration, Instant};
 
+use crate::devtools::parse_web_vitals;
 use crate::dx::llm_studio::LlmStudio;
 use crate::dx::test_generator::{DomStep, NetworkTrace, RecordedSession, TestGenerator};
+use crate::features::backend::{BackendEngine, IdorProbe, WebhookEvent};
 use crate::features::security::{AuthzProbe, HttpSnapshot, SecurityEngine};
-use crate::features::{FeatureId, FeatureRegistry};
+use crate::features::{FeatureEngine, FeatureId, FeatureRegistry};
 use crate::load::LatencyHistogram;
 
 /// Extra latency headroom allowed for unoptimized `debug_assertions` builds,
@@ -448,6 +450,36 @@ pub const SLA_RESPONSE_DIFF: FeaturePathSla = FeaturePathSla {
     threshold: Duration::from_millis(5),
 };
 
+// --- v2 critical paths: orchestrator routing, CDP bridge, backend sinks ------
+
+pub const SLA_FEATURE_INVOKE_ROUTING: FeaturePathSla = FeaturePathSla {
+    id: "feature_invoke_routing",
+    feature: FeatureId::PerformanceSla,
+    description: "Orchestrator feature-invoke routing (slug -> engine)",
+    threshold: Duration::from_micros(500), // 500µs
+};
+
+pub const SLA_CDP_PARSE_WEB_VITALS: FeaturePathSla = FeaturePathSla {
+    id: "cdp_parse_web_vitals",
+    feature: FeatureId::VitalsUnderLoad,
+    description: "CDP bridge parse Core Web Vitals JSON",
+    threshold: Duration::from_millis(1),
+};
+
+pub const SLA_WEBHOOK_SINK_RECORD: FeaturePathSla = FeaturePathSla {
+    id: "webhook_sink_record",
+    feature: FeatureId::WebhookSink,
+    description: "Webhook sink record event",
+    threshold: Duration::from_millis(5),
+};
+
+pub const SLA_IDOR_MATRIX_4CTX: FeaturePathSla = FeaturePathSla {
+    id: "idor_matrix_4ctx",
+    feature: FeatureId::IdorMatrix,
+    description: "IDOR matrix analyze (4 contexts x 1 resource)",
+    threshold: Duration::from_millis(100),
+};
+
 /// Every feature-path SLA, in reporting order.
 pub const FEATURE_PATH_SLAS: &[FeaturePathSla] = &[
     SLA_FEATURE_REGISTRY_LOOKUP,
@@ -457,6 +489,10 @@ pub const FEATURE_PATH_SLAS: &[FeaturePathSla] = &[
     SLA_PLAYWRIGHT_EXPORT_100,
     SLA_LLM_COST_ESTIMATE,
     SLA_RESPONSE_DIFF,
+    SLA_FEATURE_INVOKE_ROUTING,
+    SLA_CDP_PARSE_WEB_VITALS,
+    SLA_WEBHOOK_SINK_RECORD,
+    SLA_IDOR_MATRIX_4CTX,
 ];
 
 /// Result of measuring one feature-path SLA.
@@ -595,6 +631,62 @@ pub fn response_snapshots() -> (HttpSnapshot, HttpSnapshot) {
     )
 }
 
+/// A representative Core Web Vitals JSON payload as emitted by the CDP bridge's
+/// `Runtime.evaluate` collection script (flat object, short web-vitals keys).
+pub const SAMPLE_WEB_VITALS_JSON: &str = r#"{"lcp":2100.5,"fid":12.0,"inp":150.0,"tbt":120.0,"cls":0.03,"fcp":900.0,"ttfb":420.0,"domContentLoaded":1100.0,"domInteractive":1000.0}"#;
+
+/// A representative inbound webhook event for the backend webhook sink.
+pub fn sample_webhook_event() -> WebhookEvent {
+    WebhookEvent {
+        method: "POST".into(),
+        path: "/hooks/stripe/payment_intent".into(),
+        headers: [
+            ("content-type".to_string(), "application/json".to_string()),
+            (
+                "x-signature".to_string(),
+                "t=1700000000,v1=abc123def456".to_string(),
+            ),
+        ]
+        .into_iter()
+        .collect(),
+        body: r#"{"id":"evt_1","type":"payment_intent.succeeded","amount":4200}"#.into(),
+        received_ms: 1_700_000_000_000,
+    }
+}
+
+/// The canonical 4-context IDOR/BOLA probe set for a single owner-scoped
+/// resource (Admin + Owner legitimately allowed; Other User granted a 2xx =
+/// broken object-level authz; Anonymous correctly denied).
+pub fn idor_probes() -> Vec<IdorProbe> {
+    let resource = "/api/orders/1001";
+    vec![
+        IdorProbe {
+            identity: "Admin".into(),
+            resource: resource.into(),
+            is_owner: true,
+            status: 200,
+        },
+        IdorProbe {
+            identity: "Owner".into(),
+            resource: resource.into(),
+            is_owner: true,
+            status: 200,
+        },
+        IdorProbe {
+            identity: "Other User".into(),
+            resource: resource.into(),
+            is_owner: false,
+            status: 200,
+        },
+        IdorProbe {
+            identity: "Anonymous".into(),
+            resource: resource.into(),
+            is_owner: false,
+            status: 401,
+        },
+    ]
+}
+
 // --- Measurement harness ---------------------------------------------------
 
 /// Best (min) amortized per-op latency of `f` over `repeats` batches of `iters`
@@ -707,6 +799,49 @@ pub fn measure_response_diff() -> FeaturePathResult {
     result(SLA_RESPONSE_DIFF, per_op)
 }
 
+pub fn measure_feature_invoke_routing() -> FeaturePathResult {
+    let engine = FeatureEngine::new();
+    let slugs = [
+        "response-diff",
+        "authz-matrix",
+        "jwt-deep",
+        "webhook-sink",
+        "idor-matrix",
+    ];
+    let mut k = 0usize;
+    let per_op = measure_per_op(5, 200_000, || {
+        let slug = slugs[k % slugs.len()];
+        k += 1;
+        black_box(engine.invoke(black_box(slug)).unwrap());
+    });
+    result(SLA_FEATURE_INVOKE_ROUTING, per_op)
+}
+
+pub fn measure_cdp_parse_web_vitals() -> FeaturePathResult {
+    let per_op = measure_per_op(5, 100_000, || {
+        black_box(parse_web_vitals(black_box(SAMPLE_WEB_VITALS_JSON)).unwrap());
+    });
+    result(SLA_CDP_PARSE_WEB_VITALS, per_op)
+}
+
+pub fn measure_webhook_sink_record() -> FeaturePathResult {
+    let engine = BackendEngine::new();
+    let event = sample_webhook_event();
+    let per_op = measure_per_op(5, 10_000, || {
+        engine.record_webhook(black_box(event.clone()));
+    });
+    result(SLA_WEBHOOK_SINK_RECORD, per_op)
+}
+
+pub fn measure_idor_matrix() -> FeaturePathResult {
+    let engine = BackendEngine::new();
+    let probes = idor_probes();
+    let per_op = measure_per_op(5, 20_000, || {
+        black_box(engine.analyze_idor(black_box(&probes)));
+    });
+    result(SLA_IDOR_MATRIX_4CTX, per_op)
+}
+
 /// Run every feature-path SLA and return one result per target (in
 /// [`FEATURE_PATH_SLAS`] order).
 pub fn run_feature_path_slas() -> Vec<FeaturePathResult> {
@@ -718,6 +853,10 @@ pub fn run_feature_path_slas() -> Vec<FeaturePathResult> {
         measure_playwright_export(),
         measure_llm_cost(),
         measure_response_diff(),
+        measure_feature_invoke_routing(),
+        measure_cdp_parse_web_vitals(),
+        measure_webhook_sink_record(),
+        measure_idor_matrix(),
     ]
 }
 
@@ -794,6 +933,26 @@ mod feature_path_sla_tests {
     #[test]
     fn sla_response_diff() {
         assert_sla(measure_response_diff());
+    }
+
+    #[test]
+    fn sla_feature_invoke_routing() {
+        assert_sla(measure_feature_invoke_routing());
+    }
+
+    #[test]
+    fn sla_cdp_parse_web_vitals() {
+        assert_sla(measure_cdp_parse_web_vitals());
+    }
+
+    #[test]
+    fn sla_webhook_sink_record() {
+        assert_sla(measure_webhook_sink_record());
+    }
+
+    #[test]
+    fn sla_idor_matrix_4ctx() {
+        assert_sla(measure_idor_matrix());
     }
 
     #[test]

@@ -535,6 +535,15 @@ impl Default for FeatureRuntime {
     }
 }
 
+/// Outcome of routing a single feature invocation through the orchestrator.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct FeatureInvocation {
+    pub id: FeatureId,
+    pub category: FeatureCategory,
+    /// Running invocation count after this call.
+    pub invocations: u64,
+}
+
 /// Serializable status snapshot for one feature.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FeatureStatusReport {
@@ -646,6 +655,28 @@ impl FeatureEngine {
         }
         r.invocations += 1;
         Some(r.invocations)
+    }
+
+    /// Route an invocation by feature slug through the orchestrator: resolve the
+    /// slug to its registered descriptor, verify the feature is enabled, and
+    /// record the invocation. This is the hot path used by shell/IPC dispatch to
+    /// fan a chrome command out to its backing engine, so it must stay fast
+    /// (see `sla::SLA_FEATURE_INVOKE_ROUTING`).
+    pub fn invoke(&self, slug: &str) -> Result<FeatureInvocation, String> {
+        let descriptor = self
+            .registry
+            .by_slug(slug)
+            .ok_or_else(|| format!("unknown feature slug: {slug}"))?;
+        let id = descriptor.id;
+        let category = descriptor.category;
+        let invocations = self
+            .record_invocation(id)
+            .ok_or_else(|| format!("feature disabled: {slug}"))?;
+        Ok(FeatureInvocation {
+            id,
+            category,
+            invocations,
+        })
     }
 
     pub fn invocation_count(&self, id: FeatureId) -> u64 {
