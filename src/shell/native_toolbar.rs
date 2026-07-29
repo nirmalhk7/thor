@@ -28,7 +28,9 @@ const ROW_H: f64 = 28.0;
 const FIELD_INSET_Y: f64 = 5.0; // vertical pad so caret/baseline sits mid-glass
 
 fn traffic_light_inset_y() -> f64 {
-    18.0
+    // Tao positions the lights from the titlebar's upper-left corner. Match
+    // their 12pt frame to the vertical center of the 28pt toolbar row.
+    row_y() + (ROW_H - TRAFFIC_LIGHT_SIZE) / 2.0
 }
 
 fn row_y() -> f64 {
@@ -101,6 +103,45 @@ fn make_flush_button(title: &str, tag: i64, frame: NSRect) -> id {
     }
 }
 
+/// Tao uses the vertical traffic-light inset to size the titlebar container,
+/// but leaves the buttons at their former y-coordinate. Pin them to the
+/// container's lower edge so their visual center matches the toolbar row.
+fn align_traffic_lights(window: &Window) {
+    unsafe {
+        let ns_window = window.ns_window() as id;
+        if ns_window == nil {
+            return;
+        }
+        let close: id = msg_send![ns_window, standardWindowButton: 0u64];
+        let minimize: id = msg_send![ns_window, standardWindowButton: 1u64];
+        let zoom: id = msg_send![ns_window, standardWindowButton: 2u64];
+        if close == nil || minimize == nil || zoom == nil {
+            return;
+        }
+
+        let titlebar: id = msg_send![close, superview];
+        let titlebar: id = msg_send![titlebar, superview];
+        if titlebar == nil {
+            return;
+        }
+        let window_frame: NSRect = msg_send![ns_window, frame];
+        let mut titlebar_frame: NSRect = msg_send![titlebar, frame];
+        titlebar_frame.size.height = TRAFFIC_LIGHT_SIZE + traffic_light_inset_y();
+        titlebar_frame.origin.y = window_frame.size.height - titlebar_frame.size.height;
+        let _: () = msg_send![titlebar, setFrame: titlebar_frame];
+
+        let close_frame: NSRect = msg_send![close, frame];
+        let minimize_frame: NSRect = msg_send![minimize, frame];
+        let spacing = minimize_frame.origin.x - close_frame.origin.x;
+        for (index, button) in [close, minimize, zoom].into_iter().enumerate() {
+            let mut frame: NSRect = msg_send![button, frame];
+            frame.origin.x = TRAFFIC_LIGHT_X + index as f64 * spacing;
+            frame.origin.y = 0.0;
+            let _: () = msg_send![button, setFrame: frame];
+        }
+    }
+}
+
 fn style_inline_field(field: id, placeholder: &str) {
     unsafe {
         let _: () = msg_send![field, setBezeled: NO];
@@ -155,7 +196,7 @@ fn make_glass_omnibox(frame: NSRect) -> (id, id) {
             NSPoint::new(10.0, FIELD_INSET_Y),
             NSSize::new((frame.size.width - 20.0).max(40.0), inner_h),
         );
-        let field: id = msg_send![class!(NSTextField), alloc];
+        let field: id = msg_send![omnibox_field_class(), alloc];
         let field: id = msg_send![field, initWithFrame: field_rect];
         let _: () = msg_send![field, setStringValue: nsstring("https://www.google.com")];
         let _: () = msg_send![field, setBezeled: NO];
@@ -242,6 +283,36 @@ fn toolbar_target() -> id {
         obj as usize
     });
     ptr as id
+}
+
+fn omnibox_field_class() -> &'static Class {
+    static CLASS: OnceLock<&'static Class> = OnceLock::new();
+    CLASS.get_or_init(|| {
+        Class::get("ThorOmniboxTextField").unwrap_or_else(|| {
+            let mut decl = ClassDecl::new("ThorOmniboxTextField", class!(NSTextField)).unwrap();
+            unsafe {
+                decl.add_method(
+                    sel!(mouseDown:),
+                    omnibox_mouse_down as extern "C" fn(&Object, Sel, id),
+                );
+            }
+            decl.register()
+        })
+    })
+}
+
+extern "C" fn omnibox_mouse_down(this: &Object, _sel: Sel, event: id) {
+    unsafe {
+        let _: () = msg_send![super(this, class!(NSTextField)), mouseDown: event];
+        let window: id = msg_send![this, window];
+        if window == nil {
+            return;
+        }
+        let editor: id = msg_send![window, fieldEditor: YES forObject: this];
+        if editor != nil {
+            let _: () = msg_send![editor, selectAll: nil];
+        }
+    }
 }
 
 extern "C" fn toolbar_click(_this: &Object, _sel: Sel, sender: id) {
@@ -448,6 +519,7 @@ pub fn configure_unified_titlebar(window: &Window) {
         TRAFFIC_LIGHT_X,
         traffic_light_inset_y(),
     ));
+    align_traffic_lights(window);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -626,6 +698,7 @@ impl NativeToolbar {
                 TRAFFIC_LIGHT_X,
                 traffic_light_inset_y(),
             ));
+            align_traffic_lights(window);
 
             println!("⚡ [Thor] Minimal chrome ({w}×{CHROME_HEIGHT}) — + · omnibox · tools");
             install_palette_key_equivalents();
