@@ -218,7 +218,6 @@ pub struct MetricsCollector {
     successful_requests: AtomicUsize,
     failed_requests: AtomicUsize,
     total_bytes: AtomicU64,
-    latencies_ms: Mutex<Vec<f64>>,
     histogram: Mutex<LatencyHistogram>,
     status_codes: Mutex<HashMap<u16, usize>>,
     browser_vitals: Mutex<Option<BrowserMetrics>>,
@@ -232,7 +231,6 @@ impl MetricsCollector {
             successful_requests: AtomicUsize::new(0),
             failed_requests: AtomicUsize::new(0),
             total_bytes: AtomicU64::new(0),
-            latencies_ms: Mutex::new(Vec::new()),
             histogram: Mutex::new(LatencyHistogram::default()),
             status_codes: Mutex::new(HashMap::new()),
             browser_vitals: Mutex::new(None),
@@ -248,9 +246,6 @@ impl MetricsCollector {
         }
         self.total_bytes.fetch_add(bytes, Ordering::Relaxed);
 
-        if let Ok(mut lats) = self.latencies_ms.lock() {
-            lats.push(latency_ms);
-        }
         if let Ok(mut hist) = self.histogram.lock() {
             hist.record(latency_ms);
         }
