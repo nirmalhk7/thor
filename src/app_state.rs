@@ -1,5 +1,6 @@
 use crate::dx::cmd_palette::TabHistoryTracker;
 use crate::engine::profiles::{ProfileConfig, ProfileManager, ProfileMode};
+use crate::features::FeatureEngine;
 use crate::net::consent::{validate_locust_start, LocustStartGate};
 use crate::net::locust::{LocustHandle, LocustScoredMetrics};
 use crate::net::security_shield::SecurityShield;
@@ -101,6 +102,7 @@ pub struct AppState {
     security: SecurityShieldToggles,
     tab_history: Mutex<TabHistoryTracker>,
     locust: Mutex<Option<LocustHandle>>,
+    features: FeatureEngine,
 }
 
 static APP_STATE: OnceLock<AppState> = OnceLock::new();
@@ -123,6 +125,7 @@ impl AppState {
             security,
             tab_history: Mutex::new(TabHistoryTracker::new()),
             locust: Mutex::new(None),
+            features: FeatureEngine::new(),
         }
     }
 
@@ -145,6 +148,11 @@ impl AppState {
 
     pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, TabHistoryTracker> {
         self.tab_history.lock()
+    }
+
+    /// Process-wide Engineer Feature Suite (72 features across six domains).
+    pub fn features(&self) -> &FeatureEngine {
+        &self.features
     }
 
     /// Set profile mode, sync shield toggles, persist (FS-PROF-01/02, SEC-010–012).
@@ -236,9 +244,9 @@ mod tests {
         a.tamper().set_interception_enabled(false);
 
         a.security().set_strip_tracking(true);
-        let (clean, stripped) =
-            a.security()
-                .sanitize_navigate_url("https://ex.com/?utm_source=x&ok=1");
+        let (clean, stripped) = a
+            .security()
+            .sanitize_navigate_url("https://ex.com/?utm_source=x&ok=1");
         assert!(stripped);
         assert_eq!(clean, "https://ex.com/?ok=1");
         a.security().set_strip_tracking(false);

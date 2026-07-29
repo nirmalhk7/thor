@@ -38,12 +38,54 @@ pub enum ScenarioStep {
     /// Think time / sleep step in milliseconds
     Wait { duration_ms: u64 },
     /// WebSocket load connection & message sequence
-    WebSocketConnect {
-        url: String,
-        messages: Vec<String>,
-    },
+    WebSocketConnect { url: String, messages: Vec<String> },
     /// Custom JavaScript or script step execution
     CustomScript { name: String, script: String },
+}
+
+/// Performance budgets asserted against a scenario run. Any `None` field is not
+/// enforced. Thresholds are pass/fail gates used by CI and the perf SLA checker.
+#[derive(Debug, Clone, Default, Serialize, Deserialize, PartialEq)]
+pub struct PerformanceBudgets {
+    /// Max acceptable p75 Largest Contentful Paint (ms).
+    pub max_lcp_ms: Option<f64>,
+    /// Max acceptable Interaction to Next Paint (ms).
+    pub max_inp_ms: Option<f64>,
+    /// Max acceptable Cumulative Layout Shift (unitless).
+    pub max_cls: Option<f64>,
+    /// Max acceptable Total Blocking Time (ms).
+    pub max_tbt_ms: Option<f64>,
+    /// Max acceptable Time to First Byte (ms).
+    pub max_ttfb_ms: Option<f64>,
+    /// Max acceptable p95 request latency (ms).
+    pub max_p95_latency_ms: Option<f64>,
+    /// Max acceptable p99 request latency (ms).
+    pub max_p99_latency_ms: Option<f64>,
+    /// Max acceptable error rate as a fraction in [0,1].
+    pub max_error_rate: Option<f64>,
+    /// Minimum acceptable throughput (requests/sec).
+    pub min_rps: Option<f64>,
+}
+
+impl PerformanceBudgets {
+    /// Web-vitals "good" thresholds (2024 Core Web Vitals) as a starting budget.
+    pub fn core_web_vitals() -> Self {
+        Self {
+            max_lcp_ms: Some(2500.0),
+            max_inp_ms: Some(200.0),
+            max_cls: Some(0.1),
+            max_tbt_ms: Some(200.0),
+            max_ttfb_ms: Some(800.0),
+            max_p95_latency_ms: None,
+            max_p99_latency_ms: None,
+            max_error_rate: Some(0.01),
+            min_rps: None,
+        }
+    }
+
+    pub fn is_empty(&self) -> bool {
+        *self == PerformanceBudgets::default()
+    }
 }
 
 /// Canonical Thor Scenario Specification for Load Engine
@@ -59,6 +101,8 @@ pub struct ThorScenario {
     pub target_rps: Option<u32>,
     pub headers: HashMap<String, String>,
     pub steps: Vec<ScenarioStep>,
+    #[serde(default)]
+    pub budgets: PerformanceBudgets,
 }
 
 impl ThorScenario {
@@ -76,7 +120,13 @@ impl ThorScenario {
             target_rps: None,
             headers: HashMap::new(),
             steps: Vec::new(),
+            budgets: PerformanceBudgets::default(),
         }
+    }
+
+    pub fn with_budgets(mut self, budgets: PerformanceBudgets) -> Self {
+        self.budgets = budgets;
+        self
     }
 
     pub fn with_runner(mut self, runner_type: RunnerType) -> Self {
