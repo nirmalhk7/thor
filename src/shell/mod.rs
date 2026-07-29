@@ -1097,6 +1097,7 @@ fn open_cmd_shift_k_in_active_tab(tabs: &ShellTabs) {
     let _ = wv.focus();
 }
 
+#[cfg(target_os = "macos")]
 fn start_locust_from_bar(tabs: &ShellTabs, params: &native_toolbar::LocustBarParams) -> bool {
     let url = tabs
         .meta
