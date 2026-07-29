@@ -2678,4 +2678,3 @@ renderTabs();
 
 pub fn wire_cmd_k_palette() {}
 pub fn wire_cmd_shift_k_palette() {}
-

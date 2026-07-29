@@ -7,8 +7,8 @@ use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 use crate::engine::{
-    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig, IdentityContext,
-    TabLifecycle, TabSession,
+    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig,
+    IdentityContext, TabLifecycle, TabSession,
 };
 use crate::shell::engine_status;
 
@@ -135,7 +135,9 @@ impl ChromiumTabs {
     pub fn create_disposable_tab(&mut self, tab_id: &str, url: &str) -> ChromiumResult<()> {
         let clean = sanitize_and_record(tab_id, url, "");
         let session = self.runtime.new_tab_blocking(Some(&clean))?;
-        let profile = crate::app_state::AppState::global().profiles().get_profile();
+        let profile = crate::app_state::AppState::global()
+            .profiles()
+            .get_profile();
         let profile_id = match profile.mode {
             crate::engine::profiles::ProfileMode::DevHost => "dev_host",
             crate::engine::profiles::ProfileMode::StealthTarget => "stealth_target",

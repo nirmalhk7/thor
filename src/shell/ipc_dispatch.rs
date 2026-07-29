@@ -87,7 +87,7 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
         "locust_stop" => match state.locust_stop() {
             Some(m) => DispatchResult::LocustMetrics(m),
             None => DispatchResult::Message("locust:idle".into()),
-        }
+        },
         "locust_toggle_active" => {
             // URL must be supplied by Rust (active tab), not the page.
             let url = payload["url"].as_str().unwrap_or("").to_string();
@@ -143,9 +143,18 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
             "JWT crack unavailable (honest). Display-only decoder is supported.".into(),
         ),
         "add_tamper_rule" => {
-            let pattern = payload["target_url_pattern"].as_str().unwrap_or("").to_string();
-            let key = payload["replace_header_key"].as_str().unwrap_or("").to_string();
-            let val = payload["replace_header_value"].as_str().unwrap_or("").to_string();
+            let pattern = payload["target_url_pattern"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let key = payload["replace_header_key"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
+            let val = payload["replace_header_value"]
+                .as_str()
+                .unwrap_or("")
+                .to_string();
             let _drop = payload["drop"].as_bool().unwrap_or(false);
             if pattern.is_empty() {
                 return DispatchResult::Err("Pattern required".into());

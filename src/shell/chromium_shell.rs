@@ -82,7 +82,8 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
 
     let runtime_for_mcp = tabs.borrow().runtime.clone();
     tokio::spawn(async move {
-        let (engine, handle) = crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
+        let (engine, handle) =
+            crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
         tokio::spawn(engine.run());
         crate::mcp::server::start_mcp_server(handle).await;
     });
@@ -93,15 +94,15 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
 
     let scale_factor = window.scale_factor();
     let initial_logical = window.inner_size().to_logical::<f64>(scale_factor);
-    let win_size: Rc<RefCell<(f64, f64)>> =
-        Rc::new(RefCell::new((initial_logical.width, initial_logical.height)));
+    let win_size: Rc<RefCell<(f64, f64)>> = Rc::new(RefCell::new((
+        initial_logical.width,
+        initial_logical.height,
+    )));
 
     #[cfg(target_os = "macos")]
     {
         let tb = native_toolbar::NativeToolbar::attach(&window, proxy.clone());
-        let initial_url = tabs
-            .borrow()
-            .resolved_url("default_tab");
+        let initial_url = tabs.borrow().resolved_url("default_tab");
         if initial_url.is_empty() {
             tb.set_url("https://www.google.com");
         } else {
@@ -429,7 +430,10 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
             }
         }
         "web_vitals_result" => {
-            let summary = payload["summary"].as_str().unwrap_or("no vitals").to_string();
+            let summary = payload["summary"]
+                .as_str()
+                .unwrap_or("no vitals")
+                .to_string();
             let _ = proxy.send_event(UserEvent::WebVitalsResult(summary));
         }
         "back" => {
@@ -441,14 +445,8 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
         "toggle_devtools" => {
             let _ = proxy.send_event(UserEvent::OpenTool("toggle_devtools".into()));
         }
-        "open_ide"
-        | "add_tamper_rule"
-        | "add_bookmark"
-        | "remove_bookmark"
-        | "locust_start"
-        | "locust_stop"
-        | "decode_payload"
-        | "decode_jwt_crack" => {
+        "open_ide" | "add_tamper_rule" | "add_bookmark" | "remove_bookmark" | "locust_start"
+        | "locust_stop" | "decode_payload" | "decode_jwt_crack" => {
             let res = super::ipc_dispatch::dispatch_privileged(cmd, &payload);
             println!("⚡ [Thor IPC Dispatch] {cmd} → {res:?}");
         }
@@ -461,5 +459,11 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
     }
 }
 
-pub enum TabState { Active, Frozen, Discarded, Restoring, McpControlled, LocustRunning }
-
+pub enum TabState {
+    Active,
+    Frozen,
+    Discarded,
+    Restoring,
+    McpControlled,
+    LocustRunning,
+}
