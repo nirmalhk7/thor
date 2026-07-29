@@ -138,6 +138,14 @@ impl BrowserRunner {
             snapshot.duration_secs = start_time.elapsed().as_secs_f64();
         }
 
+        let violations = scenario.budgets.check(&snapshot);
+        if !violations.is_empty() {
+            return Err(format!(
+                "performance budget violated: {}",
+                violations.join("; ")
+            ));
+        }
+
         Ok(snapshot)
     }
 

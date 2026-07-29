@@ -64,7 +64,15 @@ impl ProtocolRunner {
             let _ = handle.await;
         }
 
-        Ok(collector.snapshot())
+        let snapshot = collector.snapshot();
+        let violations = scenario.budgets.check(&snapshot);
+        if !violations.is_empty() {
+            return Err(format!(
+                "performance budget violated: {}",
+                violations.join("; ")
+            ));
+        }
+        Ok(snapshot)
     }
 
     /// Synchronous wrapper for non-async callers
