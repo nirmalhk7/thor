@@ -1,8 +1,8 @@
-pub mod bookmarks;
-pub mod cmd_palette;
 #[path = "3d_dom_snapshot.rs"]
 pub mod _3d_dom_snapshot;
+pub mod bookmarks;
 pub mod canvas;
+pub mod cmd_palette;
 pub mod css_overlay;
 pub mod decoder;
 pub mod ide_bridge;
@@ -28,13 +28,8 @@ pub use ide_bridge::IdeBridge;
 pub use llm_clean_context::LlmCleanContext;
 pub use llm_studio::{LlmCostEstimate, LlmStudio, SseStreamMetrics, SseStreamParser};
 pub use stack_detector::{DetectedStack, TechBadge, TechStackDetector};
-pub use test_generator::{DomStep, ExportFormat, NetworkTrace, RecordedSession, TestGenerator};
+pub use test_generator::{
+    DomStep, ExportFormat, LocatorCandidate, NetworkTrace, RecordedSession, TestGenerator,
+};
 pub use wasm_plugin::{WasmPluginManifest, WasmPluginMicrokernel};
 pub use web3_inspector::{AbiSelectorMatch, Eip55Status, Web3Inspector};
-
-
-
-
-
-pub enum Lens { FullStack, Security, Performance, AiLlm, Web3Chain }
-

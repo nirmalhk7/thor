@@ -11,6 +11,7 @@ use tokio::task::JoinHandle;
 
 use crate::engine::chromium_runtime::{ChromiumError, ChromiumResult, ChromiumRuntime};
 use crate::engine::tab_session::TabSession;
+use crate::load::BrowserMetrics;
 
 /// Represents a console.log (and friends) event from the JS runtime via CDP.
 #[derive(Debug, Clone)]
@@ -200,6 +201,44 @@ impl CdpIntegration {
     }
 }
 
+/// Parse a Core Web Vitals JSON payload — as returned by a `Runtime.evaluate`
+/// collection over the CDP bridge — into [`BrowserMetrics`].
+///
+/// The collection script (PerformanceObserver + navigation timing) emits a flat
+/// JSON object; keys are matched leniently so both the short web-vitals names
+/// (`lcp`, `cls`, `ttfb`, `domContentLoaded`) and explicit `*_ms` variants are
+/// accepted. Missing or non-numeric fields default to `0.0` rather than failing,
+/// so a partial paint (e.g. no interaction yet, so no INP) still parses. Returns
+/// `None` only when the payload is not a JSON object.
+///
+/// This is on the hot instrumentation path (called per navigation), so it stays
+/// allocation-light — see `sla::SLA_CDP_PARSE_WEB_VITALS`.
+pub fn parse_web_vitals(json: &str) -> Option<BrowserMetrics> {
+    let value: serde_json::Value = serde_json::from_str(json).ok()?;
+    let obj = value.as_object()?;
+
+    let num = |keys: &[&str]| -> f64 {
+        for k in keys {
+            if let Some(v) = obj.get(*k).and_then(serde_json::Value::as_f64) {
+                return v;
+            }
+        }
+        0.0
+    };
+
+    Some(BrowserMetrics {
+        lcp_ms: num(&["lcp", "lcp_ms", "largestContentfulPaint"]),
+        fid_ms: num(&["fid", "fid_ms", "firstInputDelay"]),
+        inp_ms: num(&["inp", "inp_ms", "interactionToNextPaint"]),
+        tbt_ms: num(&["tbt", "tbt_ms", "totalBlockingTime"]),
+        cls: num(&["cls", "cumulativeLayoutShift"]),
+        fcp_ms: num(&["fcp", "fcp_ms", "firstContentfulPaint"]),
+        ttfb_ms: num(&["ttfb", "ttfb_ms", "timeToFirstByte"]),
+        dom_content_loaded_ms: num(&["domContentLoaded", "dom_content_loaded_ms", "dcl"]),
+        dom_interactive_ms: num(&["domInteractive", "dom_interactive_ms"]),
+    })
+}
+
 impl Default for CdpIntegration {
     fn default() -> Self {
         Self::new()
@@ -239,6 +278,29 @@ mod tests {
         let recent = cdp.get_recent_logs(10);
         assert_eq!(recent.len(), 1);
         assert_eq!(recent[0].message, "hi");
+    }
+
+    #[test]
+    fn parse_web_vitals_lenient() {
+        let json = r#"{
+            "lcp": 2100.5, "fid": 12.0, "inp": 150.0, "tbt": 120.0,
+            "cls": 0.03, "fcp": 900.0, "ttfb": 420.0,
+            "domContentLoaded": 1100.0, "domInteractive": 1000.0
+        }"#;
+        let v = parse_web_vitals(json).expect("parse vitals");
+        assert!((v.lcp_ms - 2100.5).abs() < 1e-6);
+        assert!((v.cls - 0.03).abs() < 1e-6);
+        assert!((v.ttfb_ms - 420.0).abs() < 1e-6);
+        assert!((v.dom_content_loaded_ms - 1100.0).abs() < 1e-6);
+
+        // Partial payload: missing interaction metrics default to 0.
+        let partial = parse_web_vitals(r#"{"lcp_ms": 1800.0, "ttfb_ms": 300.0}"#).unwrap();
+        assert!((partial.lcp_ms - 1800.0).abs() < 1e-6);
+        assert_eq!(partial.inp_ms, 0.0);
+
+        // Non-object payloads are rejected.
+        assert!(parse_web_vitals("42").is_none());
+        assert!(parse_web_vitals("not json").is_none());
     }
 
     #[test]

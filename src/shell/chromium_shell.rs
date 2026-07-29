@@ -20,7 +20,7 @@ use crate::shell::chromium_tabs::ChromiumTabs;
 use crate::shell::engine_status;
 
 use super::{
-    content_hotkey_script, normalize_omnibox_url, ToolbarCmd, UserEvent,
+    content_hotkey_script, normalize_omnibox_url, toggle_profile_mode, ToolbarCmd, UserEvent,
     CHROME_HEIGHT, TAB_GC_INTERVAL, TAB_IDLE_TTL,
 };
 

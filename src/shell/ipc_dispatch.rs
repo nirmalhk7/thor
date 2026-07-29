@@ -16,6 +16,9 @@ pub enum DispatchResult {
     Message(String),
     EngineStatus(Value),
     LocustMetrics(crate::net::locust::LocustScoredMetrics),
+    /// A JSON envelope produced by the Engineer Feature Suite (feature list,
+    /// invoke result, or category lens) to be pushed back to the chrome UI.
+    FeatureJson(Value),
     Err(String),
 }
 
@@ -159,6 +162,33 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 delay_ms: None,
             });
             DispatchResult::Message("tamper:rule_added".into())
+        }
+        "feature_list" => {
+            let report = state.features().status_report();
+            match serde_json::to_value(&report) {
+                Ok(v) => DispatchResult::FeatureJson(v),
+                Err(e) => DispatchResult::Err(format!("feature_list serialize failed: {e}")),
+            }
+        }
+        "feature_invoke" => {
+            let slug = payload["slug"].as_str().unwrap_or("").to_string();
+            if slug.is_empty() {
+                return DispatchResult::Err("feature_invoke requires 'slug'".into());
+            }
+            match crate::features::orchestrator::FeatureOrchestrator::invoke(&slug, payload) {
+                Ok(v) => DispatchResult::FeatureJson(v),
+                Err(e) => DispatchResult::FeatureJson(serde_json::json!({
+                    "slug": slug,
+                    "error": e,
+                })),
+            }
+        }
+        "lens_payload" => {
+            let category = payload["category"].as_str().unwrap_or("");
+            match crate::features::orchestrator::FeatureOrchestrator::lens_payload(category) {
+                Ok(v) => DispatchResult::FeatureJson(v),
+                Err(e) => DispatchResult::Err(e),
+            }
         }
         "add_bookmark" => {
             let title = payload["title"].as_str().unwrap_or("").to_string();

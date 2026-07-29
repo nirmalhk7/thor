@@ -11,6 +11,7 @@ pub mod daemon;
 pub mod devtools;
 pub mod dx;
 pub mod engine;
+pub mod features;
 pub mod ipc;
 pub mod load;
 pub mod net;
