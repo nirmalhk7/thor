@@ -35,3 +35,6 @@ pub use web3_inspector::{AbiSelectorMatch, Eip55Status, Web3Inspector};
 
 
 
+
+pub enum Lens { FullStack, Security, Performance, AiLlm, Web3Chain }
+

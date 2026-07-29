@@ -170,7 +170,8 @@ impl TestGenerator {
                 out.push_str("    },\n");
             }
             if let Some(ref b) = trace.body {
-                out.push_str(&format!("    data: {},\n", serde_json::to_string(b).unwrap_or_else(|_| format!("\"{}\"", b))));
+                let escaped_b = b.replace('`', "\\`").replace('$', "\\$");
+                out.push_str(&format!("    data: `{}`, \n", escaped_b));
             }
             out.push_str("  });\n");
             out.push_str(&format!(
@@ -210,12 +211,13 @@ impl TestGenerator {
 
             if method == "POST" || method == "PUT" || method == "PATCH" {
                 let payload = trace.body.as_deref().unwrap_or("");
+                let escaped_payload = payload.replace('`', "\\`").replace('$', "\\$");
                 out.push_str(&format!(
-                    "  let {} = http.request('{}', '{}', JSON.stringify({}), {{\n{}\n  }});\n",
+                    "  let {} = http.request('{}', '{}', `{}`, {{\n{}\n  }});\n",
                     var_name,
                     method,
                     trace.url,
-                    serde_json::to_string(payload).unwrap_or_default(),
+                    escaped_payload,
                     params
                 ));
             } else {
@@ -254,8 +256,8 @@ impl TestGenerator {
                 out.push_str(&format!(" \\\n  -H \"{}: {}\"", k, v));
             }
             if let Some(ref body) = trace.body {
-                let escaped_body = body.replace('"', "\\\"");
-                out.push_str(&format!(" \\\n  -d \"{}\"", escaped_body));
+                let escaped_body = body.replace('\'', "'\\''");
+                out.push_str(&format!(" \\\n  -d '{}'", escaped_body));
             }
             out.push_str("\n\n");
         }
@@ -439,3 +441,4 @@ mod tests {
         assert!(thor_scen.contains("#username"));
     }
 }
+

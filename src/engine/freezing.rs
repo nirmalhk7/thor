@@ -160,3 +160,10 @@ mod tests {
         assert_eq!(state, TabLifecycle::Frozen);
     }
 }
+
+#[derive(Debug, Clone)]
+pub struct RestoreSnapshot {
+    pub url: String,
+    pub scroll_y: f64,
+}
+

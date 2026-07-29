@@ -275,9 +275,13 @@ async fn run_swarm(config: LocustConfig, shared: Arc<LocustShared>) {
             }
 
             while !shared.stop.load(Ordering::SeqCst) && Instant::now() < deadline {
-                let metric = fire_request(&client, &url).await;
-                if let Ok(mut lock) = shared.metrics.lock() {
-                    lock.push(metric);
+                tokio::select! {
+                    metric = fire_request(&client, &url) => {
+                        if let Ok(mut lock) = shared.metrics.lock() {
+                            lock.push(metric);
+                        }
+                    }
+                    _ = wait_until_stopped(&shared) => break,
                 }
             }
         }));

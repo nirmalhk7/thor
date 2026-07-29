@@ -70,6 +70,9 @@ pub struct SseStreamMetrics {
     pub tokens_per_sec: f64,
     pub accumulated_text: String,
     pub is_complete: bool,
+    pub tool_calls: Vec<String>,
+    pub finish_reason: Option<String>,
+    pub error: Option<String>,
 }
 
 /// SSE Stream Parser for tracking TTFT and streaming throughput
@@ -82,6 +85,9 @@ pub struct SseStreamParser {
     accumulated_text: String,
     is_complete: bool,
     buffer: String,
+    tool_calls: Vec<String>,
+    finish_reason: Option<String>,
+    error: Option<String>,
 }
 
 impl SseStreamParser {
@@ -94,6 +100,9 @@ impl SseStreamParser {
             accumulated_text: String::new(),
             is_complete: false,
             buffer: String::new(),
+            tool_calls: Vec::new(),
+            finish_reason: None,
+            error: None,
         }
     }
 
@@ -152,6 +161,24 @@ impl SseStreamParser {
                         }
                     }
                 }
+
+                if let Some(calls) = val["choices"][0]["delta"]["tool_calls"].as_array() {
+                    for call in calls {
+                        if let Some(fn_name) = call["function"]["name"].as_str() {
+                            self.tool_calls.push(fn_name.to_string());
+                        }
+                    }
+                }
+
+                if let Some(reason) = val["choices"][0]["finish_reason"].as_str() {
+                    self.finish_reason = Some(reason.to_string());
+                    self.is_complete = true;
+                }
+
+                if let Some(err) = val["error"]["message"].as_str() {
+                    self.error = Some(err.to_string());
+                }
+
             } else if !payload_str.is_empty() && payload_str != "[DONE]" && payload_str.starts_with("data:") {
                 // Raw string payload
                 if self.first_token_time_ms.is_none() {
@@ -187,6 +214,9 @@ impl SseStreamParser {
             tokens_per_sec,
             accumulated_text: self.accumulated_text.clone(),
             is_complete: self.is_complete,
+            tool_calls: self.tool_calls.clone(),
+            finish_reason: self.finish_reason.clone(),
+            error: self.error.clone(),
         }
     }
 }
@@ -204,6 +234,17 @@ pub struct LocalLlmEndpoint {
 pub struct LlmStudio;
 
 impl LlmStudio {
+    /// Export clean context for AI with secrets redacted
+    pub fn clean_context_export(raw_context: &str, secrets: &[&str]) -> String {
+        let mut clean = raw_context.to_string();
+        for secret in secrets {
+            if !secret.is_empty() {
+                clean = clean.replace(secret, "[REDACTED]");
+            }
+        }
+        clean
+    }
+
     /// BPE heuristic token counter (~4 chars or 0.75 words per token)
     pub fn count_tokens(text: &str) -> usize {
         if text.is_empty() {

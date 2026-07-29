@@ -210,3 +210,54 @@ impl MetricsCollector {
         }
     }
 }
+
+pub struct LockFreeHistogram {
+    pub buckets: [AtomicU64; 200],
+}
+
+impl Default for LockFreeHistogram {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl LockFreeHistogram {
+    pub fn new() -> Self {
+        Self {
+            buckets: std::array::from_fn(|_| AtomicU64::new(0)),
+        }
+    }
+
+    pub fn record(&self, latency_ms: f64) {
+        let bucket_idx = latency_to_bucket(latency_ms);
+        self.buckets[bucket_idx].fetch_add(1, Ordering::Relaxed);
+    }
+
+    pub fn calculate_p50_p90_p95_p99(&self) -> (f64, f64, f64, f64) {
+        let mut total_samples = 0u64;
+        let mut counts = [0u64; 200];
+        for i in 0..200 {
+            let count = self.buckets[i].load(Ordering::Relaxed);
+            counts[i] = count;
+            total_samples += count;
+        }
+
+        let calc_p = |target_pct: f64| -> f64 {
+            if total_samples == 0 {
+                return 0.0;
+            }
+            let target_count = ((total_samples as f64) * target_pct).round() as u64;
+            let mut accum = 0u64;
+            for i in 0..200 {
+                accum += counts[i];
+                if accum >= target_count {
+                    return bucket_to_latency(i);
+                }
+            }
+            bucket_to_latency(199)
+        };
+
+        (calc_p(0.50), calc_p(0.90), calc_p(0.95), calc_p(0.99))
+    }
+}
+

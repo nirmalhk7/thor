@@ -575,6 +575,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "Authorization".to_string(),
             replace_header_value: "Bearer test_token_123".to_string(),
+            delay_ms: None,
+            mock_body: None,
+            mock_status: None,
         });
 
         let req = InterceptedRequest {
@@ -780,6 +783,9 @@ mod tests {
             match_header_key: None,
             replace_header_key: "X-User-ID".into(),
             replace_header_value: "1002".into(),
+            delay_ms: None,
+            mock_body: None,
+            mock_status: None,
         });
         let req = InterceptedRequest {
             id: "idor_req".into(),

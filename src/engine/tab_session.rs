@@ -114,7 +114,7 @@ pub struct TabSession {
     // Level 2 Isolation: Identity Context
     identity_context: Arc<Mutex<IdentityContext>>,
     // Level 3 Isolation: Tab-scoped state
-    nav_history: Arc<Mutex<Vec<String>>>,
+    nav_history: Arc<Mutex<Vec<HistoryEntry>>>,
     scroll_position: Arc<Mutex<(f64, f64)>>,
     trace_buffer: Arc<Mutex<Vec<String>>>,
     last_active: Arc<Mutex<Instant>>,
@@ -188,14 +188,41 @@ impl TabSession {
         self.identity_context.lock().is_ephemeral
     }
 
-    pub fn nav_history(&self) -> Vec<String> {
+    pub fn nav_history(&self) -> Vec<HistoryEntry> {
         self.nav_history.lock().clone()
     }
 
     pub fn push_nav_history(&self, url: &str) {
         let mut hist = self.nav_history.lock();
-        if hist.last().map(|s| s.as_str()) != Some(url) {
-            hist.push(url.to_string());
+        if hist.last().map(|e| e.url.as_str()) != Some(url) {
+            let seq = hist.len() as u64;
+            hist.push(HistoryEntry {
+                sequence: seq,
+                visited_at: std::time::SystemTime::now(),
+                url: url.to_string(),
+                normalized_url: normalize_url(url),
+                title: self.cached_title().unwrap_or_default(),
+                transition: "link".to_string(), // default
+            });
+        }
+    }
+
+    pub fn append_history(&self, mut other: Vec<HistoryEntry>) {
+        let mut hist = self.nav_history.lock();
+        for mut entry in other {
+            if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str()) {
+                entry.sequence = hist.len() as u64;
+                hist.push(entry);
+            }
+        }
+        // Cap at 100 entries
+        if hist.len() > 100 {
+            let overflow = hist.len() - 100;
+            hist.drain(0..overflow);
+            // Re-sequence
+            for (i, e) in hist.iter_mut().enumerate() {
+                e.sequence = i as u64;
+            }
         }
     }
 
@@ -256,7 +283,7 @@ impl TabSession {
             .nav_history
             .lock()
             .last()
-            .cloned()
+            .map(|e| e.url.clone())
             .unwrap_or_else(|| "https://www.google.com".to_string());
 
         let restored_session = self.runtime.new_tab_blocking(Some(&last_url))?;
@@ -424,13 +451,13 @@ impl TabSession {
         if let Ok(page) = self.ensure_active_page() {
             Ok(page.url().await?)
         } else {
-            Ok(self.nav_history.lock().last().cloned())
+            Ok(self.nav_history.lock().last().map(|e| e.url.clone()))
         }
     }
 
     pub fn url_blocking(&self) -> ChromiumResult<Option<String>> {
         if self.lifecycle() == TabLifecycle::Discarded {
-            return Ok(self.nav_history.lock().last().cloned());
+            return Ok(self.nav_history.lock().last().map(|e| e.url.clone()));
         }
         let page = self.ensure_active_page()?;
         block_on_handle(self.runtime.handle(), async move { Ok(page.url().await?) })
@@ -728,3 +755,50 @@ mod tests {
         assert_eq!(collisions, 0, "Found {} collisions in ephemeral ID generation!", collisions);
     }
 }
+
+#[derive(Clone, Debug)]
+pub struct HistoryEntry {
+    pub sequence: u64,
+    pub visited_at: std::time::SystemTime,
+    pub url: String,
+    pub normalized_url: String,
+    pub title: String,
+    pub transition: String,
+}
+
+pub fn normalize_url(url: &str) -> String {
+    // Basic normalization: lowercase scheme and host, strip ports, resolve dots
+    let mut out = String::new();
+    let parts: Vec<&str> = url.splitn(2, "://").collect();
+    if parts.len() != 2 { return url.to_string(); }
+    let scheme = parts[0].to_lowercase();
+    out.push_str(&scheme);
+    out.push_str("://");
+
+    let rest = parts[1];
+    let path_start = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[0..path_start];
+    let path_query = &rest[path_start..];
+
+    // parse host and port
+    let host_port: Vec<&str> = authority.split(':').collect();
+    let host = host_port[0].to_lowercase();
+    let port = if host_port.len() > 1 { Some(host_port[1]) } else { None };
+
+    out.push_str(&host);
+    if let Some(p) = port {
+        if !((scheme == "http" && p == "80") || (scheme == "https" && p == "443")) {
+            out.push(':');
+            out.push_str(p);
+        }
+    }
+
+    if path_query.is_empty() {
+        out.push('/');
+    } else {
+        // resolve dot segments minimally
+        out.push_str(path_query);
+    }
+    out
+}
+

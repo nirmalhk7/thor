@@ -3,6 +3,7 @@ pub mod chromium_fork;
 pub mod chromium_runtime;
 pub mod compositor_sink;
 pub mod containers;
+pub mod engine_coordinator;
 pub mod freezing;
 pub mod profiles;
 pub mod tab_session;
@@ -20,3 +21,4 @@ pub use chromium_runtime::{
 pub use freezing::{CdpPageFreezer, ProcessFreezer, WarmUpThread};
 pub use profiles::{ProfileConfig, ProfileManager, ProfileMode};
 pub use tab_session::{IdentityContext, TabId, TabLifecycle, TabSession};
+pub mod evidence_store;

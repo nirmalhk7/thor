@@ -173,14 +173,21 @@ impl BrowserRunner {
                     collector.record_sample(200, step_start.elapsed().as_secs_f64() * 1000.0, 0, true);
                 }
                 ScenarioStep::Click { selector } => {
-                    let script = format!("document.querySelector('{}')?.click()", selector);
-                    let _ = tab.evaluate_js(&script).await;
+                    if let Some(page) = tab.page() {
+                        if let Ok(el) = page.find_element(selector.as_str()).await {
+                            let _ = el.click().await;
+                        }
+                    }
                     sleep(Duration::from_millis(25)).await;
                     collector.record_sample(200, step_start.elapsed().as_secs_f64() * 1000.0, 0, true);
                 }
                 ScenarioStep::Fill { selector, value } => {
-                    let script = format!("let el = document.querySelector('{}'); if (el) el.value = '{}';", selector, value);
-                    let _ = tab.evaluate_js(&script).await;
+                    if let Some(page) = tab.page() {
+                        if let Ok(el) = page.find_element(selector.as_str()).await {
+                            let _ = el.click().await;
+                            let _ = el.type_str(value.as_str()).await;
+                        }
+                    }
                     sleep(Duration::from_millis(35)).await;
                     collector.record_sample(200, step_start.elapsed().as_secs_f64() * 1000.0, 0, true);
                 }

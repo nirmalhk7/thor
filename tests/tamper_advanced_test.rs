@@ -15,6 +15,9 @@ fn test_overlapping_rules() {
         match_header_key: None,
         replace_header_key: "X-Overlapping".to_string(),
         replace_header_value: "value1".to_string(),
+        delay_ms: None,
+        mock_body: None,
+        mock_status: None,
     });
 
     engine.add_rule(TamperRule {
@@ -24,6 +27,9 @@ fn test_overlapping_rules() {
         match_header_key: None,
         replace_header_key: "X-Overlapping".to_string(),
         replace_header_value: "value2".to_string(),
+        delay_ms: None,
+        mock_body: None,
+        mock_status: None,
     });
 
     let req = InterceptedRequest {

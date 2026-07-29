@@ -1602,7 +1602,15 @@ pub(crate) fn setup_macos_app_icon() {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    if std::env::var("THOR_DUAL_WINDOW").map(|v| v == "1").unwrap_or(false) {
+    let dual = std::env::var("THOR_DUAL_WINDOW").ok();
+    
+    #[cfg(not(debug_assertions))]
+    let use_chromium = dual.map(|v| v == "1").unwrap_or(true);
+    
+    #[cfg(debug_assertions)]
+    let use_chromium = dual.map(|v| v == "1").unwrap_or(false);
+
+    if use_chromium {
         chromium_shell::run_chromium_shell()
     } else {
         run_wry_shell()

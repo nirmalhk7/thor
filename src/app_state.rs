@@ -1,4 +1,4 @@
-use crate::dx::cmd_palette::TabHistoryTracker;
+use crate::engine::engine_coordinator::EngineHandle;
 use crate::engine::profiles::{ProfileConfig, ProfileManager, ProfileMode};
 use crate::net::consent::{validate_locust_start, LocustStartGate};
 use crate::net::locust::{LocustHandle, LocustScoredMetrics};
@@ -100,8 +100,9 @@ pub struct AppState {
     tamper: TrafficTamperEngine,
     idor: crate::net::idor_matrix::IdorMatrixEngine,
     security: SecurityShieldToggles,
-    tab_history: Mutex<TabHistoryTracker>,
+    tab_history: Mutex<crate::dx::cmd_palette::TabHistoryTracker>,
     locust: Mutex<Option<LocustHandle>>,
+    engine_handle: Mutex<Option<EngineHandle>>,
 }
 
 static APP_STATE: OnceLock<AppState> = OnceLock::new();
@@ -124,8 +125,9 @@ impl AppState {
             tamper,
             idor,
             security,
-            tab_history: Mutex::new(TabHistoryTracker::new()),
+            tab_history: Mutex::new(crate::dx::cmd_palette::TabHistoryTracker::new()),
             locust: Mutex::new(None),
+            engine_handle: Mutex::new(None),
         }
     }
 
@@ -150,8 +152,16 @@ impl AppState {
         &self.security
     }
 
-    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, TabHistoryTracker> {
+    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
         self.tab_history.lock()
+    }
+
+    pub fn set_engine_handle(&self, handle: EngineHandle) {
+        *self.engine_handle.lock() = Some(handle);
+    }
+
+    pub fn engine_handle(&self) -> Option<EngineHandle> {
+        self.engine_handle.lock().clone()
     }
 
     /// Set profile mode, sync shield toggles, persist (FS-PROF-01/02, SEC-010–012).
@@ -176,7 +186,10 @@ impl AppState {
             let _ = prev.stop();
         }
         let handle = LocustHandle::start(config)?;
-        *self.locust.lock() = Some(handle);
+        let dropped = self.locust.lock().replace(handle);
+        if let Some(dropped) = dropped {
+            let _ = dropped.stop();
+        }
         Ok(())
     }
 

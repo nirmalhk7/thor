@@ -82,7 +82,9 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
 
     let runtime_for_mcp = tabs.borrow().runtime.clone();
     tokio::spawn(async move {
-        crate::mcp::server::start_mcp_server(runtime_for_mcp).await;
+        let (engine, handle) = crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
+        tokio::spawn(engine.run());
+        crate::mcp::server::start_mcp_server(handle).await;
     });
 
     #[cfg(target_os = "macos")]
@@ -458,3 +460,6 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>) {
         _ => {}
     }
 }
+
+pub enum TabState { Active, Frozen, Discarded, Restoring, McpControlled, LocustRunning }
+

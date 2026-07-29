@@ -32,7 +32,7 @@ impl PrewarmDaemon {
 
     /// Discover Chromium and launch a [`ChromiumRuntime`] with a warm page pool.
     pub fn warm_thor_chromium(&self, headful: bool) -> ChromiumResult<Arc<ChromiumRuntime>> {
-        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?;
+        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf();
         let config = ChromiumRuntimeConfig {
             executable: Some(executable),
             headful,
@@ -92,6 +92,7 @@ impl PrewarmDaemon {
             )
         })?;
 
+        let cmd = cmd.executable_path();
         Command::new(cmd)
             .args([
                 "--headless=new",
