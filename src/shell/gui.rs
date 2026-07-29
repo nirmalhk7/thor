@@ -2340,6 +2340,8 @@ function selectModalItem(item) {
     if (key.startsWith('focus_tab_')) {
       const id = key.slice('focus_tab_'.length);
       ipc('switch_tab', { id });
+    } else if (key.startsWith('navigate_history_')) {
+      loadContentUrl(item.url);
     } else if (key === 'toggle_devtools') {
       ipc('toggle_devtools');
     } else if (key === 'toggle_profile') {

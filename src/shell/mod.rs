@@ -503,6 +503,11 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                     closeThorModal();
                     return;
                 }
+                if (it.action_key && String(it.action_key).indexOf('navigate_history_') === 0) {
+                    if (it.url) sendIpc(JSON.stringify({ cmd: 'navigate', url: String(it.url) }));
+                    closeThorModal();
+                    return;
+                }
                 if (it.action_key) {
                     sendIpc(JSON.stringify({ cmd: 'open_tool', action_key: String(it.action_key) }));
                     closeThorModal();
