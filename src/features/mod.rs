@@ -1,11 +1,20 @@
 //! Thor Engineer Feature Suite.
 //!
-//! 72 engineer feature requests organized into six specialist domains plus a
+//! Engineer feature requests organized into six specialist domains plus a
 //! Performance SLA subsystem. Every feature is backed by real Rust logic in one
 //! of the domain modules and registered here so the shell / IPC layer can
 //! enumerate, enable, and invoke them through a single [`FeatureEngine`].
 //!
 //! Access the process-wide engine via [`crate::AppState::global().features()`].
+//!
+//! ## Soft-Nav Vitals (honest capture note)
+//!
+//! [`FeatureId::SoftNavVitals`] analyzes `SoftNavRecord` payloads. Live capture
+//! requires evaluating [`cdp_bridge::CdpBridge::soft_nav_and_speculation_script`]
+//! (wired by `BrowserRunner` navigate) and feeding
+//! [`cdp_bridge::CdpBridge::parse_soft_navs`] into `PerfEngine::soft_nav_vitals`.
+//! All-zero records (`lcp=inp=cls=0`) are refused. Without script evaluation
+//! (or offline JSON), SoftNav reports stay empty — not simulated.
 
 pub mod ai;
 pub mod backend;
@@ -72,7 +81,7 @@ impl FeatureStatus {
     }
 }
 
-/// Stable identifier for each of the 72 engineer features.
+/// Stable identifier for each registered engineer feature.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
 pub enum FeatureId {
     // Frontend (11)
@@ -87,6 +96,19 @@ pub enum FeatureId {
     NetworkComponentBinding,
     FontAuditor,
     ZIndexVisualizer,
+    // Frontend wave-2 (12)
+    HydrationDiffLens,
+    CssCoverageMap,
+    FocusOrderOverlay,
+    EventListenerMap,
+    CssVariableInspector,
+    LayoutThrashDetector,
+    MediaCqMatrix,
+    ImageDeliveryAuditor,
+    CssContainmentAdvisor,
+    AriaLiveMonitor,
+    SelectorSpecificityBudget,
+    DomSnapshotCapture,
     // Backend (12)
     ApiWorkbench,
     AuthVault,
@@ -100,6 +122,19 @@ pub enum FeatureId {
     ChaosInjection,
     IdempotencyAuditor,
     DbAdjacency,
+    // Backend wave-2 (12)
+    WebhookSignatureVault,
+    RateLimitProbe,
+    PaginationAuditor,
+    CacheSemanticsLens,
+    MultipartWorkbench,
+    SseWsServerLab,
+    OpenApiDiffGate,
+    OauthFlowCapture,
+    QueueAdjacency,
+    GrpcStreamWorkbench,
+    LiveStubServer,
+    HeaderContractFuzzer,
     // Security (12)
     AuthzMatrix,
     ResponseDiff,
@@ -113,7 +148,20 @@ pub enum FeatureId {
     SinkPollution,
     TlsInspector,
     OobListener,
-    // Performance (12 + SLA)
+    // Security wave-2 (12)
+    DomXssTaintMap,
+    CorsDeepProbe,
+    CspPolicyForensics,
+    OauthOidcMisconfig,
+    CookieSessionForensics,
+    SessionFixationLab,
+    GraphqlAuthzMatrix,
+    MassAssignmentDiff,
+    RaceWindowRepeater,
+    SsrfLabHarness,
+    SriSupplyChainAuditor,
+    WebsocketAuthzProbe,
+    // Performance (24 + SLA)
     PerfBudgets,
     TraceDiff,
     WaterfallForensics,
@@ -126,8 +174,20 @@ pub enum FeatureId {
     VitalsUnderLoad,
     FlameGraph,
     ThirdPartyAttribution,
+    LcpElementForensics,
+    LongTaskRadar,
+    MainThreadBlockMap,
+    BfCacheProbe,
+    FreezeResumeBench,
+    SoftNavVitals,
+    SpeculationLab,
+    ConnPoolInspector,
+    Http3PathAudit,
+    CompressionBudget,
+    MediaWeightGate,
+    ContinuousProfiler,
     PerformanceSla,
-    // QA (12)
+    // QA (12 wave-1 + 12 wave-2)
     ResilientLocators,
     FlakeRadar,
     VisualRegression,
@@ -140,6 +200,18 @@ pub enum FeatureId {
     TimeTravelTrace,
     DeterminismHarness,
     AuthzMatrixTests,
+    FlakeTriager,
+    QuarantinePolicy,
+    ContractDriftGate,
+    HermeticFixturePack,
+    A11yTestGen,
+    SnapshotStrategyPack,
+    CoverageAdjacencyMap,
+    ParallelShardPlanner,
+    TracePropertyMiner,
+    RuntimeSelfHeal,
+    OracleSynthesizer,
+    MutationHookBridge,
     // AI (12)
     LlmInspector,
     StreamingWaterfall,
@@ -153,11 +225,24 @@ pub enum FeatureId {
     InjectionScanner,
     LlmLoad,
     DeterministicReplay,
+    // AI wave-2 (12)
+    ToolCallForensics,
+    JsonSchemaGuard,
+    CacheHitLedger,
+    TokenWasteAuditor,
+    StreamingSloGates,
+    RouterDecisionTrace,
+    McpTrafficLens,
+    EvalDatasetMiner,
+    HallucinationOracle,
+    EmbeddingRagBench,
+    ProtocolQuirkDiff,
+    LocalCloudParity,
 }
 
 impl FeatureId {
-    /// All 72 feature identifiers in registry order.
-    pub const ALL: [FeatureId; 72] = [
+    /// All feature identifiers in registry order.
+    pub const ALL: [FeatureId; 144] = [
         FeatureId::ComponentTreeLens,
         FeatureId::ResponsiveMatrix,
         FeatureId::CssCascade,
@@ -169,6 +254,18 @@ impl FeatureId {
         FeatureId::NetworkComponentBinding,
         FeatureId::FontAuditor,
         FeatureId::ZIndexVisualizer,
+        FeatureId::HydrationDiffLens,
+        FeatureId::CssCoverageMap,
+        FeatureId::FocusOrderOverlay,
+        FeatureId::EventListenerMap,
+        FeatureId::CssVariableInspector,
+        FeatureId::LayoutThrashDetector,
+        FeatureId::MediaCqMatrix,
+        FeatureId::ImageDeliveryAuditor,
+        FeatureId::CssContainmentAdvisor,
+        FeatureId::AriaLiveMonitor,
+        FeatureId::SelectorSpecificityBudget,
+        FeatureId::DomSnapshotCapture,
         FeatureId::ApiWorkbench,
         FeatureId::AuthVault,
         FeatureId::ContractValidation,
@@ -181,6 +278,18 @@ impl FeatureId {
         FeatureId::ChaosInjection,
         FeatureId::IdempotencyAuditor,
         FeatureId::DbAdjacency,
+        FeatureId::WebhookSignatureVault,
+        FeatureId::RateLimitProbe,
+        FeatureId::PaginationAuditor,
+        FeatureId::CacheSemanticsLens,
+        FeatureId::MultipartWorkbench,
+        FeatureId::SseWsServerLab,
+        FeatureId::OpenApiDiffGate,
+        FeatureId::OauthFlowCapture,
+        FeatureId::QueueAdjacency,
+        FeatureId::GrpcStreamWorkbench,
+        FeatureId::LiveStubServer,
+        FeatureId::HeaderContractFuzzer,
         FeatureId::AuthzMatrix,
         FeatureId::ResponseDiff,
         FeatureId::HeaderAnalyzer,
@@ -193,6 +302,18 @@ impl FeatureId {
         FeatureId::SinkPollution,
         FeatureId::TlsInspector,
         FeatureId::OobListener,
+        FeatureId::DomXssTaintMap,
+        FeatureId::CorsDeepProbe,
+        FeatureId::CspPolicyForensics,
+        FeatureId::OauthOidcMisconfig,
+        FeatureId::CookieSessionForensics,
+        FeatureId::SessionFixationLab,
+        FeatureId::GraphqlAuthzMatrix,
+        FeatureId::MassAssignmentDiff,
+        FeatureId::RaceWindowRepeater,
+        FeatureId::SsrfLabHarness,
+        FeatureId::SriSupplyChainAuditor,
+        FeatureId::WebsocketAuthzProbe,
         FeatureId::PerfBudgets,
         FeatureId::TraceDiff,
         FeatureId::WaterfallForensics,
@@ -205,6 +326,18 @@ impl FeatureId {
         FeatureId::VitalsUnderLoad,
         FeatureId::FlameGraph,
         FeatureId::ThirdPartyAttribution,
+        FeatureId::LcpElementForensics,
+        FeatureId::LongTaskRadar,
+        FeatureId::MainThreadBlockMap,
+        FeatureId::BfCacheProbe,
+        FeatureId::FreezeResumeBench,
+        FeatureId::SoftNavVitals,
+        FeatureId::SpeculationLab,
+        FeatureId::ConnPoolInspector,
+        FeatureId::Http3PathAudit,
+        FeatureId::CompressionBudget,
+        FeatureId::MediaWeightGate,
+        FeatureId::ContinuousProfiler,
         FeatureId::PerformanceSla,
         FeatureId::ResilientLocators,
         FeatureId::FlakeRadar,
@@ -218,6 +351,18 @@ impl FeatureId {
         FeatureId::TimeTravelTrace,
         FeatureId::DeterminismHarness,
         FeatureId::AuthzMatrixTests,
+        FeatureId::FlakeTriager,
+        FeatureId::QuarantinePolicy,
+        FeatureId::ContractDriftGate,
+        FeatureId::HermeticFixturePack,
+        FeatureId::A11yTestGen,
+        FeatureId::SnapshotStrategyPack,
+        FeatureId::CoverageAdjacencyMap,
+        FeatureId::ParallelShardPlanner,
+        FeatureId::TracePropertyMiner,
+        FeatureId::RuntimeSelfHeal,
+        FeatureId::OracleSynthesizer,
+        FeatureId::MutationHookBridge,
         FeatureId::LlmInspector,
         FeatureId::StreamingWaterfall,
         FeatureId::PromptDiff,
@@ -230,6 +375,18 @@ impl FeatureId {
         FeatureId::InjectionScanner,
         FeatureId::LlmLoad,
         FeatureId::DeterministicReplay,
+        FeatureId::ToolCallForensics,
+        FeatureId::JsonSchemaGuard,
+        FeatureId::CacheHitLedger,
+        FeatureId::TokenWasteAuditor,
+        FeatureId::StreamingSloGates,
+        FeatureId::RouterDecisionTrace,
+        FeatureId::McpTrafficLens,
+        FeatureId::EvalDatasetMiner,
+        FeatureId::HallucinationOracle,
+        FeatureId::EmbeddingRagBench,
+        FeatureId::ProtocolQuirkDiff,
+        FeatureId::LocalCloudParity,
     ];
 
     /// Stable machine slug (kebab-case) for IPC routing.
@@ -282,6 +439,18 @@ impl FeatureId {
             FeatureId::VitalsUnderLoad => "vitals-under-load",
             FeatureId::FlameGraph => "flame-graph",
             FeatureId::ThirdPartyAttribution => "third-party-attribution",
+            FeatureId::LcpElementForensics => "lcp-element-forensics",
+            FeatureId::LongTaskRadar => "long-task-radar",
+            FeatureId::MainThreadBlockMap => "main-thread-block-map",
+            FeatureId::BfCacheProbe => "bfcache-probe",
+            FeatureId::FreezeResumeBench => "freeze-resume-bench",
+            FeatureId::SoftNavVitals => "soft-nav-vitals",
+            FeatureId::SpeculationLab => "speculation-lab",
+            FeatureId::ConnPoolInspector => "conn-pool-inspector",
+            FeatureId::Http3PathAudit => "http3-path-audit",
+            FeatureId::CompressionBudget => "compression-budget",
+            FeatureId::MediaWeightGate => "media-weight-gate",
+            FeatureId::ContinuousProfiler => "continuous-profiler",
             FeatureId::PerformanceSla => "performance-sla",
             FeatureId::ResilientLocators => "resilient-locators",
             FeatureId::FlakeRadar => "flake-radar",
@@ -295,6 +464,18 @@ impl FeatureId {
             FeatureId::TimeTravelTrace => "time-travel-trace",
             FeatureId::DeterminismHarness => "determinism-harness",
             FeatureId::AuthzMatrixTests => "authz-matrix-tests",
+            FeatureId::FlakeTriager => "flake-triager",
+            FeatureId::QuarantinePolicy => "quarantine-policy",
+            FeatureId::ContractDriftGate => "contract-drift-gate",
+            FeatureId::HermeticFixturePack => "hermetic-fixture-pack",
+            FeatureId::A11yTestGen => "a11y-test-gen",
+            FeatureId::SnapshotStrategyPack => "snapshot-strategy-pack",
+            FeatureId::CoverageAdjacencyMap => "coverage-adjacency-map",
+            FeatureId::ParallelShardPlanner => "parallel-shard-planner",
+            FeatureId::TracePropertyMiner => "trace-property-miner",
+            FeatureId::RuntimeSelfHeal => "runtime-self-heal",
+            FeatureId::OracleSynthesizer => "oracle-synthesizer",
+            FeatureId::MutationHookBridge => "mutation-hook-bridge",
             FeatureId::LlmInspector => "llm-inspector",
             FeatureId::StreamingWaterfall => "streaming-waterfall",
             FeatureId::PromptDiff => "prompt-diff",
@@ -307,6 +488,54 @@ impl FeatureId {
             FeatureId::InjectionScanner => "injection-scanner",
             FeatureId::LlmLoad => "llm-load",
             FeatureId::DeterministicReplay => "deterministic-replay",
+FeatureId::HydrationDiffLens => "hydration-diff-lens",
+            FeatureId::CssCoverageMap => "css-coverage-map",
+            FeatureId::FocusOrderOverlay => "focus-order-overlay",
+            FeatureId::EventListenerMap => "event-listener-map",
+            FeatureId::CssVariableInspector => "css-variable-inspector",
+            FeatureId::LayoutThrashDetector => "layout-thrash-detector",
+            FeatureId::MediaCqMatrix => "media-cq-matrix",
+            FeatureId::ImageDeliveryAuditor => "image-delivery-auditor",
+            FeatureId::CssContainmentAdvisor => "css-containment-advisor",
+            FeatureId::AriaLiveMonitor => "aria-live-monitor",
+            FeatureId::SelectorSpecificityBudget => "selector-specificity-budget",
+            FeatureId::DomSnapshotCapture => "dom-snapshot-capture",
+            FeatureId::WebhookSignatureVault => "webhook-signature-vault",
+            FeatureId::RateLimitProbe => "rate-limit-probe",
+            FeatureId::PaginationAuditor => "pagination-auditor",
+            FeatureId::CacheSemanticsLens => "cache-semantics-lens",
+            FeatureId::MultipartWorkbench => "multipart-workbench",
+            FeatureId::SseWsServerLab => "sse-ws-server-lab",
+            FeatureId::OpenApiDiffGate => "openapi-diff-gate",
+            FeatureId::OauthFlowCapture => "oauth-flow-capture",
+            FeatureId::QueueAdjacency => "queue-adjacency",
+            FeatureId::GrpcStreamWorkbench => "grpc-stream-workbench",
+            FeatureId::LiveStubServer => "live-stub-server",
+            FeatureId::HeaderContractFuzzer => "header-contract-fuzzer",
+            FeatureId::DomXssTaintMap => "dom-xss-taint-map",
+            FeatureId::CorsDeepProbe => "cors-deep-probe",
+            FeatureId::CspPolicyForensics => "csp-policy-forensics",
+            FeatureId::OauthOidcMisconfig => "oauth-oidc-misconfig",
+            FeatureId::CookieSessionForensics => "cookie-session-forensics",
+            FeatureId::SessionFixationLab => "session-fixation-lab",
+            FeatureId::GraphqlAuthzMatrix => "graphql-authz-matrix",
+            FeatureId::MassAssignmentDiff => "mass-assignment-diff",
+            FeatureId::RaceWindowRepeater => "race-window-repeater",
+            FeatureId::SsrfLabHarness => "ssrf-lab-harness",
+            FeatureId::SriSupplyChainAuditor => "sri-supply-chain-auditor",
+            FeatureId::WebsocketAuthzProbe => "websocket-authz-probe",
+            FeatureId::ToolCallForensics => "tool-call-forensics",
+            FeatureId::JsonSchemaGuard => "json-schema-guard",
+            FeatureId::CacheHitLedger => "cache-hit-ledger",
+            FeatureId::TokenWasteAuditor => "token-waste-auditor",
+            FeatureId::StreamingSloGates => "streaming-slo-gates",
+            FeatureId::RouterDecisionTrace => "router-decision-trace",
+            FeatureId::McpTrafficLens => "mcp-traffic-lens",
+            FeatureId::EvalDatasetMiner => "eval-dataset-miner",
+            FeatureId::HallucinationOracle => "hallucination-oracle",
+            FeatureId::EmbeddingRagBench => "embedding-rag-bench",
+            FeatureId::ProtocolQuirkDiff => "protocol-quirk-diff",
+            FeatureId::LocalCloudParity => "local-cloud-parity",
         }
     }
 
@@ -360,6 +589,18 @@ impl FeatureId {
             FeatureId::VitalsUnderLoad => "Vitals Under Load",
             FeatureId::FlameGraph => "Flame Graph",
             FeatureId::ThirdPartyAttribution => "Third-Party Attribution",
+            FeatureId::LcpElementForensics => "LCP Element Forensics",
+            FeatureId::LongTaskRadar => "Long Task Radar",
+            FeatureId::MainThreadBlockMap => "Main-Thread Block Map",
+            FeatureId::BfCacheProbe => "bfcache Probe",
+            FeatureId::FreezeResumeBench => "Freeze / Resume Bench",
+            FeatureId::SoftNavVitals => "Soft-Nav Vitals (experimental)",
+            FeatureId::SpeculationLab => "Speculation Lab",
+            FeatureId::ConnPoolInspector => "Connection Pool Inspector",
+            FeatureId::Http3PathAudit => "HTTP/3 Path Audit",
+            FeatureId::CompressionBudget => "Compression Budget",
+            FeatureId::MediaWeightGate => "Media Weight Gate",
+            FeatureId::ContinuousProfiler => "Continuous Profiler",
             FeatureId::PerformanceSla => "Performance SLA",
             FeatureId::ResilientLocators => "Resilient Locators",
             FeatureId::FlakeRadar => "Flake Radar",
@@ -373,6 +614,18 @@ impl FeatureId {
             FeatureId::TimeTravelTrace => "Time-Travel Trace",
             FeatureId::DeterminismHarness => "Determinism Harness",
             FeatureId::AuthzMatrixTests => "Authz Matrix Tests",
+            FeatureId::FlakeTriager => "Flake Triager",
+            FeatureId::QuarantinePolicy => "Quarantine Policy",
+            FeatureId::ContractDriftGate => "Contract Drift Gate",
+            FeatureId::HermeticFixturePack => "Hermetic Fixture Pack",
+            FeatureId::A11yTestGen => "A11y Test Gen",
+            FeatureId::SnapshotStrategyPack => "Snapshot Strategy Pack",
+            FeatureId::CoverageAdjacencyMap => "Coverage Adjacency Map",
+            FeatureId::ParallelShardPlanner => "Parallel Shard Planner",
+            FeatureId::TracePropertyMiner => "Trace Property Miner",
+            FeatureId::RuntimeSelfHeal => "Runtime Self-Heal",
+            FeatureId::OracleSynthesizer => "Oracle Synthesizer",
+            FeatureId::MutationHookBridge => "Mutation Hook Bridge",
             FeatureId::LlmInspector => "LLM Inspector",
             FeatureId::StreamingWaterfall => "Streaming Waterfall",
             FeatureId::PromptDiff => "Prompt Diff",
@@ -385,11 +638,59 @@ impl FeatureId {
             FeatureId::InjectionScanner => "Prompt Injection Scanner",
             FeatureId::LlmLoad => "LLM Load",
             FeatureId::DeterministicReplay => "Deterministic Replay",
+FeatureId::HydrationDiffLens => "Hydration Diff Lens",
+            FeatureId::CssCoverageMap => "CSS Coverage Map",
+            FeatureId::FocusOrderOverlay => "Focus Order Overlay",
+            FeatureId::EventListenerMap => "Event Listener Map",
+            FeatureId::CssVariableInspector => "CSS Variable Inspector",
+            FeatureId::LayoutThrashDetector => "Layout Thrash Detector",
+            FeatureId::MediaCqMatrix => "Media / Container Query Matrix",
+            FeatureId::ImageDeliveryAuditor => "Image Delivery Auditor",
+            FeatureId::CssContainmentAdvisor => "CSS Containment Advisor",
+            FeatureId::AriaLiveMonitor => "ARIA Live Monitor",
+            FeatureId::SelectorSpecificityBudget => "Selector Specificity Budget",
+            FeatureId::DomSnapshotCapture => "DOM Snapshot Capture",
+            FeatureId::WebhookSignatureVault => "Webhook Signature Vault",
+            FeatureId::RateLimitProbe => "Rate Limit Probe",
+            FeatureId::PaginationAuditor => "Pagination Auditor",
+            FeatureId::CacheSemanticsLens => "Cache Semantics Lens",
+            FeatureId::MultipartWorkbench => "Multipart Analyzer (offline)",
+            FeatureId::SseWsServerLab => "SSE Server Lab",
+            FeatureId::OpenApiDiffGate => "OpenAPI Diff Gate",
+            FeatureId::OauthFlowCapture => "OAuth Flow Capture",
+            FeatureId::QueueAdjacency => "Queue Adjacency",
+            FeatureId::GrpcStreamWorkbench => "gRPC Stream Analyzer (offline)",
+            FeatureId::LiveStubServer => "Live Stub Server",
+            FeatureId::HeaderContractFuzzer => "Header Contract Fuzzer",
+            FeatureId::DomXssTaintMap => "DOM XSS Taint Analyzer (offline)",
+            FeatureId::CorsDeepProbe => "CORS Deep Probe",
+            FeatureId::CspPolicyForensics => "CSP Policy Forensics",
+            FeatureId::OauthOidcMisconfig => "OAuth / OIDC Misconfig",
+            FeatureId::CookieSessionForensics => "Cookie Session Forensics",
+            FeatureId::SessionFixationLab => "Session Fixation Lab",
+            FeatureId::GraphqlAuthzMatrix => "GraphQL Authz Matrix",
+            FeatureId::MassAssignmentDiff => "Mass Assignment Diff",
+            FeatureId::RaceWindowRepeater => "Race Window Analyzer",
+            FeatureId::SsrfLabHarness => "SSRF Lab Harness",
+            FeatureId::SriSupplyChainAuditor => "SRI Supply Chain Auditor",
+            FeatureId::WebsocketAuthzProbe => "WebSocket Authz Probe",
+            FeatureId::ToolCallForensics => "Tool Call Forensics",
+            FeatureId::JsonSchemaGuard => "JSON Schema Guard",
+            FeatureId::CacheHitLedger => "Cache Hit Ledger",
+            FeatureId::TokenWasteAuditor => "Token Waste Auditor",
+            FeatureId::StreamingSloGates => "Streaming SLO Gates",
+            FeatureId::RouterDecisionTrace => "Router Decision Trace",
+            FeatureId::McpTrafficLens => "MCP Traffic Lens",
+            FeatureId::EvalDatasetMiner => "Eval Dataset Miner",
+            FeatureId::HallucinationOracle => "Hallucination Oracle (evidence-gated)",
+            FeatureId::EmbeddingRagBench => "Embedding / RAG Bench",
+            FeatureId::ProtocolQuirkDiff => "Protocol Quirk Diff",
+            FeatureId::LocalCloudParity => "Local / Cloud Parity",
         }
     }
 
     /// Domain the feature belongs to.
-    pub fn category(&self) -> FeatureCategory {
+pub fn category(&self) -> FeatureCategory {
         use FeatureId::*;
         match self {
             ComponentTreeLens
@@ -402,13 +703,67 @@ impl FeatureId {
             | ComponentSandbox
             | NetworkComponentBinding
             | FontAuditor
-            | ZIndexVisualizer => FeatureCategory::Frontend,
-            ApiWorkbench | AuthVault | ContractValidation | WebhookSink | IdorMatrix
-            | RequestChaining | GrpcGraphql | TraceAdjacency | MockStub | ChaosInjection
-            | IdempotencyAuditor | DbAdjacency => FeatureCategory::Backend,
-            AuthzMatrix | ResponseDiff | HeaderAnalyzer | JwtDeep | PromoteFinding
-            | SurfaceCrawler | StorageAuditor | FuzzRepeater | CsrfAnalyzer | SinkPollution
-            | TlsInspector | OobListener => FeatureCategory::Security,
+            | ZIndexVisualizer
+            | HydrationDiffLens
+            | CssCoverageMap
+            | FocusOrderOverlay
+            | EventListenerMap
+            | CssVariableInspector
+            | LayoutThrashDetector
+            | MediaCqMatrix
+            | ImageDeliveryAuditor
+            | CssContainmentAdvisor
+            | AriaLiveMonitor
+            | SelectorSpecificityBudget
+            | DomSnapshotCapture => FeatureCategory::Frontend,
+            ApiWorkbench
+            | AuthVault
+            | ContractValidation
+            | WebhookSink
+            | IdorMatrix
+            | RequestChaining
+            | GrpcGraphql
+            | TraceAdjacency
+            | MockStub
+            | ChaosInjection
+            | IdempotencyAuditor
+            | DbAdjacency
+            | WebhookSignatureVault
+            | RateLimitProbe
+            | PaginationAuditor
+            | CacheSemanticsLens
+            | MultipartWorkbench
+            | SseWsServerLab
+            | OpenApiDiffGate
+            | OauthFlowCapture
+            | QueueAdjacency
+            | GrpcStreamWorkbench
+            | LiveStubServer
+            | HeaderContractFuzzer => FeatureCategory::Backend,
+            AuthzMatrix
+            | ResponseDiff
+            | HeaderAnalyzer
+            | JwtDeep
+            | PromoteFinding
+            | SurfaceCrawler
+            | StorageAuditor
+            | FuzzRepeater
+            | CsrfAnalyzer
+            | SinkPollution
+            | TlsInspector
+            | OobListener
+            | DomXssTaintMap
+            | CorsDeepProbe
+            | CspPolicyForensics
+            | OauthOidcMisconfig
+            | CookieSessionForensics
+            | SessionFixationLab
+            | GraphqlAuthzMatrix
+            | MassAssignmentDiff
+            | RaceWindowRepeater
+            | SsrfLabHarness
+            | SriSupplyChainAuditor
+            | WebsocketAuthzProbe => FeatureCategory::Security,
             PerfBudgets
             | TraceDiff
             | WaterfallForensics
@@ -421,15 +776,67 @@ impl FeatureId {
             | VitalsUnderLoad
             | FlameGraph
             | ThirdPartyAttribution
-            | PerformanceSla => FeatureCategory::Performance,
-            ResilientLocators | FlakeRadar | VisualRegression | IdentityFixtures
-            | DataDrivenScenarios | RealVitalsGates | ContractTesting | DeflakedExport
-            | CiBundle | TimeTravelTrace | DeterminismHarness | AuthzMatrixTests => {
-                FeatureCategory::Qa
-            }
-            LlmInspector | StreamingWaterfall | PromptDiff | CostDashboard | EvalReplay
-            | ModelComparison | AgentTrace | ContextHeatmap | RagInspector | InjectionScanner
-            | LlmLoad | DeterministicReplay => FeatureCategory::Ai,
+            | PerformanceSla
+            | LcpElementForensics
+            | LongTaskRadar
+            | MainThreadBlockMap
+            | BfCacheProbe
+            | FreezeResumeBench
+            | SoftNavVitals
+            | SpeculationLab
+            | ConnPoolInspector
+            | Http3PathAudit
+            | CompressionBudget
+            | MediaWeightGate
+            | ContinuousProfiler => FeatureCategory::Performance,
+            ResilientLocators
+            | FlakeRadar
+            | VisualRegression
+            | IdentityFixtures
+            | DataDrivenScenarios
+            | RealVitalsGates
+            | ContractTesting
+            | DeflakedExport
+            | CiBundle
+            | TimeTravelTrace
+            | DeterminismHarness
+            | AuthzMatrixTests
+            | FlakeTriager
+            | QuarantinePolicy
+            | ContractDriftGate
+            | HermeticFixturePack
+            | A11yTestGen
+            | SnapshotStrategyPack
+            | CoverageAdjacencyMap
+            | ParallelShardPlanner
+            | TracePropertyMiner
+            | RuntimeSelfHeal
+            | OracleSynthesizer
+            | MutationHookBridge => FeatureCategory::Qa,
+            LlmInspector
+            | StreamingWaterfall
+            | PromptDiff
+            | CostDashboard
+            | EvalReplay
+            | ModelComparison
+            | AgentTrace
+            | ContextHeatmap
+            | RagInspector
+            | InjectionScanner
+            | LlmLoad
+            | DeterministicReplay
+            | ToolCallForensics
+            | JsonSchemaGuard
+            | CacheHitLedger
+            | TokenWasteAuditor
+            | StreamingSloGates
+            | RouterDecisionTrace
+            | McpTrafficLens
+            | EvalDatasetMiner
+            | HallucinationOracle
+            | EmbeddingRagBench
+            | ProtocolQuirkDiff
+            | LocalCloudParity => FeatureCategory::Ai,
         }
     }
 
@@ -437,15 +844,83 @@ impl FeatureId {
     pub fn status(&self) -> FeatureStatus {
         use FeatureId::*;
         match self {
-            // Experimental: features that lean on live Chromium/network wiring.
-            OobListener | ChaosInjection | AgentTrace | FlameGraph => FeatureStatus::Experimental,
-            // Beta: newer analyzers still stabilizing their heuristics.
+            // Experimental: live Chromium / network / mutating lab surfaces.
+            OobListener
+            | ChaosInjection
+            | AgentTrace
+            | FlameGraph
+            | RuntimeSelfHeal
+            | DomSnapshotCapture
+            | SseWsServerLab
+            | GrpcStreamWorkbench
+            | LiveStubServer
+            | SessionFixationLab
+            | RaceWindowRepeater
+            | SsrfLabHarness
+            | FreezeResumeBench
+            | SpeculationLab
+            | ContinuousProfiler
+            | MutationHookBridge
+            | SoftNavVitals
+            | MultipartWorkbench
+            | McpTrafficLens => FeatureStatus::Experimental,
+            // Beta: newer analyzers still stabilizing heuristics.
             SinkPollution
             | RagInspector
             | InjectionScanner
             | VisualRegression
             | ThirdPartyAttribution
-            | MemoryLeakHunter => FeatureStatus::Beta,
+            | MemoryLeakHunter
+            | FlakeTriager
+            | ContractDriftGate
+            | TracePropertyMiner
+            | HydrationDiffLens
+            | CssCoverageMap
+            | FocusOrderOverlay
+            | EventListenerMap
+            | CssVariableInspector
+            | LayoutThrashDetector
+            | MediaCqMatrix
+            | ImageDeliveryAuditor
+            | CssContainmentAdvisor
+            | AriaLiveMonitor
+            | SelectorSpecificityBudget
+            | WebhookSignatureVault
+            | RateLimitProbe
+            | PaginationAuditor
+            | CacheSemanticsLens
+            | OpenApiDiffGate
+            | OauthFlowCapture
+            | QueueAdjacency
+            | HeaderContractFuzzer
+            | DomXssTaintMap
+            | CorsDeepProbe
+            | CspPolicyForensics
+            | OauthOidcMisconfig
+            | CookieSessionForensics
+            | GraphqlAuthzMatrix
+            | MassAssignmentDiff
+            | SriSupplyChainAuditor
+            | WebsocketAuthzProbe
+            | LcpElementForensics
+            | LongTaskRadar
+            | MainThreadBlockMap
+            | BfCacheProbe
+            | ConnPoolInspector
+            | Http3PathAudit
+            | CompressionBudget
+            | MediaWeightGate
+            | ToolCallForensics
+            | JsonSchemaGuard
+            | CacheHitLedger
+            | TokenWasteAuditor
+            | StreamingSloGates
+            | RouterDecisionTrace
+            | EvalDatasetMiner
+            | HallucinationOracle
+            | EmbeddingRagBench
+            | ProtocolQuirkDiff
+            | LocalCloudParity => FeatureStatus::Beta,
             _ => FeatureStatus::Stable,
         }
     }
@@ -559,7 +1034,7 @@ pub struct FeatureStatusReport {
     pub invocations: u64,
 }
 
-/// Process-wide engine exposing all 72 features and their domain sub-engines.
+/// Process-wide engine exposing all registered features and their domain sub-engines.
 ///
 /// Prefer the shared instance from `AppState::global().features()` over
 /// constructing a new engine per IPC message.
@@ -588,11 +1063,31 @@ impl FeatureEngine {
         for id in FeatureId::ALL {
             runtime.insert(id, FeatureRuntime::default());
         }
+        let backend = BackendEngine::new();
+        backend.store_auth(
+            "anonymous",
+            backend::AuthScheme::ApiKey {
+                header: "X-Thor-Identity".into(),
+                key: "anonymous".into(),
+            },
+        );
+        backend.store_auth(
+            "user",
+            backend::AuthScheme::Bearer {
+                token: "user-demo-token".into(),
+            },
+        );
+        backend.store_auth(
+            "admin",
+            backend::AuthScheme::Bearer {
+                token: "admin-demo-token".into(),
+            },
+        );
         Self {
             registry: FeatureRegistry::new(),
             runtime: Mutex::new(runtime),
             frontend: FrontendEngine::new(),
-            backend: BackendEngine::new(),
+            backend,
             security: SecurityEngine::new(),
             perf: PerfEngine::new(),
             qa: QaEngine::new(),
@@ -639,6 +1134,12 @@ impl FeatureEngine {
     /// CDP capture bridge feeding real browser/network data into the engines.
     pub fn cdp(&self) -> &CdpBridge {
         &self.cdp
+    }
+
+    /// Evaluate JS on the active Chromium tab (via [`CdpBridge::evaluate_on_active`]).
+    /// Missing runtime → clear `Err` (never empty success).
+    pub fn evaluate_on_active(&self, script: &str) -> Result<String, String> {
+        CdpBridge::evaluate_on_active(script)
     }
 
     pub fn is_enabled(&self, id: FeatureId) -> bool {
@@ -728,10 +1229,10 @@ mod tests {
     use super::*;
 
     #[test]
-    fn test_registry_has_72_features() {
+    fn test_registry_has_all_features() {
         let engine = FeatureEngine::new();
-        assert_eq!(engine.registry().len(), 72);
-        assert_eq!(FeatureId::ALL.len(), 72);
+        assert_eq!(engine.registry().len(), FeatureId::ALL.len());
+        assert_eq!(FeatureId::ALL.len(), 144);
     }
 
     #[test]
@@ -740,18 +1241,18 @@ mod tests {
         for id in FeatureId::ALL {
             assert!(seen.insert(id.slug()), "duplicate slug: {}", id.slug());
         }
-        assert_eq!(seen.len(), 72);
+        assert_eq!(seen.len(), FeatureId::ALL.len());
     }
 
     #[test]
     fn test_category_counts() {
         let reg = FeatureRegistry::new();
-        assert_eq!(reg.by_category(FeatureCategory::Frontend).len(), 11);
-        assert_eq!(reg.by_category(FeatureCategory::Backend).len(), 12);
-        assert_eq!(reg.by_category(FeatureCategory::Security).len(), 12);
-        assert_eq!(reg.by_category(FeatureCategory::Performance).len(), 13);
-        assert_eq!(reg.by_category(FeatureCategory::Qa).len(), 12);
-        assert_eq!(reg.by_category(FeatureCategory::Ai).len(), 12);
+        assert_eq!(reg.by_category(FeatureCategory::Frontend).len(), 23);
+        assert_eq!(reg.by_category(FeatureCategory::Backend).len(), 24);
+        assert_eq!(reg.by_category(FeatureCategory::Security).len(), 24);
+        assert_eq!(reg.by_category(FeatureCategory::Performance).len(), 25);
+        assert_eq!(reg.by_category(FeatureCategory::Qa).len(), 24);
+        assert_eq!(reg.by_category(FeatureCategory::Ai).len(), 24);
     }
 
     #[test]

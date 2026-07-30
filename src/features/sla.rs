@@ -337,6 +337,10 @@ mod tests {
             p99_latency_ms: 800.0,
             status_codes: std::collections::HashMap::new(),
             browser_vitals: None,
+            transfer_bytes: None,
+            decoded_bytes: None,
+            lcp_media_bytes: None,
+            soft_nav: None,
         };
         let report = engine.check_run(&SlaEngine::reliability_sla(), Some(&load), None);
         assert!(report.overall_met, "results: {:?}", report.results);
@@ -369,6 +373,10 @@ use crate::devtools::parse_web_vitals;
 use crate::dx::llm_studio::LlmStudio;
 use crate::dx::test_generator::{DomStep, NetworkTrace, RecordedSession, TestGenerator};
 use crate::features::backend::{BackendEngine, IdorProbe, WebhookEvent};
+use crate::features::cdp_bridge::CdpBridge;
+use crate::features::perf_features::{
+    ConnPoolEntry, LcpElementPayload, LongTaskEvent, PerfEngine, StackSample,
+};
 use crate::features::security::{AuthzProbe, HttpSnapshot, SecurityEngine};
 use crate::features::{FeatureEngine, FeatureId, FeatureRegistry};
 use crate::load::LatencyHistogram;
@@ -480,6 +488,48 @@ pub const SLA_IDOR_MATRIX_4CTX: FeaturePathSla = FeaturePathSla {
     threshold: Duration::from_millis(100),
 };
 
+pub const SLA_LCP_ELEMENT_FORENSICS: FeaturePathSla = FeaturePathSla {
+    id: "lcp_element_forensics",
+    feature: FeatureId::LcpElementForensics,
+    description: "LCP element forensics from vitals JSON payload",
+    threshold: Duration::from_micros(200),
+};
+
+pub const SLA_LONG_TASK_RADAR: FeaturePathSla = FeaturePathSla {
+    id: "long_task_radar_1k",
+    feature: FeatureId::LongTaskRadar,
+    description: "Long-task radar rank 1k events",
+    threshold: Duration::from_millis(5),
+};
+
+pub const SLA_CONN_POOL_INSPECTOR: FeaturePathSla = FeaturePathSla {
+    id: "conn_pool_inspector_1k",
+    feature: FeatureId::ConnPoolInspector,
+    description: "Connection pool inspect 1k entries",
+    threshold: Duration::from_millis(5),
+};
+
+pub const SLA_CONTINUOUS_PROFILER: FeaturePathSla = FeaturePathSla {
+    id: "continuous_profiler_500",
+    feature: FeatureId::ContinuousProfiler,
+    description: "Continuous profiler fold 500 stack samples",
+    threshold: Duration::from_millis(10),
+};
+
+pub const SLA_CDP_INGEST_NETWORK: FeaturePathSla = FeaturePathSla {
+    id: "cdp_ingest_network_batch",
+    feature: FeatureId::ConnPoolInspector,
+    description: "CDP Network JSON ingest → ConnPool/Http3/Compression",
+    threshold: Duration::from_millis(2),
+};
+
+pub const SLA_BUDGET_CHECK_UNIFIED: FeaturePathSla = FeaturePathSla {
+    id: "budget_check_unified",
+    feature: FeatureId::PerformanceSla,
+    description: "PerfEngine + PerformanceBudgets::evaluate same fixture",
+    threshold: Duration::from_micros(50),
+};
+
 /// Every feature-path SLA, in reporting order.
 pub const FEATURE_PATH_SLAS: &[FeaturePathSla] = &[
     SLA_FEATURE_REGISTRY_LOOKUP,
@@ -493,6 +543,12 @@ pub const FEATURE_PATH_SLAS: &[FeaturePathSla] = &[
     SLA_CDP_PARSE_WEB_VITALS,
     SLA_WEBHOOK_SINK_RECORD,
     SLA_IDOR_MATRIX_4CTX,
+    SLA_LCP_ELEMENT_FORENSICS,
+    SLA_LONG_TASK_RADAR,
+    SLA_CONN_POOL_INSPECTOR,
+    SLA_CONTINUOUS_PROFILER,
+    SLA_CDP_INGEST_NETWORK,
+    SLA_BUDGET_CHECK_UNIFIED,
 ];
 
 /// Result of measuring one feature-path SLA.
@@ -842,6 +898,143 @@ pub fn measure_idor_matrix() -> FeaturePathResult {
     result(SLA_IDOR_MATRIX_4CTX, per_op)
 }
 
+pub fn measure_lcp_element_forensics() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let payload = LcpElementPayload {
+        vitals_json: Some(
+            r#"{"lcp":2100,"lcpElement":{"url":"https://cdn/hero.webp","type":"image","size":82000,"discoverTime":120,"loadTime":900,"renderTime":2100}}"#
+                .into(),
+        ),
+        ..Default::default()
+    };
+    let per_op = measure_per_op(5, 50_000, || {
+        black_box(engine.lcp_element_forensics(black_box(&payload)));
+    });
+    result(SLA_LCP_ELEMENT_FORENSICS, per_op)
+}
+
+pub fn measure_long_task_radar() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let tasks: Vec<LongTaskEvent> = (0..1_000)
+        .map(|i| LongTaskEvent {
+            duration_ms: 60.0 + (i % 40) as f64,
+            start_ms: i as f64,
+            script_url: Some(format!("https://cdn/chunk-{}.js", i % 17)),
+            name: Some("script".into()),
+            inp_overlap: i % 11 == 0,
+        })
+        .collect();
+    let per_op = measure_per_op(5, 200, || {
+        black_box(engine.long_task_radar(black_box(&tasks)));
+    });
+    result(SLA_LONG_TASK_RADAR, per_op)
+}
+
+pub fn measure_conn_pool_inspector() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let entries: Vec<ConnPoolEntry> = (0..1_000)
+        .map(|i| ConnPoolEntry {
+            url: format!("https://api.example.com/{i}"),
+            connection_id: format!("c{}", i % 32),
+            wait_ms: (i % 25) as f64,
+            reused: i % 3 != 0,
+            protocol: Some(if i % 5 == 0 { "h3" } else { "h2" }.into()),
+        })
+        .collect();
+    let per_op = measure_per_op(5, 200, || {
+        black_box(engine.conn_pool_inspect(black_box(&entries)));
+    });
+    result(SLA_CONN_POOL_INSPECTOR, per_op)
+}
+
+pub fn measure_continuous_profiler() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let samples: Vec<StackSample> = (0..500)
+        .map(|i| StackSample {
+            stack: vec![
+                "main".into(),
+                format!("fn_{}", i % 20),
+                format!("leaf_{}", i % 7),
+            ],
+            weight: 1 + (i % 5) as u64,
+        })
+        .collect();
+    let per_op = measure_per_op(5, 50, || {
+        black_box(engine.continuous_profile(black_box(&samples)));
+    });
+    result(SLA_CONTINUOUS_PROFILER, per_op)
+}
+
+pub const SAMPLE_CDP_NETWORK_JSON: &str = r#"[
+  {"url":"https://cdn.example.com/a.js","status":200,"protocol":"h3","connectionId":7,"connectionReused":false,"encodedDataLength":800,"decodedBodyLength":800,"headers":{"content-encoding":"br"}},
+  {"url":"https://cdn.example.com/b.js","status":200,"protocol":"h3","connectionId":7,"connectionReused":true,"encodedDataLength":400,"decodedBodyLength":1600,"headers":{"content-encoding":"br"}}
+]"#;
+
+pub fn measure_cdp_ingest_network() -> FeaturePathResult {
+    let per_op = measure_per_op(5, 5_000, || {
+        let bridge = CdpBridge::new();
+        black_box(bridge.ingest_cdp_network_json(black_box(SAMPLE_CDP_NETWORK_JSON)));
+        let pool = bridge.conn_pool_entries();
+        let h3 = bridge.http3_path_samples();
+        let comp = bridge.compression_entries();
+        let engine = PerfEngine::new();
+        black_box(engine.conn_pool_inspect(black_box(&pool)));
+        black_box(engine.http3_path_audit(black_box(&h3)));
+        black_box(engine.compression_budget(black_box(&comp), 4.0));
+    });
+    result(SLA_CDP_INGEST_NETWORK, per_op)
+}
+
+pub fn measure_budget_check_unified() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let budgets = PerformanceBudgets::core_web_vitals();
+    let vitals = BrowserMetrics {
+        lcp_ms: 1800.0,
+        inp_ms: 120.0,
+        cls: 0.05,
+        tbt_ms: 100.0,
+        ttfb_ms: 400.0,
+        ..Default::default()
+    };
+    let load = LoadMetrics {
+        total_requests: 1000,
+        successful_requests: 995,
+        failed_requests: 5,
+        total_bytes: 0,
+        duration_secs: 10.0,
+        rps: 100.0,
+        min_latency_ms: 1.0,
+        max_latency_ms: 200.0,
+        avg_latency_ms: 50.0,
+        p50_latency_ms: 40.0,
+        p90_latency_ms: 80.0,
+        p95_latency_ms: 100.0,
+        p99_latency_ms: 150.0,
+        status_codes: Default::default(),
+        browser_vitals: Some(vitals.clone()),
+        transfer_bytes: None,
+        decoded_bytes: None,
+        lcp_media_bytes: None,
+        soft_nav: None,
+    };
+    let per_op = measure_per_op(5, 20_000, || {
+        let pe = engine.check_budgets(
+            black_box(&budgets),
+            Some(black_box(&vitals)),
+            Some(black_box(&load)),
+        );
+        let eval = budgets.evaluate(
+            Some(black_box(&vitals)),
+            Some(black_box(&load)),
+            None,
+            None,
+            None,
+        );
+        black_box((pe.passed == eval.passed, pe.checked == eval.checked));
+    });
+    result(SLA_BUDGET_CHECK_UNIFIED, per_op)
+}
+
 /// Run every feature-path SLA and return one result per target (in
 /// [`FEATURE_PATH_SLAS`] order).
 pub fn run_feature_path_slas() -> Vec<FeaturePathResult> {
@@ -857,6 +1050,12 @@ pub fn run_feature_path_slas() -> Vec<FeaturePathResult> {
         measure_cdp_parse_web_vitals(),
         measure_webhook_sink_record(),
         measure_idor_matrix(),
+        measure_lcp_element_forensics(),
+        measure_long_task_radar(),
+        measure_conn_pool_inspector(),
+        measure_continuous_profiler(),
+        measure_cdp_ingest_network(),
+        measure_budget_check_unified(),
     ]
 }
 
@@ -953,6 +1152,36 @@ mod feature_path_sla_tests {
     #[test]
     fn sla_idor_matrix_4ctx() {
         assert_sla(measure_idor_matrix());
+    }
+
+    #[test]
+    fn sla_lcp_element_forensics() {
+        assert_sla(measure_lcp_element_forensics());
+    }
+
+    #[test]
+    fn sla_long_task_radar_1k() {
+        assert_sla(measure_long_task_radar());
+    }
+
+    #[test]
+    fn sla_conn_pool_inspector_1k() {
+        assert_sla(measure_conn_pool_inspector());
+    }
+
+    #[test]
+    fn sla_continuous_profiler_500() {
+        assert_sla(measure_continuous_profiler());
+    }
+
+    #[test]
+    fn sla_cdp_ingest_network_batch() {
+        assert_sla(measure_cdp_ingest_network());
+    }
+
+    #[test]
+    fn sla_budget_check_unified() {
+        assert_sla(measure_budget_check_unified());
     }
 
     #[test]

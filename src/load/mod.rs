@@ -6,6 +6,11 @@ pub mod scenario;
 
 pub use browser_runner::{BrowserRunner, BrowserRunnerConfig};
 pub use compiler::ScenarioCompiler;
-pub use metrics::{BrowserMetrics, LatencyHistogram, LoadMetrics, MetricsCollector};
+pub use metrics::{
+    BrowserMetrics, LatencyHistogram, LoadMetrics, MetricsCollector, SoftNavRecord,
+    SoftNavVitalsReport,
+};
 pub use protocol_runner::ProtocolRunner;
-pub use scenario::{PerformanceBudgets, RunnerType, ScenarioStep, ThorScenario};
+pub use scenario::{
+    BudgetEvaluation, BudgetGate, PerformanceBudgets, RunnerType, ScenarioStep, ThorScenario,
+};

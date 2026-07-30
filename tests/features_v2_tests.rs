@@ -1,7 +1,7 @@
 //! Integration tests for the **v2 feature integration** layer of the Thor
 //! Engineer Feature Suite.
 //!
-//! Where `features_tests.rs` proves each of the 72 features is registered and its
+//! Where `features_tests.rs` proves each registered feature is registered and its
 //! backing logic runs, this suite exercises the *wiring* added in v2:
 //!
 //!   * [`FeatureOrchestrator`] — the single `(slug, payload)` → JSON envelope
@@ -206,12 +206,12 @@ fn test_orchestrator_invoke_each_category() {
 #[test]
 fn test_orchestrator_lens_payload_per_category() {
     let expectations = [
-        ("frontend", "Frontend", 11usize),
-        ("backend", "Backend", 12),
-        ("security", "Security", 12),
-        ("performance", "Performance", 13),
-        ("qa", "QA", 12),
-        ("ai", "AI", 12),
+        ("frontend", "Frontend", 23usize),
+        ("backend", "Backend", 24),
+        ("security", "Security", 24),
+        ("performance", "Performance", 25),
+        ("qa", "QA", 24),
+        ("ai", "AI", 24),
     ];
     for (arg, expect_name, count) in expectations {
         let lens = FeatureOrchestrator::lens_payload(arg).expect("lens payload");

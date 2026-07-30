@@ -7,8 +7,8 @@ echo "📦 Packaging Thor for macOS (v${VERSION})"
 echo "============================================================"
 
 # Ensure release binary is compiled
-echo "🔨 Compiling release binary..."
-cargo build --release --bin Thor
+echo "🔨 Compiling release binaries..."
+cargo build --release --bin Thor --bin thor-labs
 
 DIST_DIR="dist"
 APP_DIR="${DIST_DIR}/Thor.app"
@@ -19,9 +19,40 @@ RESOURCES_DIR="${CONTENTS_DIR}/Resources"
 rm -rf "${DIST_DIR}"
 mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
 
-# Copy binary
+# Copy binary (Rust product launcher / Labs host)
 cp "target/release/Thor" "${MACOS_DIR}/Thor"
 chmod +x "${MACOS_DIR}/Thor"
+if [[ -f "target/release/thor-labs" ]]; then
+  cp "target/release/thor-labs" "${MACOS_DIR}/thor-labs"
+  chmod +x "${MACOS_DIR}/thor-labs"
+fi
+
+# Stage Thor-owned Chromium into Frameworks (snapshot cache or prior bootstrap)
+FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
+mkdir -p "${FRAMEWORKS_DIR}"
+CACHE_APP="${HOME}/Library/Application Support/Thor/ChromiumCache/Chromium.app"
+SRC_OUT_APP=""
+if [[ -n "${THOR_CHROMIUM_SRC:-}" ]]; then
+  for candidate in \
+    "${THOR_CHROMIUM_SRC}/src/out/Thor/Chromium.app" \
+    "${THOR_CHROMIUM_SRC}/src/out/Thor/Thor.app" \
+    "${THOR_CHROMIUM_SRC}/out/Thor/Chromium.app"; do
+    if [[ -d "$candidate" ]]; then SRC_OUT_APP="$candidate"; break; fi
+  done
+fi
+if [[ -d "$SRC_OUT_APP" ]]; then
+  echo "→ Bundling Chromium from source build: $SRC_OUT_APP"
+  rm -rf "${FRAMEWORKS_DIR}/Chromium.app"
+  cp -R "$SRC_OUT_APP" "${FRAMEWORKS_DIR}/Chromium.app"
+elif [[ -d "$CACHE_APP" ]]; then
+  echo "→ Bundling Chromium from snapshot cache: $CACHE_APP"
+  rm -rf "${FRAMEWORKS_DIR}/Chromium.app"
+  cp -R "$CACHE_APP" "${FRAMEWORKS_DIR}/Chromium.app"
+elif [[ -d "${DIST_DIR}/Thor.app/Contents/Frameworks/Chromium.app" ]]; then
+  echo "→ Chromium Frameworks already staged"
+else
+  echo "⚠️ No Thor-owned Chromium found. Run ./scripts/bootstrap_chromium_snapshot.sh or build_chromium.sh"
+fi
 
 # Create Info.plist
 cat <<EOF > "${CONTENTS_DIR}/Info.plist"

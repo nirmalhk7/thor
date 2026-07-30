@@ -1,6 +1,6 @@
 //! Integration tests for the Thor Engineer Feature Suite (`src/features/`).
 //!
-//! Covers all 72 features across the six specialist domains (frontend, backend,
+//! Covers all registered features across the six specialist domains (frontend, backend,
 //! security, performance, qa, ai) plus the Performance SLA subsystem. Each
 //! persona group test asserts that every feature in that group is registered in
 //! the [`FeatureRegistry`] and that its backing sub-engine logic executes
@@ -9,10 +9,10 @@
 //!
 //! NOTE on the registry API: the shipped implementation models feature maturity
 //! as [`FeatureStatus::{Stable, Beta, Experimental}`] and exposes the canonical
-//! set via `FeatureRegistry::new().all()` (all 72 are enabled/"implemented" by
+//! set via `FeatureRegistry::new().all()` (all are enabled/"implemented" by
 //! default in [`FeatureEngine`]). These tests therefore assert
-//! "72 registered + enabled features, each with a valid status" as the concrete
-//! realization of "72 implemented features".
+//! "N registered + enabled features, each with a valid status" as the concrete
+//! realization of "all implemented features".
 
 use std::collections::{BTreeMap, HashMap};
 
@@ -108,27 +108,32 @@ fn sample_load_metrics() -> LoadMetrics {
         p99_latency_ms: 800.0,
         status_codes: HashMap::new(),
         browser_vitals: None,
+        transfer_bytes: None,
+        decoded_bytes: None,
+        lcp_media_bytes: None,
+        soft_nav: None,
     }
 }
 
 // ===========================================================================
-// 1. Registry-wide coverage — all 72 features implemented
+// 1. Registry-wide coverage — all registered features implemented
 // ===========================================================================
 
 #[test]
-fn test_registry_has_all_72_features() {
+fn test_registry_has_all_features() {
     let engine = FeatureEngine::new();
-    assert_eq!(FeatureId::ALL.len(), 72, "expected exactly 72 feature ids");
-    assert_eq!(engine.registry().len(), 72, "registry must hold 72 features");
+    let n = FeatureId::ALL.len();
+    assert!(n >= 84, "expected at least wave-2 QA expansion (84+), got {n}");
+    assert_eq!(engine.registry().len(), n, "registry must hold all feature ids");
 
     let registry = FeatureRegistry::new();
-    assert_eq!(registry.all().len(), 72);
+    assert_eq!(registry.all().len(), n);
     assert!(!registry.is_empty());
 }
 
 #[test]
-fn test_all_72_features_registered_enabled_and_have_status() {
-    // Concrete realization of "all_implemented() returns 72 features with a
+fn test_all_features_registered_enabled_and_have_status() {
+    // Concrete realization of "all_implemented() returns N features with a
     // valid (implemented) status": every canonical feature is registered,
     // enabled by default, and carries a maturity status.
     let engine = FeatureEngine::new();
@@ -145,7 +150,7 @@ fn test_all_72_features_registered_enabled_and_have_status() {
         assert!(engine.is_enabled(id), "{} enabled", id.slug());
         implemented += 1;
     }
-    assert_eq!(implemented, 72, "all 72 features must be implemented + enabled");
+    assert_eq!(implemented, FeatureId::ALL.len(), "all features must be implemented + enabled");
 }
 
 #[test]
@@ -157,12 +162,12 @@ fn test_no_duplicate_slugs_and_lookup_by_slug() {
         // Round-trip: slug -> descriptor -> id.
         assert_eq!(registry.by_slug(id.slug()).map(|d| d.id), Some(id));
     }
-    assert_eq!(seen.len(), 72);
+    assert_eq!(seen.len(), FeatureId::ALL.len());
     assert!(registry.by_slug("does-not-exist").is_none());
 }
 
 #[test]
-fn test_category_counts_sum_to_72() {
+fn test_category_counts_sum_to_registry() {
     let registry = FeatureRegistry::new();
     let frontend = registry.by_category(FeatureCategory::Frontend).len();
     let backend = registry.by_category(FeatureCategory::Backend).len();
@@ -171,25 +176,25 @@ fn test_category_counts_sum_to_72() {
     let qa = registry.by_category(FeatureCategory::Qa).len();
     let ai = registry.by_category(FeatureCategory::Ai).len();
 
-    assert_eq!(frontend, 11);
-    assert_eq!(backend, 12);
-    assert_eq!(sec, 12);
-    assert_eq!(perf, 13);
-    assert_eq!(qa, 12);
-    assert_eq!(ai, 12);
-    assert_eq!(frontend + backend + sec + perf + qa + ai, 72);
+    assert!(frontend >= 11);
+    assert!(backend >= 12);
+    assert!(sec >= 12);
+    assert!(perf >= 13);
+    assert_eq!(qa, 24, "QA wave-1+2 must be 24");
+    assert!(ai >= 12);
+    assert_eq!(frontend + backend + sec + perf + qa + ai, FeatureId::ALL.len());
 }
 
 #[test]
 fn test_status_report_and_json_shape() {
     let engine = FeatureEngine::new();
     let report = engine.status_report();
-    assert_eq!(report.len(), 72);
+    assert_eq!(report.len(), FeatureId::ALL.len());
     assert!(report.iter().all(|r| r.enabled));
 
     let json = engine.status_report_json();
     let parsed: Vec<serde_json::Value> = serde_json::from_str(&json).expect("valid json");
-    assert_eq!(parsed.len(), 72);
+    assert_eq!(parsed.len(), FeatureId::ALL.len());
     let first = &parsed[0];
     assert!(first.get("id").is_some());
     assert!(first.get("slug").is_some());
@@ -213,7 +218,7 @@ fn test_feature_toggle_disables_invocation() {
 #[test]
 fn test_app_state_global_exposes_feature_engine() {
     let engine = AppState::global().features();
-    assert_eq!(engine.registry().len(), 72);
+    assert_eq!(engine.registry().len(), FeatureId::ALL.len());
     // Sub-engines are reachable via the shared engine.
     assert!(engine
         .registry()
@@ -228,7 +233,7 @@ fn test_app_state_global_exposes_feature_engine() {
 #[test]
 fn test_frontend_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Frontend, 11);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Frontend, 23);
 
     let fe = engine.frontend();
     // 1. Component Tree Lens
@@ -306,7 +311,7 @@ fn test_frontend_group_registered_and_executes() {
 #[test]
 fn test_backend_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Backend, 12);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Backend, 24);
 
     let be = engine.backend();
     // 1. API Workbench (offline template resolution, no network)
@@ -386,7 +391,7 @@ fn test_backend_group_registered_and_executes() {
 #[test]
 fn test_security_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Security, 12);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Security, 24);
 
     let se = engine.security();
     // 1. Authorization Matrix
@@ -465,7 +470,7 @@ fn test_security_group_registered_and_executes() {
 #[test]
 fn test_performance_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Performance, 13);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Performance, 25);
 
     let pe = engine.perf();
     let budgets = PerformanceBudgets::core_web_vitals();
@@ -522,7 +527,97 @@ fn test_performance_group_registered_and_executes() {
     assert_eq!(pe.build_flame_graph(&["main;a 10".to_string()]).value, 10);
     // 12. Third-Party Attribution
     let _ = pe.attribute_third_party("https://mysite.com", &res);
-    // 13. Performance SLA
+    // 13–24 wave-2 performance engines
+    let _ = pe.lcp_element_forensics(&perf_features::LcpElementPayload {
+        url: Some("https://cdn/hero.webp".into()),
+        element_type: Some("image".into()),
+        size_bytes: Some(40_000),
+        discover_ms: Some(100.0),
+        load_ms: Some(800.0),
+        render_ms: Some(1800.0),
+        ..Default::default()
+    });
+    let _ = pe.long_task_radar(&[perf_features::LongTaskEvent {
+        duration_ms: 120.0,
+        start_ms: 0.0,
+        script_url: Some("app.js".into()),
+        name: Some("script".into()),
+        inp_overlap: true,
+    }]);
+    let _ = pe.main_thread_block_map(&[perf_features::TraceCategorySlice {
+        category: "v8.execute".into(),
+        duration_ms: 200.0,
+    }]);
+    let _ = pe.bfcache_probe(&[perf_features::BfCacheSample {
+        restored: true,
+        restore_ms: Some(10.0),
+        not_restored_reasons: vec![],
+    }]);
+    let _ = pe.freeze_resume_bench(&[perf_features::FreezeTimingSample {
+        tab_id: "t1".into(),
+        soft_freeze_ms: 5.0,
+        soft_unfreeze_ms: 6.0,
+        discard_ms: None,
+        restore_ms: None,
+    }]);
+    let _ = pe
+        .soft_nav_vitals(&[perf_features::SoftNavRecord {
+            navigation_id: "1".into(),
+            url: "/a".into(),
+            lcp_ms: 900.0,
+            inp_ms: 40.0,
+            cls: 0.01,
+            ttfb_ms: 0.0,
+        }])
+        .expect("soft-nav");
+    let _ = pe.speculation_lab(&[perf_features::SpeculationTrial {
+        url: "/".into(),
+        cold_nav_ms: 1000.0,
+        prerender_nav_ms: Some(200.0),
+        prefetch_nav_ms: None,
+        rule_type: Some("prerender".into()),
+    }]);
+    let _ = pe.conn_pool_inspect(&[perf_features::ConnPoolEntry {
+        url: "/".into(),
+        connection_id: "c1".into(),
+        wait_ms: 1.0,
+        reused: true,
+        protocol: Some("h3".into()),
+    }]);
+    let _ = pe.http3_path_audit(&[perf_features::Http3PathSample {
+        url: "/".into(),
+        alpn: Some("h3".into()),
+        ttfb_ms: 40.0,
+        fallback_from: None,
+        fallback_cost_ms: None,
+    }]);
+    let _ = pe.compression_budget(
+        &[perf_features::CompressionEntry {
+            url: "/a.js".into(),
+            transfer_bytes: 10_000,
+            decoded_bytes: 40_000,
+            content_encoding: Some("br".into()),
+            content_type: Some("application/javascript".into()),
+        }],
+        5.0,
+    );
+    let _ = pe.media_weight_gate(
+        &[perf_features::MediaResource {
+            url: "hero.webp".into(),
+            bytes: 100_000,
+            media_type: "image".into(),
+            contributes_to_lcp: true,
+            lcp_ms: Some(1800.0),
+        }],
+        500_000,
+        2_000_000,
+        300_000,
+    );
+    let _ = pe.continuous_profile(&[perf_features::StackSample {
+        stack: vec!["main".into(), "render".into()],
+        weight: 3,
+    }]);
+    // Performance SLA
     let sla_engine = engine.sla();
     let report = sla_engine.check_run(&sla::SlaEngine::web_performance_sla(), None, Some(&sample_vitals()));
     assert!(report.overall_met);
@@ -531,7 +626,7 @@ fn test_performance_group_registered_and_executes() {
 #[test]
 fn test_qa_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Qa, 12);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Qa, 24);
 
     let qe = engine.qa();
     // 1. Resilient Locators
@@ -578,12 +673,75 @@ fn test_qa_group_registered_and_executes() {
     // 12. Authz Matrix Tests
     let cases = qe.generate_authz_tests(&[("admin".to_string(), "/admin".to_string(), true)]);
     assert!(qe.authz_tests_to_playwright("https://x", &cases).contains("toBeLessThan(300)"));
+
+    // Wave 2 smokes
+    let radar = qe.flake_radar("t", &[true, false, true]);
+    let _ = qe.triage_flake(
+        "t",
+        &radar,
+        &qa::FlakeVector {
+            timing_cv: 0.8,
+            ..Default::default()
+        },
+        &[],
+    );
+    let _ = qe.evaluate_quarantine(&qa::QuarantineInput {
+        test: "t".into(),
+        flake_rate: 0.5,
+        consecutive_fails: 3,
+        days_in_quarantine: 0.0,
+        green_streak: 0,
+        currently_quarantined: false,
+    });
+    let _ = qe.contract_drift_gate(&interactions, &actuals);
+    let _ = qe.build_hermetic_fixture_pack(
+        "pack",
+        qa::IdentityFixture {
+            name: "u".into(),
+            role: "user".into(),
+            ..Default::default()
+        },
+        vec![],
+        vec![],
+    );
+    let _ = qe.generate_a11y_spec(
+        "home",
+        &[qa::A11yViolation {
+            rule_id: "label".into(),
+            selector: "input".into(),
+            impact: "serious".into(),
+            message: "missing label".into(),
+        }],
+    );
+    let _ = qe.snapshot_strategy_pack("s", &[1, 2, 3], "<div/>", "a", "{}");
+    let _ = qe.coverage_adjacency(&[], &[]);
+    let _ = qe.plan_parallel_shards(
+        &[qa::ShardScenario {
+            name: "a".into(),
+            duration_ms: 10.0,
+            identity: "x".into(),
+        }],
+        1,
+    );
+    let _ = qe.mine_trace_properties(&[]);
+    let _ = qe.runtime_self_heal(
+        &qa::ElementSignals {
+            test_id: Some("x".into()),
+            ..Default::default()
+        },
+        &[],
+    );
+    let _ = qe.synthesize_oracles(&qa::OracleObservation {
+        status: Some(200),
+        ..Default::default()
+    });
+    let _ = qe.mutation_hook_bridge(&[]);
 }
 
 #[test]
 fn test_ai_group_registered_and_executes() {
     let engine = FeatureEngine::new();
-    assert_group_registered_and_invocable(&engine, FeatureCategory::Ai, 12);
+    assert_group_registered_and_invocable(&engine, FeatureCategory::Ai, 24);
 
     let ae = engine.ai();
     // 1. LLM Inspector

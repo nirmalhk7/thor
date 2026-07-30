@@ -15,6 +15,7 @@ pub enum PaletteItemType {
     Css,
     NetworkRequest,
     Tab,
+    Download,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -253,6 +254,62 @@ pub fn settings_payload_json() -> Result<String, serde_json::Error> {
     palette_items_to_json(&SettingsRegistry::get_all_settings())
 }
 
+/// Serialize the Downloads palette (same modal chrome as Cmd+K / Cmd+⇧K).
+pub fn downloads_payload_json(
+    downloads: &[crate::engine::browser_features::DownloadItem],
+) -> Result<String, serde_json::Error> {
+    palette_items_to_json(&download_items_to_palette(downloads))
+}
+
+/// Map [`DownloadItem`]s into palette rows. Empty ledger → one honest empty-state row.
+pub fn download_items_to_palette(
+    downloads: &[crate::engine::browser_features::DownloadItem],
+) -> Vec<PaletteItem> {
+    if downloads.is_empty() {
+        return vec![PaletteItem::new(
+            "dl_empty",
+            "No downloads yet",
+            PaletteItemType::Download,
+            "Thor://downloads",
+            Some("Empty".into()),
+            Some("⬇️".into()),
+            "Downloads",
+            None,
+        )];
+    }
+
+    downloads
+        .iter()
+        .map(|d| {
+            let badge = d.state_badge();
+            let action = match d.state {
+                crate::engine::browser_features::DownloadState::Completed => {
+                    Some(format!("reveal_download_{}", d.id))
+                }
+                crate::engine::browser_features::DownloadState::InProgress
+                | crate::engine::browser_features::DownloadState::Pending => {
+                    Some(format!("open_download_{}", d.id))
+                }
+                _ => Some(format!("reveal_download_{}", d.id)),
+            };
+            PaletteItem::new(
+                d.id.clone(),
+                d.file_name(),
+                PaletteItemType::Download,
+                if d.target_path.is_empty() {
+                    d.url.clone()
+                } else {
+                    d.target_path.clone()
+                },
+                Some(badge),
+                Some("⬇️".into()),
+                "Downloads",
+                action,
+            )
+        })
+        .collect()
+}
+
 /// Cmd+Shift+K only: settings, IDE bridge, security, performance, and extension actions.
 ///
 /// Do **not** put bookmarks, open tabs, or tab history here — those belong to
@@ -264,6 +321,16 @@ impl SettingsRegistry {
     pub fn get_all_settings() -> Vec<PaletteItem> {
         vec![
             PaletteItem::new(
+                "set_downloads",
+                "Downloads",
+                PaletteItemType::Setting,
+                "Thor://downloads",
+                Some("Files".into()),
+                Some("⬇️".into()),
+                "Browser",
+                Some("open_downloads".into()),
+            ),
+            PaletteItem::new(
                 "set_devtools",
                 "Toggle Chromium Developer Tools",
                 PaletteItemType::Setting,
@@ -274,11 +341,31 @@ impl SettingsRegistry {
                 Some("toggle_devtools".into()),
             ),
             PaletteItem::new(
+                "set_pip",
+                "Toggle Picture-in-Picture",
+                PaletteItemType::Setting,
+                "Thor://settings/pip",
+                Some("video PiP".into()),
+                Some("⧉".into()),
+                "Browser",
+                Some("toggle_pip".into()),
+            ),
+            PaletteItem::new(
+                "set_visit_recon",
+                "Run Passive Visit Recon",
+                PaletteItemType::Setting,
+                "Thor://security/visit-recon",
+                Some("headers · cookies · storage · 3p".into()),
+                Some("🛰️".into()),
+                "Security",
+                Some("visit_recon_run".into()),
+            ),
+            PaletteItem::new(
                 "set_engine",
-                "Engine status (honest Chromium M2)",
+                "Engine status (Chromium downstream)",
                 PaletteItemType::Setting,
                 "Thor://settings/engine",
-                Some("chromium · CDP · dual-window".into()),
+                Some("chromium · self-CDP".into()),
                 Some("ℹ️".into()),
                 "Settings",
                 Some("engine_status".into()),
@@ -302,6 +389,16 @@ impl SettingsRegistry {
                 Some("🕵️".into()),
                 "Security",
                 Some("run_idor_matrix".into()),
+            ),
+            PaletteItem::new(
+                "set_bitwarden",
+                "Bitwarden vault (unlock / autofill)",
+                PaletteItemType::Setting,
+                "Thor://vault/bitwarden",
+                Some("Vault".into()),
+                Some("🔑".into()),
+                "Security",
+                Some("open_bitwarden_vault".into()),
             ),
             PaletteItem::new(
                 "set_locust",
@@ -1309,6 +1406,32 @@ mod tests {
             .all(|s| s.item_type != PaletteItemType::Bookmark
                 && s.item_type != PaletteItemType::Tab
                 && s.item_type != PaletteItemType::TabHistory));
+        assert!(settings.iter().any(|s| s.action_key.as_deref() == Some("open_downloads")));
+    }
+
+    #[test]
+    fn test_download_items_to_palette() {
+        use crate::engine::browser_features::{DownloadItem, DownloadState};
+        let empty = download_items_to_palette(&[]);
+        assert_eq!(empty.len(), 1);
+        assert_eq!(empty[0].id, "dl_empty");
+
+        let items = vec![DownloadItem {
+            id: "dl_1".into(),
+            url: "https://example.com/a.zip".into(),
+            target_path: "/tmp/a.zip".into(),
+            total_bytes: 100,
+            received_bytes: 100,
+            state: DownloadState::Completed,
+            error_reason: None,
+        }];
+        let rows = download_items_to_palette(&items);
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].item_type, PaletteItemType::Download);
+        assert_eq!(rows[0].title, "a.zip");
+        assert_eq!(rows[0].action_key.as_deref(), Some("reveal_download_dl_1"));
+        let json = downloads_payload_json(&items).unwrap();
+        assert!(json.contains("a.zip"));
     }
 }
 

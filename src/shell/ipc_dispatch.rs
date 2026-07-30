@@ -46,16 +46,50 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
         }
         "set_interception_enabled" => {
             let enabled = payload["enabled"].as_bool().unwrap_or(false);
-            if enabled {
-                // M1: never enable page MitM on WebKit.
-                state.tamper().set_interception_enabled(false);
-                DispatchResult::Err(
-                    "Page intercept requires Chromium/CDP (M2). Interception left OFF.".into(),
-                )
-            } else {
-                state.tamper().set_interception_enabled(false);
-                DispatchResult::Ok
+            state.tamper().set_interception_enabled(enabled);
+            if let Some(bp) = payload["breakpoint"].as_bool() {
+                state.tamper().set_breakpoint_mode(bp);
             }
+            if enabled {
+                DispatchResult::Message("interception:on".into())
+            } else {
+                DispatchResult::Message("interception:off".into())
+            }
+        }
+        "forward_intercepted" => {
+            let id = payload["request_id"].as_str().unwrap_or("");
+            if id.is_empty() {
+                return DispatchResult::Err("forward_intercepted requires request_id".into());
+            }
+            match state.tamper().forward_request(id, None) {
+                Some(req) => DispatchResult::FeatureJson(serde_json::json!({
+                    "forwarded": true,
+                    "id": req.id,
+                    "url": req.url,
+                })),
+                None => DispatchResult::Err(format!("no pending request {id}")),
+            }
+        }
+        "drop_intercepted" => {
+            let id = payload["request_id"].as_str().unwrap_or("");
+            if id.is_empty() {
+                return DispatchResult::Err("drop_intercepted requires request_id".into());
+            }
+            if state.tamper().drop_request(id) {
+                DispatchResult::Message(format!("dropped:{id}"))
+            } else {
+                DispatchResult::Err(format!("no pending request {id}"))
+            }
+        }
+        "list_intercepted" => {
+            let pending = state.tamper().get_pending_requests();
+            let history_len = state.tamper().get_history().len();
+            DispatchResult::FeatureJson(serde_json::json!({
+                "pending": pending,
+                "history_len": history_len,
+                "interception_enabled": state.tamper().is_interception_enabled(),
+                "breakpoint_mode": state.tamper().is_breakpoint_mode(),
+            }))
         }
         "locust_start" => {
             let url = payload["url"]
@@ -199,6 +233,45 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                 Err(e) => DispatchResult::Err(e),
             }
         }
+        "get_logs" => {
+            let min_lvl = payload["level"].as_str().and_then(|s| s.parse::<crate::logging::LogLevel>().ok());
+            let target = payload["target"].as_str();
+            let limit = payload["limit"].as_u64().unwrap_or(100) as usize;
+            let records = state.logs().query(min_lvl, target, limit);
+            match serde_json::to_value(&records) {
+                Ok(v) => DispatchResult::FeatureJson(serde_json::json!({ "logs": v })),
+                Err(e) => DispatchResult::Err(format!("get_logs serialize failed: {e}")),
+            }
+        }
+        "clear_logs" => {
+            state.logs().clear();
+            DispatchResult::Message("logs:cleared".into())
+        }
+        "copy_llm_clean_context" => {
+            let html = payload["html"].as_str().unwrap_or("");
+            let url = payload["url"].as_str().unwrap_or("");
+            let title = payload["title"].as_str().unwrap_or("");
+            if html.is_empty() {
+                return DispatchResult::Err(
+                    "copy_llm_clean_context requires html (shell should evaluate documentElement.outerHTML)"
+                        .into(),
+                );
+            }
+            let cleaned = crate::dx::llm_clean_context::LlmCleanContext::clean_dom(html);
+            let mut md = String::new();
+            if !title.is_empty() || !url.is_empty() {
+                md.push_str(&format!("# {}\n\nSource: {}\n\n", title, url));
+            }
+            md.push_str(&cleaned.markdown);
+            DispatchResult::FeatureJson(serde_json::json!({
+                "markdown": md,
+                "raw_html_len": cleaned.raw_html_len,
+                "clean_markdown_len": cleaned.clean_markdown_len,
+                "token_savings_percent": cleaned.token_savings_percent,
+                "url": url,
+                "title": title,
+            }))
+        }
         "add_bookmark" => {
             let title = payload["title"].as_str().unwrap_or("").to_string();
             let url = payload["url"].as_str().unwrap_or("").to_string();
@@ -239,6 +312,65 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
             } else {
                 DispatchResult::Err("Failed to remove bookmark".into())
             }
+        }
+        "bitwarden_status" => {
+            DispatchResult::FeatureJson(state.vault().status_json())
+        }
+        "bitwarden_login" => {
+            let email = payload["email"].as_str().unwrap_or("");
+            let password = payload["password"].as_str().unwrap_or("");
+            match state.vault().login(email, password) {
+                Ok(()) => DispatchResult::FeatureJson(state.vault().status_json()),
+                Err(e) => DispatchResult::Err(e.to_string()),
+            }
+        }
+        "bitwarden_unlock" => {
+            let password = payload["password"].as_str().unwrap_or("");
+            match state.vault().unlock(password) {
+                Ok(()) => DispatchResult::FeatureJson(state.vault().status_json()),
+                Err(e) => DispatchResult::Err(e.to_string()),
+            }
+        }
+        "bitwarden_lock" => match state.vault().lock() {
+            Ok(()) => DispatchResult::FeatureJson(state.vault().status_json()),
+            Err(e) => DispatchResult::Err(e.to_string()),
+        }
+        "bitwarden_logout" => match state.vault().logout() {
+            Ok(()) => DispatchResult::FeatureJson(state.vault().status_json()),
+            Err(e) => DispatchResult::Err(e.to_string()),
+        }
+        "bitwarden_search" => {
+            let query = payload["query"].as_str().unwrap_or("");
+            match state.vault().search(query) {
+                Ok(items) => DispatchResult::FeatureJson(serde_json::json!({
+                    "items": crate::dx::bitwarden::BitwardenVault::summaries_json(&items),
+                })),
+                Err(e) => DispatchResult::Err(e.to_string()),
+            }
+        }
+        "bitwarden_matches" => {
+            let url = payload["url"].as_str().unwrap_or("");
+            match state.vault().list_for_url(url) {
+                Ok(items) => DispatchResult::FeatureJson(serde_json::json!({
+                    "url": url,
+                    "items": crate::dx::bitwarden::BitwardenVault::summaries_json(&items),
+                })),
+                Err(e) => DispatchResult::Err(e.to_string()),
+            }
+        }
+        // Autofill requires CDP on the active tab — shell must call
+        // `bitwarden_autofill_active` after this returns Ok with item id ack.
+        // Never return passwords in this envelope.
+        "bitwarden_autofill" => {
+            let id = payload["id"].as_str().unwrap_or("").trim();
+            if id.is_empty() {
+                return DispatchResult::Err("item id required".into());
+            }
+            if !state.vault().has_session() {
+                return DispatchResult::Err(crate::dx::bitwarden::VaultError::NoSession.to_string());
+            }
+            // Signal shell to perform CDP fill (id only — no secrets).
+            DispatchResult::Message(format!("bitwarden:autofill:{id}"))
         }
         other => {
             println!("⚡ [Thor IPC] unknown/ignored privileged cmd: {other}");

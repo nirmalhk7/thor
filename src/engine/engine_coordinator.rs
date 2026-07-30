@@ -3,7 +3,6 @@ use std::sync::Arc;
 use std::time::Duration;
 use tokio::sync::{mpsc, watch, oneshot};
 use tokio::time::timeout;
-use anyhow::anyhow;
 
 use super::chromium_runtime::ChromiumRuntime;
 use super::tab_session::TabId;
@@ -91,7 +90,6 @@ pub enum TabCommand {
 }
 
 const DEADLINE_STATE: Duration = Duration::from_secs(5);
-const DEADLINE_INPUT: Duration = Duration::from_secs(10);
 const DEADLINE_SCREENSHOT: Duration = Duration::from_secs(15);
 const DEADLINE_NAV: Duration = Duration::from_secs(30);
 const DEADLINE_LAUNCH_SHUTDOWN: Duration = Duration::from_secs(15);
@@ -112,6 +110,8 @@ pub struct BrowserEngine {
     runtime: Arc<ChromiumRuntime>,
     tabs: HashMap<TabId, TabRecord>,
     identities: HashMap<IdentityContextId, IdentityRecord>,
+    /// Reserved for MCP/evidence ring-buffer plumbing (not yet read by the loop).
+    #[allow(dead_code)]
     evidence_store: EvidenceStore,
     snapshot_tx: watch::Sender<BrowserSnapshot>,
     cmd_rx: mpsc::Receiver<EngineCommand>,
@@ -134,8 +134,6 @@ impl BrowserEngine {
     }
 
     pub async fn run(mut self) {
-        let cmd_tx = self.snapshot_tx.clone();
-        
         let mut tick = tokio::time::interval(Duration::from_secs(30));
         
         loop {
@@ -169,7 +167,7 @@ impl BrowserEngine {
 
     async fn handle_command(&mut self, cmd: EngineCommand) {
         match cmd {
-            EngineCommand::CreateTab { identity_id, url, reply } => {
+            EngineCommand::CreateTab { identity_id: _, url, reply } => {
                 let runtime = Arc::clone(&self.runtime);
                 match timeout(DEADLINE_LAUNCH_SHUTDOWN, runtime.new_tab(Some(&url))).await {
                     Ok(Ok(session)) => {
@@ -221,8 +219,22 @@ impl BrowserEngine {
                                         }
                                     }
                                     TabCommand::CaptureScreenshot { options: _, reply } => {
-                                        let res = timeout(DEADLINE_SCREENSHOT, async { Ok(vec![]) }).await;
-                                        let _ = reply.send(res.unwrap_or_else(|_| Err(EngineError::Timeout)));
+                                        if let Some(session) = &session_opt {
+                                            let res = timeout(
+                                                DEADLINE_SCREENSHOT,
+                                                session.capture_screenshot(),
+                                            )
+                                            .await;
+                                            let out = match res {
+                                                Ok(Ok(bytes)) if !bytes.is_empty() => Ok(bytes),
+                                                Ok(Ok(_)) => Err(EngineError::CdpRejected),
+                                                Ok(Err(_)) => Err(EngineError::CdpRejected),
+                                                Err(_) => Err(EngineError::Timeout),
+                                            };
+                                            let _ = reply.send(out);
+                                        } else {
+                                            let _ = reply.send(Err(EngineError::TabNotFound));
+                                        }
                                     }
                                     TabCommand::GetHistory { reply } => {
                                         let h = if let Some(s) = &session_opt { s.nav_history() } else { vec![] };

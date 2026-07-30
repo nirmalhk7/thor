@@ -25,6 +25,10 @@ pub struct BrowserMetrics {
     pub dom_content_loaded_ms: f64,
     /// DOM Interactive time (ms)
     pub dom_interactive_ms: f64,
+    /// When true, metrics were estimated from HTTP latencies — not lab CWV.
+    /// Must not be used for PerformanceBudgets gates.
+    #[serde(default)]
+    pub synthetic: bool,
 }
 
 /// HdrHistogram-style fixed-bucket latency histogram with linear percentile
@@ -189,6 +193,29 @@ impl LatencyHistogram {
     }
 }
 
+/// Soft-navigation CWV sample (SPA route change).
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoftNavRecord {
+    pub navigation_id: String,
+    pub url: String,
+    pub lcp_ms: f64,
+    pub inp_ms: f64,
+    pub cls: f64,
+    #[serde(default)]
+    pub ttfb_ms: f64,
+}
+
+/// Aggregated soft-navigation vitals attached to a browser load run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SoftNavVitalsReport {
+    pub navigations: usize,
+    pub records: Vec<SoftNavRecord>,
+    pub avg_lcp_ms: f64,
+    pub worst_lcp_ms: f64,
+    pub avg_inp_ms: f64,
+    pub total_cls: f64,
+}
+
 /// Aggregated summary metrics for a load testing run
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct LoadMetrics {
@@ -207,6 +234,19 @@ pub struct LoadMetrics {
     pub p99_latency_ms: f64,
     pub status_codes: HashMap<u16, usize>,
     pub browser_vitals: Option<BrowserMetrics>,
+    /// Measured encoded/on-wire transfer size from CDP / Resource Timing.
+    /// `None` when the runner did not capture network bytes (protocol-only).
+    #[serde(default)]
+    pub transfer_bytes: Option<u64>,
+    /// Measured decoded body size from CDP / Resource Timing.
+    #[serde(default)]
+    pub decoded_bytes: Option<u64>,
+    /// Bytes of the LCP-contributing media resource when known.
+    #[serde(default)]
+    pub lcp_media_bytes: Option<u64>,
+    /// Soft-navigation CWV report when BrowserRunner captured non-theater soft-navs.
+    #[serde(default)]
+    pub soft_nav: Option<SoftNavVitalsReport>,
 }
 
 const HISTOGRAM_BUCKETS: usize = 200;
@@ -366,6 +406,10 @@ impl MetricsCollector {
             p99_latency_ms: p99,
             status_codes,
             browser_vitals,
+            transfer_bytes: None,
+            decoded_bytes: None,
+            lcp_media_bytes: None,
+            soft_nav: None,
         }
     }
 }
@@ -452,5 +496,30 @@ mod tests {
         assert_eq!(a.count(), 200);
         assert!(a.min() <= 50.0 + 1.0);
         assert!(a.max() >= 150.0 - 1.0);
+    }
+
+    #[test]
+    fn load_metrics_carries_soft_nav_and_lcp_media() {
+        let mut m = MetricsCollector::new().snapshot();
+        assert!(m.soft_nav.is_none());
+        assert!(m.lcp_media_bytes.is_none());
+        m.soft_nav = Some(SoftNavVitalsReport {
+            navigations: 2,
+            records: vec![SoftNavRecord {
+                navigation_id: "1".into(),
+                url: "/a".into(),
+                lcp_ms: 500.0,
+                inp_ms: 20.0,
+                cls: 0.01,
+                ttfb_ms: 0.0,
+            }],
+            avg_lcp_ms: 500.0,
+            worst_lcp_ms: 500.0,
+            avg_inp_ms: 20.0,
+            total_cls: 0.01,
+        });
+        m.lcp_media_bytes = Some(12_345);
+        assert_eq!(m.soft_nav.as_ref().unwrap().navigations, 2);
+        assert_eq!(m.lcp_media_bytes, Some(12_345));
     }
 }

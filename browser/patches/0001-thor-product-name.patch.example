@@ -1,0 +1,8 @@
+# Example patch — regenerate against real chromium/src after fetch.
+# Goal: surface product name "Thor" in about: and window title path.
+#
+#   cd "$THOR_CHROMIUM_SRC/src"
+#   git apply /path/to/thor/browser/patches/*.patch
+#
+# Until a real diff exists, apply_thor_branding.sh copies BRANDING + writes
+# chrome/app/theme/thor/ and sets is_chrome_branded=false with custom strings.

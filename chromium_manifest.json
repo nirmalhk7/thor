@@ -1,18 +1,27 @@
 {
-  "revision": "1350000",
-  "version": "125.0.6422.0",
+  "product": "thor-chromium-downstream",
+  "revision": "1313161",
+  "chromium_src_tag": "1313161",
+  "version": "131.0.6778.0",
+  "notes": "Source builds use scripts/fetch_chromium.sh + build_chromium.sh. Snapshot ZIPs bootstrap owned binary only — not the long-term product end-state. Revision verified available for Mac_Arm chrome-mac.zip.",
   "artifacts": {
     "aarch64-apple-darwin": {
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1350000/chrome-mac.zip",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1313161/chrome-mac.zip",
+      "sha256": "verify-on-bootstrap",
       "executable": "Chromium.app/Contents/MacOS/Chromium"
     },
     "x86_64-apple-darwin": {
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1350000/chrome-mac.zip",
-      "sha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1313161/chrome-mac.zip",
+      "sha256": "verify-on-bootstrap",
       "executable": "Chromium.app/Contents/MacOS/Chromium"
     }
   },
   "licenses": ["LICENSE"],
-  "source_revision_url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main"
+  "source_revision_url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main",
+  "downstream": {
+    "branding_dir": "browser/branding",
+    "gn_args": "browser/gn_args.thor.gn",
+    "isolation_map": "browser/isolation/MAPPING.md",
+    "docs": "docs/CHROMIUM_DOWNSTREAM.md"
+  }
 }

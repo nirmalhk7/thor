@@ -1,7 +1,25 @@
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
-use crate::load::metrics::LoadMetrics;
+use crate::load::metrics::{BrowserMetrics, LoadMetrics};
+
+/// One structured budget gate failure (shared by load + PerfEngine).
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BudgetGate {
+    pub metric: String,
+    pub actual: f64,
+    pub budget: f64,
+    pub over_by: f64,
+}
+
+/// Result of evaluating [`PerformanceBudgets`] — single source of truth for
+/// `PerformanceBudgets::check` and `PerfEngine::check_budgets*`.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BudgetEvaluation {
+    pub passed: bool,
+    pub violations: Vec<BudgetGate>,
+    pub checked: usize,
+}
 
 /// Runner execution engine target
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -67,6 +85,15 @@ pub struct PerformanceBudgets {
     pub max_error_rate: Option<f64>,
     /// Minimum acceptable throughput (requests/sec).
     pub min_rps: Option<f64>,
+    /// Max total transfer size across audited resources (bytes).
+    #[serde(default)]
+    pub max_transfer_bytes: Option<u64>,
+    /// Max decoded/transfer inflation ratio (e.g. 4.0 = 4×).
+    #[serde(default)]
+    pub max_decoded_inflation_ratio: Option<f64>,
+    /// Max bytes for the LCP-contributing media resource.
+    #[serde(default)]
+    pub max_lcp_media_bytes: Option<u64>,
 }
 
 impl PerformanceBudgets {
@@ -82,6 +109,9 @@ impl PerformanceBudgets {
             max_p99_latency_ms: None,
             max_error_rate: Some(0.01),
             min_rps: None,
+            max_transfer_bytes: None,
+            max_decoded_inflation_ratio: Some(5.0),
+            max_lcp_media_bytes: Some(500_000),
         }
     }
 
@@ -89,95 +119,160 @@ impl PerformanceBudgets {
         *self == PerformanceBudgets::default()
     }
 
+    /// Canonical budget evaluation used by load runners and
+    /// [`crate::features::perf_features::PerfEngine::check_budgets`].
+    ///
+    /// Budget fields left as `None` are not enforced. Web-vitals gates are only
+    /// checked when `vitals` is `Some`, so a protocol-only run is never failed
+    /// for a missing LCP measurement.
+    pub fn evaluate(
+        &self,
+        vitals: Option<&BrowserMetrics>,
+        load: Option<&LoadMetrics>,
+        transfer_bytes: Option<u64>,
+        decoded_bytes: Option<u64>,
+        lcp_media_bytes: Option<u64>,
+    ) -> BudgetEvaluation {
+        let mut violations = Vec::new();
+        let mut checked = 0;
+        let mut gate = |metric: &str, actual: f64, budget: f64, lower_is_better: bool| {
+            checked += 1;
+            let over = if lower_is_better {
+                actual - budget
+            } else {
+                budget - actual
+            };
+            if over > 0.0 {
+                violations.push(BudgetGate {
+                    metric: metric.to_string(),
+                    actual,
+                    budget,
+                    over_by: over,
+                });
+            }
+        };
+
+        // Synthetic / estimated CWV (e.g. HTTP-derived) is excluded from budgets.
+        if let Some(v) = vitals.filter(|v| !v.synthetic) {
+            if let Some(b) = self.max_lcp_ms {
+                gate("lcp_ms", v.lcp_ms, b, true);
+            }
+            if let Some(b) = self.max_inp_ms {
+                gate("inp_ms", v.inp_ms, b, true);
+            }
+            if let Some(b) = self.max_cls {
+                gate("cls", v.cls, b, true);
+            }
+            if let Some(b) = self.max_tbt_ms {
+                gate("tbt_ms", v.tbt_ms, b, true);
+            }
+            if let Some(b) = self.max_ttfb_ms {
+                gate("ttfb_ms", v.ttfb_ms, b, true);
+            }
+        }
+
+        if let Some(l) = load {
+            if let Some(b) = self.max_p95_latency_ms {
+                gate("p95_latency_ms", l.p95_latency_ms, b, true);
+            }
+            if let Some(b) = self.max_p99_latency_ms {
+                gate("p99_latency_ms", l.p99_latency_ms, b, true);
+            }
+            if let Some(b) = self.max_error_rate {
+                let error_rate = if l.total_requests > 0 {
+                    l.failed_requests as f64 / l.total_requests as f64
+                } else {
+                    0.0
+                };
+                gate("error_rate", error_rate, b, true);
+            }
+            if let Some(b) = self.min_rps {
+                gate("rps", l.rps, b, false);
+            }
+        }
+
+        if let (Some(transfer), Some(max)) = (transfer_bytes, self.max_transfer_bytes) {
+            gate("transfer_bytes", transfer as f64, max as f64, true);
+        }
+        if let (Some(transfer), Some(decoded), Some(max_ratio)) =
+            (transfer_bytes, decoded_bytes, self.max_decoded_inflation_ratio)
+        {
+            if transfer > 0 {
+                let ratio = decoded as f64 / transfer as f64;
+                gate("decoded_inflation_ratio", ratio, max_ratio, true);
+            }
+        }
+        if let (Some(media), Some(max)) = (lcp_media_bytes, self.max_lcp_media_bytes) {
+            gate("lcp_media_bytes", media as f64, max as f64, true);
+        }
+
+        BudgetEvaluation {
+            passed: violations.is_empty(),
+            violations,
+            checked,
+        }
+    }
+
     /// Evaluate measured [`LoadMetrics`] (and any embedded browser vitals)
     /// against the configured budgets, returning one human-readable message per
     /// violated gate. An empty result means every enforced budget passed.
     ///
-    /// Budget fields left as `None` are not enforced. Web-vitals gates are only
-    /// checked when the run actually produced `browser_vitals`, so a
-    /// protocol-only run is never failed for a missing LCP measurement.
+    /// Delegates to [`Self::evaluate`] so SLA / load / PerfEngine cannot diverge.
+    /// When [`LoadMetrics::soft_nav`] is present with navigations, soft-nav
+    /// worst LCP / avg INP / total CLS are folded into the effective vitals
+    /// (max with hard-nav values) so SPA route changes participate in gates.
     pub fn check(&self, metrics: &LoadMetrics) -> Vec<String> {
-        let mut violations = Vec::new();
-
-        if let Some(max) = self.max_p95_latency_ms {
-            if metrics.p95_latency_ms > max {
-                violations.push(format!(
+        // Drop synthetic browser vitals before folding — they must not gate budgets.
+        let mut folded = metrics
+            .browser_vitals
+            .clone()
+            .filter(|v| !v.synthetic);
+        if let Some(soft) = metrics.soft_nav.as_ref() {
+            if soft.navigations > 0 {
+                let base = folded.get_or_insert_with(BrowserMetrics::default);
+                base.lcp_ms = base.lcp_ms.max(soft.worst_lcp_ms);
+                base.inp_ms = base.inp_ms.max(soft.avg_inp_ms);
+                base.cls = base.cls.max(soft.total_cls);
+                base.synthetic = false;
+            }
+        }
+        let eval = self.evaluate(
+            folded.as_ref(),
+            Some(metrics),
+            metrics.transfer_bytes,
+            metrics.decoded_bytes,
+            metrics.lcp_media_bytes,
+        );
+        eval.violations
+            .iter()
+            .map(|v| match v.metric.as_str() {
+                "lcp_ms" => format!("LCP {:.2}ms exceeds budget {:.2}ms", v.actual, v.budget),
+                "inp_ms" => format!("INP {:.2}ms exceeds budget {:.2}ms", v.actual, v.budget),
+                "cls" => format!("CLS {:.4} exceeds budget {:.4}", v.actual, v.budget),
+                "tbt_ms" => format!("TBT {:.2}ms exceeds budget {:.2}ms", v.actual, v.budget),
+                "ttfb_ms" => format!("TTFB {:.2}ms exceeds budget {:.2}ms", v.actual, v.budget),
+                "p95_latency_ms" => format!(
                     "p95 latency {:.2}ms exceeds budget {:.2}ms",
-                    metrics.p95_latency_ms, max
-                ));
-            }
-        }
-        if let Some(max) = self.max_p99_latency_ms {
-            if metrics.p99_latency_ms > max {
-                violations.push(format!(
+                    v.actual, v.budget
+                ),
+                "p99_latency_ms" => format!(
                     "p99 latency {:.2}ms exceeds budget {:.2}ms",
-                    metrics.p99_latency_ms, max
-                ));
-            }
-        }
-        if let Some(max) = self.max_error_rate {
-            let error_rate = if metrics.total_requests > 0 {
-                metrics.failed_requests as f64 / metrics.total_requests as f64
-            } else {
-                0.0
-            };
-            if error_rate > max {
-                violations.push(format!(
+                    v.actual, v.budget
+                ),
+                "error_rate" => format!(
                     "error rate {:.4} exceeds budget {:.4}",
-                    error_rate, max
-                ));
-            }
-        }
-        if let Some(min) = self.min_rps {
-            if metrics.rps < min {
-                violations.push(format!(
+                    v.actual, v.budget
+                ),
+                "rps" => format!(
                     "throughput {:.2} rps below budget {:.2} rps",
-                    metrics.rps, min
-                ));
-            }
-        }
-
-        if let Some(vitals) = &metrics.browser_vitals {
-            if let Some(max) = self.max_lcp_ms {
-                if vitals.lcp_ms > max {
-                    violations.push(format!(
-                        "LCP {:.2}ms exceeds budget {:.2}ms",
-                        vitals.lcp_ms, max
-                    ));
-                }
-            }
-            if let Some(max) = self.max_inp_ms {
-                if vitals.inp_ms > max {
-                    violations.push(format!(
-                        "INP {:.2}ms exceeds budget {:.2}ms",
-                        vitals.inp_ms, max
-                    ));
-                }
-            }
-            if let Some(max) = self.max_cls {
-                if vitals.cls > max {
-                    violations.push(format!("CLS {:.4} exceeds budget {:.4}", vitals.cls, max));
-                }
-            }
-            if let Some(max) = self.max_tbt_ms {
-                if vitals.tbt_ms > max {
-                    violations.push(format!(
-                        "TBT {:.2}ms exceeds budget {:.2}ms",
-                        vitals.tbt_ms, max
-                    ));
-                }
-            }
-            if let Some(max) = self.max_ttfb_ms {
-                if vitals.ttfb_ms > max {
-                    violations.push(format!(
-                        "TTFB {:.2}ms exceeds budget {:.2}ms",
-                        vitals.ttfb_ms, max
-                    ));
-                }
-            }
-        }
-
-        violations
+                    v.actual, v.budget
+                ),
+                other => format!(
+                    "{other} {:.4} exceeds budget {:.4} (over by {:.4})",
+                    v.actual, v.budget, v.over_by
+                ),
+            })
+            .collect()
     }
 }
 
@@ -283,6 +378,10 @@ mod budget_tests {
             p99_latency_ms: p99,
             status_codes: HashMap::new(),
             browser_vitals: None,
+            transfer_bytes: None,
+            decoded_bytes: None,
+            lcp_media_bytes: None,
+            soft_nav: None,
         }
     }
 
@@ -335,5 +434,49 @@ mod budget_tests {
         assert!(violations.iter().any(|v| v.contains("LCP")));
         assert!(violations.iter().any(|v| v.contains("INP")));
         assert!(violations.iter().any(|v| v.contains("CLS")));
+    }
+
+    #[test]
+    fn synthetic_vitals_excluded_from_budget_gates() {
+        let budgets = PerformanceBudgets::core_web_vitals();
+        let mut metrics = load_metrics(10.0, 20.0, 100, 0, 100.0);
+        // Terrible numbers — but synthetic must not trip CWV gates.
+        metrics.browser_vitals = Some(BrowserMetrics {
+            lcp_ms: 9000.0,
+            inp_ms: 900.0,
+            cls: 0.9,
+            synthetic: true,
+            ..Default::default()
+        });
+        assert!(
+            budgets.check(&metrics).is_empty(),
+            "synthetic CWV must be excluded from budgets"
+        );
+    }
+
+    #[test]
+    fn check_uses_measured_transfer_and_decoded_bytes() {
+        let budgets = PerformanceBudgets {
+            max_transfer_bytes: Some(1_000),
+            max_decoded_inflation_ratio: Some(2.0),
+            ..PerformanceBudgets::default()
+        };
+        let mut metrics = load_metrics(10.0, 20.0, 10, 0, 10.0);
+        // Without measured bytes, transfer/inflation gates stay silent.
+        assert!(budgets.check(&metrics).is_empty());
+
+        metrics.transfer_bytes = Some(5_000);
+        metrics.decoded_bytes = Some(20_000); // ratio 4.0 > 2.0
+        let violations = budgets.check(&metrics);
+        assert!(
+            violations.iter().any(|v| v.contains("transfer_bytes")),
+            "{violations:?}"
+        );
+        assert!(
+            violations
+                .iter()
+                .any(|v| v.contains("decoded_inflation_ratio")),
+            "{violations:?}"
+        );
     }
 }

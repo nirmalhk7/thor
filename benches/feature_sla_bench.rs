@@ -13,6 +13,7 @@ use thor::devtools::parse_web_vitals;
 use thor::dx::llm_studio::LlmStudio;
 use thor::dx::test_generator::TestGenerator;
 use thor::features::backend::BackendEngine;
+use thor::features::perf_features::PerfEngine;
 use thor::features::security::SecurityEngine;
 use thor::features::sla::{self, FeaturePathResult};
 use thor::features::{FeatureEngine, FeatureRegistry};
@@ -120,6 +121,69 @@ fn bench_idor_matrix(c: &mut Criterion) {
     });
 }
 
+fn bench_lcp_element_forensics(c: &mut Criterion) {
+    let engine = PerfEngine::new();
+    let payload = thor::features::perf_features::LcpElementPayload {
+        vitals_json: Some(
+            r#"{"lcp":2100,"lcpElement":{"url":"https://cdn/hero.webp","type":"image","size":82000,"discoverTime":120,"loadTime":900,"renderTime":2100}}"#
+                .into(),
+        ),
+        ..Default::default()
+    };
+    c.bench_function("lcp_element_forensics", |b| {
+        b.iter(|| black_box(engine.lcp_element_forensics(black_box(&payload))))
+    });
+}
+
+fn bench_long_task_radar(c: &mut Criterion) {
+    let engine = PerfEngine::new();
+    let tasks: Vec<_> = (0..1_000)
+        .map(|i| thor::features::perf_features::LongTaskEvent {
+            duration_ms: 60.0 + (i % 40) as f64,
+            start_ms: i as f64,
+            script_url: Some(format!("https://cdn/chunk-{}.js", i % 17)),
+            name: Some("script".into()),
+            inp_overlap: i % 11 == 0,
+        })
+        .collect();
+    c.bench_function("long_task_radar_1k", |b| {
+        b.iter(|| black_box(engine.long_task_radar(black_box(&tasks))))
+    });
+}
+
+fn bench_conn_pool_inspector(c: &mut Criterion) {
+    let engine = PerfEngine::new();
+    let entries: Vec<_> = (0..1_000)
+        .map(|i| thor::features::perf_features::ConnPoolEntry {
+            url: format!("https://api.example.com/{i}"),
+            connection_id: format!("c{}", i % 32),
+            wait_ms: (i % 25) as f64,
+            reused: i % 3 != 0,
+            protocol: Some(if i % 5 == 0 { "h3" } else { "h2" }.into()),
+        })
+        .collect();
+    c.bench_function("conn_pool_inspector_1k", |b| {
+        b.iter(|| black_box(engine.conn_pool_inspect(black_box(&entries))))
+    });
+}
+
+fn bench_continuous_profiler(c: &mut Criterion) {
+    let engine = PerfEngine::new();
+    let samples: Vec<_> = (0..500)
+        .map(|i| thor::features::perf_features::StackSample {
+            stack: vec![
+                "main".into(),
+                format!("fn_{}", i % 20),
+                format!("leaf_{}", i % 7),
+            ],
+            weight: 1 + (i % 5) as u64,
+        })
+        .collect();
+    c.bench_function("continuous_profiler_500", |b| {
+        b.iter(|| black_box(engine.continuous_profile(black_box(&samples))))
+    });
+}
+
 /// Print a pass/fail SLA summary using the shared measurement harness.
 fn sla_summary(_c: &mut Criterion) {
     println!("\n============================================================");
@@ -162,6 +226,10 @@ criterion_group!(
     bench_cdp_parse_web_vitals,
     bench_webhook_sink_record,
     bench_idor_matrix,
+    bench_lcp_element_forensics,
+    bench_long_task_radar,
+    bench_conn_pool_inspector,
+    bench_continuous_profiler,
     sla_summary,
 );
 criterion_main!(benches);

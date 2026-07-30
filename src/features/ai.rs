@@ -1,4 +1,4 @@
-//! AI / LLM specialist features (12).
+//! AI / LLM specialist features (12 + 12 wave-2).
 //!
 //! LLM inspector, streaming waterfall, prompt diff, cost dashboard, eval replay,
 //! model comparison, agent trace, context heatmap, RAG inspector, prompt
@@ -275,6 +275,204 @@ impl Default for AiEngine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+
+// ===========================================================================
+// Wave-2 AI features (12)
+// ===========================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallEvent {
+    pub name: String,
+    pub arguments_json: String,
+    pub success: bool,
+    pub latency_ms: u64,
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ToolCallForensicsReport {
+    pub calls: usize,
+    pub failures: usize,
+    pub by_tool: BTreeMap<String, usize>,
+    pub avg_latency_ms: f64,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct JsonSchemaGuardReport {
+    pub ok: bool,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheHitEvent {
+    pub key: String,
+    pub hit: bool,
+    pub tokens_saved: usize,
+    #[serde(default)]
+    pub model: Option<String>,
+    #[serde(default)]
+    pub prompt_tokens: Option<usize>,
+    #[serde(default)]
+    pub cached_tokens: Option<usize>,
+    #[serde(default)]
+    pub completion_tokens: Option<usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheHitLedgerReport {
+    pub hits: usize,
+    pub misses: usize,
+    pub hit_rate: f64,
+    pub tokens_saved: usize,
+    /// Estimated USD saved vs billing all prompt tokens at full input price.
+    #[serde(default)]
+    pub saved_usd: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenWasteSegment {
+    pub label: String,
+    pub tokens: usize,
+    pub cited_in_output: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TokenWasteReport {
+    pub total_tokens: usize,
+    pub wasted_tokens: usize,
+    pub waste_pct: f64,
+    pub unused_segments: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingSloInput {
+    pub ttft_ms: u64,
+    pub tokens_per_sec: f64,
+    pub max_gap_ms: u64,
+    pub ttft_budget_ms: u64,
+    pub min_tokens_per_sec: f64,
+    pub max_gap_budget_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamingSloReport {
+    pub passed: bool,
+    pub violations: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterDecision {
+    pub input_preview: String,
+    pub chosen_model: String,
+    pub candidates: Vec<String>,
+    pub reason: String,
+    pub conf: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RouterDecisionReport {
+    pub decisions: usize,
+    pub low_confidence: usize,
+    pub model_histogram: BTreeMap<String, usize>,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpMessage {
+    pub method: String,
+    pub id: Option<String>,
+    pub is_error: bool,
+    pub bytes: usize,
+    pub latency_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct McpTrafficReport {
+    pub messages: usize,
+    pub errors: usize,
+    pub methods: BTreeMap<String, usize>,
+    pub avg_latency_ms: f64,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvalMineCase {
+    pub prompt: String,
+    pub response: String,
+    pub score: Option<f64>,
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EvalDatasetMineReport {
+    pub cases: usize,
+    pub avg_score: Option<f64>,
+    pub tag_histogram: BTreeMap<String, usize>,
+    pub suggested_splits: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HallucinationCheck {
+    pub claim: String,
+    pub evidence_snippets: Vec<String>,
+    pub unsupported: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HallucinationOracleReport {
+    pub claims: usize,
+    pub unsupported: usize,
+    pub risk: String,
+    pub unsupported_claims: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingPair {
+    pub query: String,
+    pub doc: String,
+    pub score: f64,
+    pub relevant: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EmbeddingRagBenchReport {
+    pub pairs: usize,
+    pub precision_at_k: f64,
+    pub avg_relevant_score: f64,
+    pub avg_irrelevant_score: f64,
+    pub separation: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolQuirkSample {
+    pub provider: String,
+    pub field: String,
+    pub value: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProtocolQuirkDiffReport {
+    pub quirks: Vec<String>,
+    pub providers: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ParityRun {
+    pub environment: String,
+    pub output: String,
+    pub tokens: usize,
+    pub latency_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LocalCloudParityReport {
+    pub matched: bool,
+    pub token_delta: i64,
+    pub latency_delta_ms: i64,
+    pub issues: Vec<String>,
 }
 
 impl AiEngine {
@@ -846,6 +1044,711 @@ impl AiEngine {
             .collect();
         self.eval_replay(&cases)
     }
+
+    // ---- Wave-2 AI --------------------------------------------------------
+
+    pub fn tool_call_forensics(&self, events: &[ToolCallEvent]) -> ToolCallForensicsReport {
+        let mut by_tool: BTreeMap<String, usize> = BTreeMap::new();
+        let mut failures = 0usize;
+        let mut lat_sum = 0u64;
+        let mut issues = Vec::new();
+        for e in events {
+            *by_tool.entry(e.name.clone()).or_default() += 1;
+            lat_sum += e.latency_ms;
+            if !e.success {
+                failures += 1;
+                issues.push(format!(
+                    "{} failed: {}",
+                    e.name,
+                    e.error.clone().unwrap_or_else(|| "unknown".into())
+                ));
+            }
+            if e.arguments_json.len() > 8_000 {
+                issues.push(format!("{} huge arguments ({} bytes)", e.name, e.arguments_json.len()));
+            }
+        }
+        let avg = if events.is_empty() {
+            0.0
+        } else {
+            lat_sum as f64 / events.len() as f64
+        };
+        ToolCallForensicsReport {
+            calls: events.len(),
+            failures,
+            by_tool,
+            avg_latency_ms: avg,
+            issues,
+        }
+    }
+
+    /// Parse OpenAI-style SSE (`data: {choices[0].delta.tool_calls}`) into tool events.
+    ///
+    /// Call-only streams never fabricate success: `success` stays `false` until a
+    /// matching `tool_result` / tool-role message merges. Latency uses timestamps
+    /// when present on call + result; otherwise `0`.
+    pub fn tool_call_events_from_sse(sse: &str) -> Vec<ToolCallEvent> {
+        #[derive(Default)]
+        struct Pending {
+            name: String,
+            args: String,
+            call_id: Option<String>,
+            success: bool,
+            latency_ms: u64,
+            error: Option<String>,
+            start_ms: Option<u64>,
+        }
+
+        let mut by_index: BTreeMap<usize, Pending> = BTreeMap::new();
+        let mut id_to_index: BTreeMap<String, usize> = BTreeMap::new();
+
+        let mark_result = |by_index: &mut BTreeMap<usize, Pending>,
+                           id_to_index: &BTreeMap<String, usize>,
+                           call_id: Option<&str>,
+                           is_error: bool,
+                           end_ms: Option<u64>| {
+            let idx = call_id
+                .and_then(|id| id_to_index.get(id).copied())
+                .or_else(|| by_index.keys().next_back().copied());
+            if let Some(idx) = idx {
+                if let Some(p) = by_index.get_mut(&idx) {
+                    p.success = !is_error;
+                    if is_error {
+                        p.error = Some(p.error.clone().unwrap_or_else(|| "tool_result error".into()));
+                    }
+                    if let (Some(start), Some(end)) = (p.start_ms, end_ms) {
+                        if end >= start {
+                            p.latency_ms = end - start;
+                        }
+                    }
+                }
+            }
+        };
+
+        for line in sse.lines() {
+            let data = line.strip_prefix("data:").map(str::trim).unwrap_or(line.trim());
+            if data.is_empty() || data == "[DONE]" {
+                continue;
+            }
+            let Ok(v) = serde_json::from_str::<serde_json::Value>(data) else {
+                continue;
+            };
+            let ts_ms = v
+                .get("created_ms")
+                .or_else(|| v.get("timestamp_ms"))
+                .or_else(|| v.get("created"))
+                .and_then(|t| t.as_u64());
+
+            // OpenAI tool_calls on delta / message
+            if let Some(arr) = v
+                .pointer("/choices/0/delta/tool_calls")
+                .or_else(|| v.pointer("/choices/0/message/tool_calls"))
+                .and_then(|x| x.as_array())
+            {
+                for tc in arr {
+                    let idx = tc.get("index").and_then(|i| i.as_u64()).unwrap_or(0) as usize;
+                    let name = tc
+                        .pointer("/function/name")
+                        .or_else(|| tc.get("name"))
+                        .and_then(|n| n.as_str())
+                        .unwrap_or("")
+                        .to_string();
+                    let args = tc
+                        .pointer("/function/arguments")
+                        .or_else(|| tc.get("input").or_else(|| tc.get("arguments")))
+                        .map(|a| {
+                            if a.is_string() {
+                                a.as_str().unwrap_or("").to_string()
+                            } else {
+                                a.to_string()
+                            }
+                        })
+                        .unwrap_or_default();
+                    let call_id = tc
+                        .get("id")
+                        .and_then(|i| i.as_str())
+                        .map(|s| s.to_string());
+                    let entry = by_index.entry(idx).or_default();
+                    if !name.is_empty() {
+                        entry.name = name;
+                    }
+                    entry.args.push_str(&args);
+                    if let Some(id) = call_id {
+                        id_to_index.insert(id.clone(), idx);
+                        entry.call_id = Some(id);
+                    }
+                    if entry.start_ms.is_none() {
+                        entry.start_ms = ts_ms;
+                    }
+                    // Never invent success on call alone.
+                    entry.success = false;
+                }
+            }
+
+            // Top-level or nested tool_result
+            let tool_result = if v.get("type").and_then(|t| t.as_str()) == Some("tool_result") {
+                Some(&v)
+            } else {
+                None
+            };
+            if let Some(tr) = tool_result {
+                let call_id = tr
+                    .get("tool_call_id")
+                    .or_else(|| tr.get("tool_use_id"))
+                    .and_then(|i| i.as_str());
+                let is_error = tr
+                    .get("is_error")
+                    .and_then(|b| b.as_bool())
+                    .unwrap_or(false);
+                mark_result(&mut by_index, &id_to_index, call_id, is_error, ts_ms);
+            }
+
+            // OpenAI tool role message
+            let role = v
+                .pointer("/choices/0/delta/role")
+                .or_else(|| v.pointer("/choices/0/message/role"))
+                .or_else(|| v.get("role"))
+                .and_then(|r| r.as_str());
+            if role == Some("tool") {
+                let call_id = v
+                    .get("tool_call_id")
+                    .or_else(|| v.pointer("/choices/0/message/tool_call_id"))
+                    .and_then(|i| i.as_str());
+                mark_result(&mut by_index, &id_to_index, call_id, false, ts_ms);
+            }
+
+            // Anthropic content blocks (tool_use + tool_result)
+            if let Some(arr) = v.get("content").and_then(|c| c.as_array()) {
+                for block in arr {
+                    match block.get("type").and_then(|t| t.as_str()) {
+                        Some("tool_use") => {
+                            let name = block
+                                .get("name")
+                                .and_then(|n| n.as_str())
+                                .unwrap_or("tool")
+                                .to_string();
+                            let args = block
+                                .get("input")
+                                .map(|i| i.to_string())
+                                .unwrap_or_else(|| "{}".into());
+                            let call_id = block
+                                .get("id")
+                                .and_then(|i| i.as_str())
+                                .map(|s| s.to_string());
+                            let idx = by_index.len();
+                            if let Some(ref id) = call_id {
+                                id_to_index.insert(id.clone(), idx);
+                            }
+                            by_index.insert(
+                                idx,
+                                Pending {
+                                    name,
+                                    args,
+                                    call_id,
+                                    success: false,
+                                    latency_ms: 0,
+                                    error: None,
+                                    start_ms: ts_ms,
+                                },
+                            );
+                        }
+                        Some("tool_result") => {
+                            let call_id = block
+                                .get("tool_use_id")
+                                .or_else(|| block.get("tool_call_id"))
+                                .and_then(|i| i.as_str());
+                            let is_error = block
+                                .get("is_error")
+                                .and_then(|b| b.as_bool())
+                                .unwrap_or(false);
+                            mark_result(&mut by_index, &id_to_index, call_id, is_error, ts_ms);
+                        }
+                        _ => {}
+                    }
+                }
+            }
+        }
+
+        by_index
+            .into_iter()
+            .map(|(_, p)| ToolCallEvent {
+                name: if p.name.is_empty() {
+                    "unknown".into()
+                } else {
+                    p.name
+                },
+                arguments_json: p.args,
+                success: p.success,
+                latency_ms: p.latency_ms,
+                error: if p.success {
+                    None
+                } else {
+                    p.error.or_else(|| Some("awaiting tool_result".into()))
+                },
+            })
+            .collect()
+    }
+
+    /// Build an agent-trace graph from SSE tool_calls / tool_use payloads.
+    pub fn agent_steps_from_sse(sse: &str) -> Vec<AgentStep> {
+        let events = Self::tool_call_events_from_sse(sse);
+        let mut steps = Vec::new();
+        for e in events {
+            steps.push(AgentStep {
+                kind: "action".into(),
+                tool: Some(e.name.clone()),
+                content: e.arguments_json.clone(),
+            });
+            steps.push(AgentStep {
+                kind: "observation".into(),
+                tool: Some(e.name),
+                content: if e.success {
+                    format!("ok latency_ms={}", e.latency_ms)
+                } else {
+                    e.error
+                        .unwrap_or_else(|| "pending: no tool_result".into())
+                },
+            });
+        }
+        steps
+    }
+
+    pub fn json_schema_guard(
+        &self,
+        value: &serde_json::Value,
+        schema: &serde_json::Value,
+    ) -> JsonSchemaGuardReport {
+        let errors = validate_json_schema_min(value, schema, "$", 0);
+        JsonSchemaGuardReport {
+            ok: errors.is_empty(),
+            errors,
+        }
+    }
+
+    pub fn cache_hit_ledger(&self, events: &[CacheHitEvent]) -> CacheHitLedgerReport {
+        let hits = events.iter().filter(|e| e.hit).count();
+        let misses = events.len().saturating_sub(hits);
+        let tokens_saved: usize = events
+            .iter()
+            .map(|e| {
+                e.cached_tokens
+                    .unwrap_or(e.tokens_saved)
+                    .max(if e.hit { e.tokens_saved } else { 0 })
+            })
+            .sum();
+        let hit_rate = if events.is_empty() {
+            0.0
+        } else {
+            hits as f64 / events.len() as f64
+        };
+        let mut saved_usd = 0.0f64;
+        for e in events {
+            let model = e.model.as_deref().unwrap_or("gpt-4o");
+            let prompt = e.prompt_tokens.unwrap_or(0);
+            let cached = e.cached_tokens.unwrap_or(if e.hit { e.tokens_saved } else { 0 });
+            let completion = e.completion_tokens.unwrap_or(0);
+            if cached > 0 || e.hit {
+                let with_cache =
+                    LlmStudio::estimate_cost_with_caching(model, prompt.max(cached), cached, completion);
+                let without = LlmStudio::estimate_cost(model, prompt.max(cached), completion);
+                saved_usd += (without.total_cost_usd - with_cache.total_cost_usd).max(0.0);
+            }
+        }
+        CacheHitLedgerReport {
+            hits,
+            misses,
+            hit_rate,
+            tokens_saved,
+            saved_usd,
+        }
+    }
+
+    /// Parse provider `usage` objects (OpenAI `prompt_tokens_details.cached_tokens`,
+    /// Anthropic `cache_read_input_tokens`) into a [`CacheHitEvent`].
+    pub fn cache_hit_event_from_usage(
+        usage: &serde_json::Value,
+        model: &str,
+        key: &str,
+    ) -> CacheHitEvent {
+        let prompt_tokens = usage
+            .get("prompt_tokens")
+            .or_else(|| usage.get("input_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        let completion_tokens = usage
+            .get("completion_tokens")
+            .or_else(|| usage.get("output_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        let cached = usage
+            .pointer("/prompt_tokens_details/cached_tokens")
+            .or_else(|| usage.get("cache_read_input_tokens"))
+            .or_else(|| usage.get("cached_tokens"))
+            .and_then(|v| v.as_u64())
+            .unwrap_or(0) as usize;
+        CacheHitEvent {
+            key: key.to_string(),
+            hit: cached > 0,
+            tokens_saved: cached,
+            model: Some(model.to_string()),
+            prompt_tokens: Some(prompt_tokens),
+            cached_tokens: Some(cached),
+            completion_tokens: Some(completion_tokens),
+        }
+    }
+
+    pub fn token_waste_auditor(&self, segments: &[TokenWasteSegment]) -> TokenWasteReport {
+        let total: usize = segments.iter().map(|s| s.tokens).sum();
+        let unused: Vec<&TokenWasteSegment> = segments.iter().filter(|s| !s.cited_in_output).collect();
+        let wasted: usize = unused.iter().map(|s| s.tokens).sum();
+        let waste_pct = if total == 0 {
+            0.0
+        } else {
+            wasted as f64 / total as f64 * 100.0
+        };
+        TokenWasteReport {
+            total_tokens: total,
+            wasted_tokens: wasted,
+            waste_pct,
+            unused_segments: unused.iter().map(|s| s.label.clone()).collect(),
+        }
+    }
+
+    pub fn streaming_slo_gates(&self, input: &StreamingSloInput) -> StreamingSloReport {
+        let mut violations = Vec::new();
+        if input.ttft_ms > input.ttft_budget_ms {
+            violations.push(format!(
+                "TTFT {}ms > budget {}ms",
+                input.ttft_ms, input.ttft_budget_ms
+            ));
+        }
+        if input.tokens_per_sec < input.min_tokens_per_sec {
+            violations.push(format!(
+                "throughput {:.1} t/s < min {:.1}",
+                input.tokens_per_sec, input.min_tokens_per_sec
+            ));
+        }
+        if input.max_gap_ms > input.max_gap_budget_ms {
+            violations.push(format!(
+                "max gap {}ms > budget {}ms",
+                input.max_gap_ms, input.max_gap_budget_ms
+            ));
+        }
+        StreamingSloReport {
+            passed: violations.is_empty(),
+            violations,
+        }
+    }
+
+    /// Derive streaming SLO input from a captured [`StreamWaterfall`].
+    pub fn streaming_slo_gates_from_waterfall(
+        &self,
+        waterfall: &StreamWaterfall,
+        ttft_budget_ms: u64,
+        min_tokens_per_sec: f64,
+        max_gap_budget_ms: u64,
+    ) -> StreamingSloReport {
+        self.streaming_slo_gates(&StreamingSloInput {
+            ttft_ms: waterfall.ttft_ms,
+            tokens_per_sec: waterfall.tokens_per_sec,
+            max_gap_ms: waterfall.max_gap_ms,
+            ttft_budget_ms,
+            min_tokens_per_sec,
+            max_gap_budget_ms,
+        })
+    }
+
+    pub fn router_decision_trace(&self, decisions: &[RouterDecision]) -> RouterDecisionReport {
+        let mut model_histogram: BTreeMap<String, usize> = BTreeMap::new();
+        let mut low_confidence = 0usize;
+        let mut issues = Vec::new();
+        for d in decisions {
+            *model_histogram.entry(d.chosen_model.clone()).or_default() += 1;
+            if d.conf < 0.5 {
+                low_confidence += 1;
+                issues.push(format!(
+                    "low conf {:.2} chose {} ({})",
+                    d.conf, d.chosen_model, d.reason
+                ));
+            }
+            if !d.candidates.is_empty() && !d.candidates.iter().any(|c| c == &d.chosen_model) {
+                issues.push(format!(
+                    "chosen {} not in candidates {:?}",
+                    d.chosen_model, d.candidates
+                ));
+            }
+        }
+        RouterDecisionReport {
+            decisions: decisions.len(),
+            low_confidence,
+            model_histogram,
+            issues,
+        }
+    }
+
+    pub fn mcp_traffic_lens(&self, messages: &[McpMessage]) -> McpTrafficReport {
+        let mut methods: BTreeMap<String, usize> = BTreeMap::new();
+        let mut errors = 0usize;
+        let mut lat = 0u64;
+        let mut issues = Vec::new();
+        for m in messages {
+            *methods.entry(m.method.clone()).or_default() += 1;
+            lat += m.latency_ms;
+            if m.is_error {
+                errors += 1;
+            }
+            if m.bytes > 1_000_000 {
+                issues.push(format!("{} message {} bytes", m.method, m.bytes));
+            }
+        }
+        let avg = if messages.is_empty() {
+            0.0
+        } else {
+            lat as f64 / messages.len() as f64
+        };
+        if errors > 0 {
+            issues.push(format!("{errors} MCP error messages"));
+        }
+        McpTrafficReport {
+            messages: messages.len(),
+            errors,
+            methods,
+            avg_latency_ms: avg,
+            issues,
+        }
+    }
+
+    /// Accept Thor `src/mcp` JSON-RPC request/response shapes (`method`, `id`,
+    /// optional `error` / `result`) and fold into [`McpMessage`]s.
+    ///
+    /// Pairs request/response by `id`, computes latency when both timestamps are
+    /// present, and labels unmatched requests/responses.
+    pub fn mcp_messages_from_jsonrpc(frames: &[serde_json::Value]) -> Vec<McpMessage> {
+        let mut out = Vec::new();
+        let mut pending_req: BTreeMap<String, (String, Option<u64>, usize)> = BTreeMap::new();
+        for v in frames {
+            let id = v.get("id").and_then(|i| {
+                i.as_str()
+                    .map(|s| s.to_string())
+                    .or_else(|| i.as_u64().map(|n| n.to_string()))
+            });
+            let ts = v
+                .get("timestamp_ms")
+                .or_else(|| v.get("ts"))
+                .and_then(|t| t.as_u64());
+            let bytes = v.to_string().len();
+            let is_error = v.get("error").is_some()
+                || v.get("is_error").and_then(|b| b.as_bool()).unwrap_or(false);
+            let has_method = v.get("method").and_then(|m| m.as_str()).is_some();
+            let has_result = v.get("result").is_some() || v.get("error").is_some();
+
+            match id {
+                Some(id) if has_method && !has_result => {
+                    let method = v
+                        .get("method")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown")
+                        .to_string();
+                    pending_req.insert(id, (method, ts, bytes));
+                }
+                Some(id) if has_result => {
+                    if let Some((method, start_ts, req_bytes)) = pending_req.remove(&id) {
+                        let latency = match (start_ts, ts) {
+                            (Some(a), Some(b)) => b.saturating_sub(a),
+                            _ => v
+                                .get("latency_ms")
+                                .and_then(|l| l.as_u64())
+                                .unwrap_or(0),
+                        };
+                        out.push(McpMessage {
+                            method,
+                            id: Some(id),
+                            is_error,
+                            bytes: req_bytes + bytes,
+                            latency_ms: latency,
+                        });
+                    } else {
+                        out.push(McpMessage {
+                            method: "unmatched-response".into(),
+                            id: Some(id),
+                            is_error,
+                            bytes,
+                            latency_ms: 0,
+                        });
+                    }
+                }
+                None if has_method => {
+                    out.push(McpMessage {
+                        method: v
+                            .get("method")
+                            .and_then(|m| m.as_str())
+                            .unwrap_or("notification")
+                            .to_string(),
+                        id: None,
+                        is_error,
+                        bytes,
+                        latency_ms: v.get("latency_ms").and_then(|l| l.as_u64()).unwrap_or(0),
+                    });
+                }
+                _ => {}
+            }
+        }
+        for (id, (method, _, bytes)) in pending_req {
+            out.push(McpMessage {
+                method: format!("{method} (unmatched-request)"),
+                id: Some(id),
+                is_error: false,
+                bytes,
+                latency_ms: 0,
+            });
+        }
+        out
+    }
+
+    pub fn eval_dataset_miner(&self, cases: &[EvalMineCase]) -> EvalDatasetMineReport {
+        let mut tag_histogram: BTreeMap<String, usize> = BTreeMap::new();
+        let mut score_sum = 0.0;
+        let mut score_n = 0usize;
+        for c in cases {
+            for t in &c.tags {
+                *tag_histogram.entry(t.clone()).or_default() += 1;
+            }
+            if let Some(s) = c.score {
+                score_sum += s;
+                score_n += 1;
+            }
+        }
+        let avg_score = if score_n == 0 {
+            None
+        } else {
+            Some(score_sum / score_n as f64)
+        };
+        // Suggested 80/10/10 split by count.
+        let n = cases.len();
+        let mut suggested_splits = BTreeMap::new();
+        suggested_splits.insert("train".into(), n * 80 / 100);
+        suggested_splits.insert("val".into(), n * 10 / 100);
+        suggested_splits.insert("test".into(), n - (n * 80 / 100) - (n * 10 / 100));
+        EvalDatasetMineReport {
+            cases: n,
+            avg_score,
+            tag_histogram,
+            suggested_splits,
+        }
+    }
+
+    pub fn hallucination_oracle(&self, checks: &[HallucinationCheck]) -> HallucinationOracleReport {
+        // Evidence rule: a claim is unsupported when flagged OR when no evidence
+        // snippet shares a content token with the claim (empty evidence ⇒ unsupported).
+        let unsupported_claims: Vec<String> = checks
+            .iter()
+            .filter(|c| {
+                if c.unsupported || c.evidence_snippets.is_empty() {
+                    return true;
+                }
+                let claim_toks = tokenize_words(&c.claim);
+                !c.evidence_snippets.iter().any(|ev| {
+                    let ev_toks = tokenize_words(ev);
+                    claim_toks.iter().any(|t| ev_toks.contains(t) && t.len() > 2)
+                })
+            })
+            .map(|c| c.claim.clone())
+            .collect();
+        let unsupported = unsupported_claims.len();
+        let risk = if unsupported == 0 {
+            "low"
+        } else if unsupported * 100 / checks.len().max(1) < 20 {
+            "medium"
+        } else {
+            "high"
+        };
+        HallucinationOracleReport {
+            claims: checks.len(),
+            unsupported,
+            risk: risk.to_string(),
+            unsupported_claims,
+        }
+    }
+
+    pub fn embedding_rag_bench(&self, pairs: &[EmbeddingPair], k: usize) -> EmbeddingRagBenchReport {
+        let mut scored = pairs.to_vec();
+        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        let topk = scored.iter().take(k.max(1)).collect::<Vec<_>>();
+        let relevant_hits = topk.iter().filter(|p| p.relevant).count();
+        let precision_at_k = relevant_hits as f64 / topk.len().max(1) as f64;
+        let rel: Vec<f64> = pairs.iter().filter(|p| p.relevant).map(|p| p.score).collect();
+        let irrel: Vec<f64> = pairs.iter().filter(|p| !p.relevant).map(|p| p.score).collect();
+        let avg_relevant_score = if rel.is_empty() {
+            0.0
+        } else {
+            rel.iter().sum::<f64>() / rel.len() as f64
+        };
+        let avg_irrelevant_score = if irrel.is_empty() {
+            0.0
+        } else {
+            irrel.iter().sum::<f64>() / irrel.len() as f64
+        };
+        EmbeddingRagBenchReport {
+            pairs: pairs.len(),
+            precision_at_k,
+            avg_relevant_score,
+            avg_irrelevant_score,
+            separation: avg_relevant_score - avg_irrelevant_score,
+        }
+    }
+
+    pub fn protocol_quirk_diff(&self, samples: &[ProtocolQuirkSample]) -> ProtocolQuirkDiffReport {
+        let mut by_field: BTreeMap<String, BTreeMap<String, String>> = BTreeMap::new();
+        let mut providers = BTreeMap::<String, ()>::new();
+        for s in samples {
+            providers.insert(s.provider.clone(), ());
+            by_field
+                .entry(s.field.clone())
+                .or_default()
+                .insert(s.provider.clone(), s.value.clone());
+        }
+        let mut quirks = Vec::new();
+        for (field, map) in by_field {
+            let values: std::collections::HashSet<_> = map.values().cloned().collect();
+            if values.len() > 1 {
+                quirks.push(format!("{field}: {:?}", map));
+            }
+        }
+        ProtocolQuirkDiffReport {
+            quirks,
+            providers: providers.len(),
+        }
+    }
+
+    pub fn local_cloud_parity(&self, runs: &[ParityRun]) -> LocalCloudParityReport {
+        let local = runs.iter().find(|r| r.environment == "local");
+        let cloud = runs.iter().find(|r| r.environment == "cloud");
+        let mut issues = Vec::new();
+        let (matched, token_delta, latency_delta_ms) = match (local, cloud) {
+            (Some(l), Some(c)) => {
+                let matched = l.output.trim() == c.output.trim();
+                if !matched {
+                    issues.push("output mismatch between local and cloud".into());
+                }
+                let td = c.tokens as i64 - l.tokens as i64;
+                if td.abs() > 5 {
+                    issues.push(format!("token delta {td}"));
+                }
+                let ld = c.latency_ms as i64 - l.latency_ms as i64;
+                (matched, td, ld)
+            }
+            _ => {
+                issues.push("need both local and cloud runs".into());
+                (false, 0, 0)
+            }
+        };
+        LocalCloudParityReport {
+            matched,
+            token_delta,
+            latency_delta_ms,
+            issues,
+        }
+    }
+
 }
 
 /// Derive a stable mock-store signature from a model name and request body.
@@ -1037,6 +1940,111 @@ fn jaccard(a: &str, b: &str) -> f64 {
     let inter = sa.intersection(&sb).count();
     let union = sa.union(&sb).count().max(1);
     inter as f64 / union as f64
+}
+
+
+fn validate_json_schema_min(
+    value: &serde_json::Value,
+    schema: &serde_json::Value,
+    path: &str,
+    depth: usize,
+) -> Vec<String> {
+    const MAX_DEPTH: usize = 32;
+    let mut errs = Vec::new();
+    if depth > MAX_DEPTH {
+        errs.push(format!("{path}: exceeded max schema depth {MAX_DEPTH}"));
+        return errs;
+    }
+    let ty = schema.get("type").and_then(|v| v.as_str()).unwrap_or("");
+    match ty {
+        "object" => {
+            if !value.is_object() {
+                errs.push(format!("{path}: expected object"));
+                return errs;
+            }
+            if let Some(required) = schema.get("required").and_then(|v| v.as_array()) {
+                for r in required {
+                    if let Some(key) = r.as_str() {
+                        if value.get(key).is_none() {
+                            errs.push(format!("{path}: missing required '{key}'"));
+                        }
+                    }
+                }
+            }
+            let props = schema
+                .get("properties")
+                .and_then(|v| v.as_object())
+                .cloned()
+                .unwrap_or_default();
+            if let Some(obj) = value.as_object() {
+                for (k, sub) in &props {
+                    if let Some(v) = obj.get(k) {
+                        errs.extend(validate_json_schema_min(
+                            v,
+                            sub,
+                            &format!("{path}.{k}"),
+                            depth + 1,
+                        ));
+                    }
+                }
+                match schema.get("additionalProperties") {
+                    Some(serde_json::Value::Bool(false)) => {
+                        for k in obj.keys() {
+                            if !props.contains_key(k) {
+                                errs.push(format!("{path}: additional property '{k}' not allowed"));
+                            }
+                        }
+                    }
+                    Some(sub) if sub.is_object() => {
+                        for (k, v) in obj {
+                            if !props.contains_key(k) {
+                                errs.extend(validate_json_schema_min(
+                                    v,
+                                    sub,
+                                    &format!("{path}.{k}"),
+                                    depth + 1,
+                                ));
+                            }
+                        }
+                    }
+                    _ => {}
+                }
+            }
+        }
+        "array" => {
+            if !value.is_array() {
+                errs.push(format!("{path}: expected array"));
+            } else if let Some(items) = schema.get("items") {
+                if let Some(arr) = value.as_array() {
+                    for (i, v) in arr.iter().enumerate() {
+                        errs.extend(validate_json_schema_min(
+                            v,
+                            items,
+                            &format!("{path}[{i}]"),
+                            depth + 1,
+                        ));
+                    }
+                }
+            }
+        }
+        "string" => {
+            if !value.is_string() {
+                errs.push(format!("{path}: expected string"));
+            }
+        }
+        "number" | "integer" => {
+            if !value.is_number() {
+                errs.push(format!("{path}: expected number"));
+            }
+        }
+        "boolean" => {
+            if !value.is_boolean() {
+                errs.push(format!("{path}: expected boolean"));
+            }
+        }
+        _ => {}
+    }
+    errs
 }
 
 #[cfg(test)]
@@ -1344,4 +2352,123 @@ mod tests {
         assert_eq!(r.total, 2);
         assert_eq!(r.passed, 1);
     }
+
+    #[test]
+    fn test_tool_call_and_schema_guard() {
+        let e = AiEngine::new();
+        let t = e.tool_call_forensics(&[ToolCallEvent {
+            name: "search".into(),
+            arguments_json: "{}".into(),
+            success: false,
+            latency_ms: 12,
+            error: Some("timeout".into()),
+        }]);
+        assert_eq!(t.failures, 1);
+        let g = e.json_schema_guard(
+            &serde_json::json!({"a": 1}),
+            &serde_json::json!({"type":"object","required":["a","b"]}),
+        );
+        assert!(!g.ok);
+    }
+
+    #[test]
+    fn test_token_waste_and_streaming_slo() {
+        let e = AiEngine::new();
+        let w = e.token_waste_auditor(&[
+            TokenWasteSegment { label: "sys".into(), tokens: 100, cited_in_output: true },
+            TokenWasteSegment { label: "dead".into(), tokens: 50, cited_in_output: false },
+        ]);
+        assert_eq!(w.wasted_tokens, 50);
+        let s = e.streaming_slo_gates(&StreamingSloInput {
+            ttft_ms: 800,
+            tokens_per_sec: 10.0,
+            max_gap_ms: 50,
+            ttft_budget_ms: 500,
+            min_tokens_per_sec: 20.0,
+            max_gap_budget_ms: 200,
+        });
+        assert!(!s.passed);
+        assert!(s.violations.len() >= 2);
+    }
+
+    #[test]
+    fn test_hallucination_and_parity() {
+        let e = AiEngine::new();
+        let h = e.hallucination_oracle(&[HallucinationCheck {
+            claim: "X happened".into(),
+            evidence_snippets: vec![],
+            unsupported: true,
+        }]);
+        assert_eq!(h.unsupported, 1);
+        let grounded = e.hallucination_oracle(&[HallucinationCheck {
+            claim: "Paris is the capital".into(),
+            evidence_snippets: vec!["Paris is the capital of France".into()],
+            unsupported: false,
+        }]);
+        assert_eq!(grounded.unsupported, 0);
+        let p = e.local_cloud_parity(&[
+            ParityRun { environment: "local".into(), output: "hi".into(), tokens: 3, latency_ms: 10 },
+            ParityRun { environment: "cloud".into(), output: "hi".into(), tokens: 3, latency_ms: 12 },
+        ]);
+        assert!(p.matched);
+    }
+
+    #[test]
+    fn test_cache_hit_ledger_and_sse_tools() {
+        let e = AiEngine::new();
+        let usage = json!({
+            "prompt_tokens": 1000,
+            "completion_tokens": 100,
+            "prompt_tokens_details": { "cached_tokens": 800 }
+        });
+        let ev = AiEngine::cache_hit_event_from_usage(&usage, "gpt-4o", "k1");
+        assert!(ev.hit);
+        assert_eq!(ev.cached_tokens, Some(800));
+        let ledger = e.cache_hit_ledger(&[ev]);
+        assert!(ledger.saved_usd > 0.0);
+        assert_eq!(ledger.tokens_saved, 800);
+
+        let sse = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"name":"search","arguments":"{\"q\":"}}]}}]}
+data: {"choices":[{"delta":{"tool_calls":[{"index":0,"function":{"arguments":"\"x\"}"}}]}}]}
+data: [DONE]
+"#;
+        let tools = AiEngine::tool_call_events_from_sse(sse);
+        assert!(!tools.is_empty());
+        assert_eq!(tools[0].name, "search");
+        assert!(!tools[0].success, "call-only SSE must not fabricate success");
+        let steps = AiEngine::agent_steps_from_sse(sse);
+        assert!(steps.iter().any(|s| s.kind == "action"));
+
+        let frames = vec![
+            json!({"jsonrpc":"2.0","id":1,"method":"tools/list"}),
+            json!({"jsonrpc":"2.0","id":1,"result":{"tools":[]}}),
+        ];
+        let msgs = AiEngine::mcp_messages_from_jsonrpc(&frames);
+        assert_eq!(msgs.len(), 1, "request+response should correlate by id");
+        assert_eq!(msgs[0].method, "tools/list");
+        let mcp = e.mcp_traffic_lens(&msgs);
+        assert_eq!(mcp.messages, 1);
+
+        let schema = json!({
+            "type": "object",
+            "properties": { "a": { "type": "string" } },
+            "additionalProperties": false,
+            "required": ["a"]
+        });
+        let bad = e.json_schema_guard(&json!({"a":"ok","extra":1}), &schema);
+        assert!(!bad.ok);
+        assert!(bad.errors.iter().any(|e| e.contains("additional")));
+
+        let wf = StreamWaterfall {
+            ttft_ms: 100,
+            total_tokens: 50,
+            tokens_per_sec: 40.0,
+            inter_token_gaps_ms: vec![10, 20],
+            max_gap_ms: 20,
+            total_duration_ms: 500,
+        };
+        let slo = e.streaming_slo_gates_from_waterfall(&wf, 500, 20.0, 200);
+        assert!(slo.passed);
+    }
+
 }

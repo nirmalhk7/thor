@@ -1,9 +1,27 @@
 //! Process / page freeze hooks for Thor (OS signals + CDP lifecycle).
+//!
+//! Product (Chromium downstream) should prefer in-process WebContents discard/freeze
+//! APIs (see `browser/isolation/MAPPING.md`). CDP lifecycle below is the self-CDP /
+//! legacy dual-window bridge until those hooks are wired in `chrome/`.
 
 use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateParams;
 use chromiumoxide::Page;
 
 use super::chromium_runtime::ChromiumResult;
+
+/// Preferred Chromium-downstream lifecycle operations (documentation + bridge names).
+/// Implementations call into browser process APIs once Thor chrome is in-tree; until
+/// then [`CdpPageFreezer`] provides the self-CDP equivalent.
+pub struct ChromiumLifecycleHooks;
+
+impl ChromiumLifecycleHooks {
+    /// Map Thor `Frozen` → Chromium page lifecycle frozen / WasHidden.
+    pub const FREEZE: &'static str = "WebContents::SetPageFrozen / lifecycle Frozen";
+    /// Map Thor `Discarded` → tab discard / unload renderer, keep URL+scroll.
+    pub const DISCARD: &'static str = "TabDiscarding / WebContents discard";
+    /// Map Thor `Expired` → close tab + wipe L3 history.
+    pub const EXPIRE: &'static str = "TabStripModel::CloseWebContentsAt + wipe tab history";
+}
 
 /// OS-level suspend / resume of a Chromium process.
 ///
@@ -60,21 +78,29 @@ impl ProcessFreezer {
 ///
 /// Some Chromium builds reject the experimental command; callers should treat
 /// errors as soft failures and fall back to [`ProcessFreezer`].
+///
+/// Timing: each call measures wall-clock ms via [`std::time::Instant`] and
+/// returns it so callers (e.g. [`crate::engine::tab_session::TabSession`]) can
+/// push [`crate::features::perf_features::FreezeTimingSample`] into PerfEngine.
 pub struct CdpPageFreezer;
 
 impl CdpPageFreezer {
-    pub async fn freeze_page(page: &Page) -> ChromiumResult<()> {
+    /// Freeze the page; returns soft-freeze duration in milliseconds.
+    pub async fn freeze_page(page: &Page) -> ChromiumResult<f64> {
         use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateState;
+        let t0 = std::time::Instant::now();
         let params = SetWebLifecycleStateParams::new(SetWebLifecycleStateState::Frozen);
         page.execute(params).await?;
-        Ok(())
+        Ok(t0.elapsed().as_secs_f64() * 1000.0)
     }
 
-    pub async fn unfreeze_page(page: &Page) -> ChromiumResult<()> {
+    /// Unfreeze the page; returns soft-unfreeze duration in milliseconds.
+    pub async fn unfreeze_page(page: &Page) -> ChromiumResult<f64> {
         use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateState;
+        let t0 = std::time::Instant::now();
         let params = SetWebLifecycleStateParams::new(SetWebLifecycleStateState::Active);
         page.execute(params).await?;
-        Ok(())
+        Ok(t0.elapsed().as_secs_f64() * 1000.0)
     }
 }
 

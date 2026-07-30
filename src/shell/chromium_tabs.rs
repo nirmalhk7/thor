@@ -6,11 +6,14 @@ use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::{Duration, Instant};
 
+use tokio::task::JoinHandle;
+
 use crate::engine::{
     discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig,
     IdentityContext, TabLifecycle, TabSession,
 };
 use crate::shell::engine_status;
+use crate::app_state::AppState;
 
 use super::{sanitize_and_record, TabMeta};
 
@@ -20,13 +23,17 @@ pub struct ChromiumTabs {
     pub(crate) meta: HashMap<String, TabMeta>,
     pub(crate) active: String,
     hotkey_script: String,
+    /// Per-tab CDP Fetch.requestPaused listeners (when intercept is on).
+    fetch_handles: HashMap<String, JoinHandle<()>>,
 }
 
 impl ChromiumTabs {
     pub fn launch(hotkey_script: &str) -> anyhow::Result<Self> {
         if discover_chromium_path().is_none() {
             anyhow::bail!(
-                "No Chrome/Chromium found. Install Google Chrome or set THOR_CHROMIUM_PATH to the binary."
+                "No Thor-owned Chromium found. Run ./scripts/bootstrap_chromium_snapshot.sh \
+                 (or build_chromium.sh), set THOR_CHROMIUM_PATH, or for labs-only system Chrome \
+                 set THOR_ALLOW_SYSTEM_CHROME=1."
             );
         }
         let runtime = ChromiumRuntime::launch_blocking(ChromiumRuntimeConfig {
@@ -48,6 +55,7 @@ impl ChromiumTabs {
             meta: HashMap::new(),
             active: String::new(),
             hotkey_script: hotkey_script.to_string(),
+            fetch_handles: HashMap::new(),
         })
     }
 
@@ -128,6 +136,8 @@ impl ChromiumTabs {
         self.sessions.insert(tab_id.to_string(), session);
         self.active = tab_id.to_string();
         self.show_only(tab_id);
+        self.publish_active_evaluator();
+        self.maybe_attach_fetch(tab_id);
         Ok(())
     }
 
@@ -156,6 +166,8 @@ impl ChromiumTabs {
         self.sessions.insert(tab_id.to_string(), session);
         self.active = tab_id.to_string();
         self.show_only(tab_id);
+        self.publish_active_evaluator();
+        self.maybe_attach_fetch(tab_id);
         Ok(())
     }
 
@@ -221,6 +233,9 @@ impl ChromiumTabs {
             .tab_history()
             .clear_tab_history(tab_id);
         self.meta.remove(tab_id);
+        if let Some(h) = self.fetch_handles.remove(tab_id) {
+            h.abort();
+        }
         if let Some(session) = self.sessions.remove(tab_id) {
             let _ = session.close_blocking();
         }
@@ -239,6 +254,48 @@ impl ChromiumTabs {
                 self.touch(&active);
             }
         }
+        self.publish_active_evaluator();
+    }
+
+    fn maybe_attach_fetch(&mut self, tab_id: &str) {
+        if !AppState::global().tamper().is_interception_enabled() {
+            return;
+        }
+        if self.fetch_handles.contains_key(tab_id) {
+            return;
+        }
+        let Some(session) = self.sessions.get(tab_id) else {
+            return;
+        };
+        match crate::devtools::fetch_intercept::attach_blocking(
+            session,
+            AppState::global().tamper().clone(),
+        ) {
+            Ok(handle) => {
+                self.fetch_handles.insert(tab_id.to_string(), handle);
+                println!("⚡ [Thor Fetch] intercept attached on {tab_id}");
+            }
+            Err(e) => eprintln!("⚡ [Thor Fetch] attach failed on {tab_id}: {e}"),
+        }
+    }
+
+    /// Enable/disable CDP Fetch interception on all open tabs.
+    pub fn set_fetch_interception(&mut self, enabled: bool) {
+        if !enabled {
+            for session in self.sessions.values() {
+                let _ = crate::devtools::fetch_intercept::detach_blocking(session);
+            }
+            for (_, handle) in self.fetch_handles.drain() {
+                handle.abort();
+            }
+            println!("⚡ [Thor Fetch] intercept OFF");
+            return;
+        }
+        let ids: Vec<String> = self.sessions.keys().cloned().collect();
+        for id in ids {
+            self.maybe_attach_fetch(&id);
+        }
+        println!("⚡ [Thor Fetch] intercept ON ({} tabs)", self.fetch_handles.len());
     }
 
     pub fn switch_tab(&mut self, target_id: &str) -> Option<String> {
@@ -252,7 +309,21 @@ impl ChromiumTabs {
         if !url.is_empty() {
             self.set_url_title(target_id, &url, "");
         }
+        self.publish_active_evaluator();
         Some(url)
+    }
+
+    /// Publish (or clear) the process-wide active-tab evaluate hook for FeatureEngine.
+    fn publish_active_evaluator(&self) {
+        use crate::features::cdp_bridge::CdpBridge;
+        if let Some(session) = self.sessions.get(&self.active) {
+            let handle = session.eval_handle();
+            CdpBridge::install_active_evaluator(std::sync::Arc::new(move |script: &str| {
+                handle.evaluate_blocking(script)
+            }));
+        } else {
+            CdpBridge::clear_active_evaluator();
+        }
     }
 
     pub fn open_devtools_active(&self) {
@@ -268,6 +339,26 @@ impl ChromiumTabs {
         self.sessions
             .get(&self.active)
             .and_then(|s| s.evaluate_js_blocking(js).ok())
+    }
+
+    /// Autofill active tab login fields via CDP (secrets only enter the fill script).
+    pub fn autofill_login(&self, item_id: &str) -> Result<String, String> {
+        let login = AppState::global()
+            .vault()
+            .get_login(item_id)
+            .map_err(|e| e.to_string())?;
+        let script = crate::dx::bitwarden::build_autofill_script(&login.username, &login.password);
+        match self.evaluate_active(&script) {
+            Some(v) => {
+                let filled = v["filled"].as_u64().unwrap_or(0);
+                if filled == 0 {
+                    Err("No fillable username/password fields found on page".into())
+                } else {
+                    Ok(format!("filled {filled} field(s)"))
+                }
+            }
+            None => Err("No active Chromium tab for autofill".into()),
+        }
     }
 
     pub fn drain_ipc_queue(&self) -> Vec<String> {
@@ -335,5 +426,40 @@ pub fn inject_thor_bridge(session: &TabSession, hotkey_script: &str) {
     let _ = session.evaluate_js_blocking(&status);
     if !hotkey_script.is_empty() {
         let _ = session.evaluate_js_blocking(hotkey_script);
+    }
+    // Install CWV collectors early so INP/LCP can accumulate during dwell.
+    let _ = session.evaluate_js_blocking(
+        crate::features::cdp_bridge::CdpBridge::web_vitals_injection_script(),
+    );
+    // Soft-nav + speculation collectors for SPA navigations.
+    let _ = session.evaluate_js_blocking(
+        crate::features::cdp_bridge::CdpBridge::soft_nav_and_speculation_script(),
+    );
+    if AppState::global().auto_pip_enabled() {
+        let _ = session.evaluate_js_blocking(
+            crate::engine::browser_features::PictureInPicture::auto_pip_injection_script(),
+        );
+    }
+}
+
+impl ChromiumTabs {
+    pub fn toggle_pip_active(&self) -> Option<crate::engine::browser_features::PipResult> {
+        let session = self.sessions.get(&self.active)?;
+        crate::engine::browser_features::PictureInPicture::toggle_video(session).ok()
+    }
+
+    pub fn run_visit_recon_active(&self) -> Option<crate::dx::visit_recon::VisitReconReport> {
+        if !AppState::global().visit_recon_enabled() {
+            return None;
+        }
+        let session = self.sessions.get(&self.active)?;
+        let url = self
+            .meta
+            .get(&self.active)
+            .map(|m| m.url.as_str())
+            .unwrap_or("");
+        let report = crate::dx::visit_recon::VisitReconEngine::run_passive(session, url);
+        AppState::global().store_visit_recon(report.clone());
+        Some(report)
     }
 }

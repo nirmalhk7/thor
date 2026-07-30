@@ -1,4 +1,4 @@
-//! Security specialist features (12).
+//! Security specialist features (12 + 12 wave-2).
 //!
 //! Authorization matrix, response diff, security-header analysis, deep JWT
 //! inspection, promote-to-finding, attack-surface crawling, storage auditing,
@@ -247,6 +247,203 @@ impl Default for SecurityEngine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+
+// ===========================================================================
+// Wave-2 security features (12)
+// ===========================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TaintFlow {
+    pub source: String,
+    pub sink: String,
+    #[serde(default)]
+    pub via: Vec<String>,
+    #[serde(default)]
+    pub sanitized: bool,
+    /// Sink taxonomy: `html` | `js` | `url` | `dom` | `unknown`.
+    #[serde(default)]
+    pub sink_kind: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct DomXssTaintReport {
+    pub flows: Vec<TaintFlow>,
+    pub unsanitized: usize,
+    pub risk: String,
+    /// Counts by sink taxonomy for CDP-shaped triage.
+    #[serde(default)]
+    pub by_sink_kind: BTreeMap<String, usize>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorsProbeResult {
+    pub origin: String,
+    pub acao: Option<String>,
+    pub acac: Option<String>,
+    pub method: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CorsDeepReport {
+    pub findings: Vec<String>,
+    pub reflects_origin: bool,
+    pub credentials_with_star: bool,
+    /// True when ACAO reflects the request Origin and ACAC is true.
+    #[serde(default)]
+    pub credentials_with_reflected_origin: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CspForensicsReport {
+    pub directives: BTreeMap<String, Vec<String>>,
+    pub issues: Vec<String>,
+    pub score: u32,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OidcConfig {
+    pub authorization_endpoint: String,
+    pub token_endpoint: String,
+    pub jwks_uri: Option<String>,
+    pub response_types_supported: Vec<String>,
+    pub grant_types_supported: Vec<String>,
+    #[serde(default)]
+    pub claims: BTreeMap<String, serde_json::Value>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OidcMisconfigReport {
+    pub issues: Vec<String>,
+    pub severity: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CookieJarEntry {
+    pub name: String,
+    pub value: String,
+    pub secure: bool,
+    pub http_only: bool,
+    pub same_site: Option<String>,
+    pub domain: Option<String>,
+    pub path: Option<String>,
+    pub max_age: Option<i64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CookieForensicsReport {
+    pub session_cookies: usize,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFixationProbe {
+    pub pre_auth_session: String,
+    pub post_auth_session: String,
+    pub login_status: u16,
+    /// Login URL under test — required for consent gating (always).
+    pub target_url: String,
+    /// Explicit authorized-lab consent for non-local targets.
+    #[serde(default)]
+    pub lab_consent: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SessionFixationReport {
+    pub vulnerable: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphqlAuthzProbe {
+    pub role: String,
+    pub operation: String,
+    pub field: String,
+    pub should_allow: bool,
+    pub status: u16,
+    pub errors: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GraphqlAuthzReport {
+    pub escalations: usize,
+    pub cells: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassAssignDiff {
+    pub sent_fields: Vec<String>,
+    pub accepted_fields: Vec<String>,
+    pub privileged_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MassAssignReport {
+    pub unexpected_writes: Vec<String>,
+    pub privileged_accepted: Vec<String>,
+    pub risk: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaceAttempt {
+    pub id: u32,
+    pub status: u16,
+    pub body_hash: String,
+    pub start_ms: u64,
+    pub end_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RaceWindowReport {
+    pub attempts: usize,
+    pub unique_outcomes: usize,
+    pub window_ms: u64,
+    pub inconsistency: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SsrfTarget {
+    pub url: String,
+    pub resolved_ip: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SsrfLabReport {
+    pub blocked: Vec<String>,
+    pub allowed_lab: Vec<String>,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SriScript {
+    pub src: String,
+    pub integrity: Option<String>,
+    pub crossorigin: Option<String>,
+    pub bytes: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SriAuditReport {
+    pub missing_integrity: Vec<String>,
+    pub weak_algo: Vec<String>,
+    pub missing_crossorigin: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsAuthzProbe {
+    pub role: String,
+    pub url: String,
+    pub connected: bool,
+    pub should_allow: bool,
+    pub first_message: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WsAuthzReport {
+    pub escalations: usize,
+    pub findings: Vec<String>,
 }
 
 impl SecurityEngine {
@@ -995,6 +1192,496 @@ impl SecurityEngine {
             "har": har,
         })
     }
+
+    // ---- Wave-2 security --------------------------------------------------
+
+    pub fn dom_xss_taint_map(&self, flows: &[TaintFlow]) -> DomXssTaintReport {
+        let mut enriched = Vec::with_capacity(flows.len());
+        let mut by_sink_kind: BTreeMap<String, usize> = BTreeMap::new();
+        for f in flows {
+            let mut flow = f.clone();
+            let kind = flow
+                .sink_kind
+                .clone()
+                .unwrap_or_else(|| classify_dom_xss_sink(&flow.sink));
+            flow.sink_kind = Some(kind.clone());
+            *by_sink_kind.entry(kind).or_default() += 1;
+            enriched.push(flow);
+        }
+        let unsanitized = enriched.iter().filter(|f| !f.sanitized).count();
+        let risk = if unsanitized == 0 {
+            "low"
+        } else if unsanitized <= 2 {
+            "medium"
+        } else {
+            "high"
+        };
+        DomXssTaintReport {
+            flows: enriched,
+            unsanitized,
+            risk: risk.to_string(),
+            by_sink_kind,
+        }
+    }
+
+    /// Parse CDP-shaped taint JSON (`[{source,sink,via,sanitized}]` or
+    /// `{flows:[…]}`) into [`TaintFlow`]s for [`dom_xss_taint_map`].
+    pub fn parse_dom_xss_taint_flows(json: &str) -> Vec<TaintFlow> {
+        let v: serde_json::Value = match serde_json::from_str(json.trim()) {
+            Ok(v) => v,
+            Err(_) => return Vec::new(),
+        };
+        let arr = if let Some(a) = v.as_array() {
+            a.clone()
+        } else if let Some(a) = v.get("flows").and_then(|f| f.as_array()) {
+            a.clone()
+        } else {
+            return Vec::new();
+        };
+        arr.iter()
+            .filter_map(|item| {
+                let source = item.get("source")?.as_str()?.to_string();
+                let sink = item.get("sink")?.as_str()?.to_string();
+                let via = item
+                    .get("via")
+                    .and_then(|v| v.as_array())
+                    .map(|a| {
+                        a.iter()
+                            .filter_map(|x| x.as_str().map(|s| s.to_string()))
+                            .collect()
+                    })
+                    .unwrap_or_default();
+                let sanitized = item
+                    .get("sanitized")
+                    .and_then(|s| s.as_bool())
+                    .unwrap_or(false);
+                let sink_kind = item
+                    .get("sink_kind")
+                    .and_then(|s| s.as_str())
+                    .map(|s| s.to_string())
+                    .or_else(|| Some(classify_dom_xss_sink(&sink)));
+                Some(TaintFlow {
+                    source,
+                    sink,
+                    via,
+                    sanitized,
+                    sink_kind,
+                })
+            })
+            .collect()
+    }
+
+    pub fn cors_deep_probe(&self, probes: &[CorsProbeResult]) -> CorsDeepReport {
+        let mut findings = Vec::new();
+        let mut reflects_origin = false;
+        let mut credentials_with_star = false;
+        let mut credentials_with_reflected_origin = false;
+        for p in probes {
+            if let Some(acao) = &p.acao {
+                if acao == "*" {
+                    findings.push(format!("ACAO * for origin {}", p.origin));
+                    if p.acac.as_deref() == Some("true") {
+                        credentials_with_star = true;
+                        findings.push("ACAO * with credentials (invalid/dangerous)".into());
+                    }
+                } else if acao == &p.origin {
+                    reflects_origin = true;
+                    if p.origin == "null" {
+                        findings.push("reflects Origin: null".into());
+                    }
+                    if p.acac.as_deref() == Some("true") {
+                        credentials_with_reflected_origin = true;
+                        findings.push(format!(
+                            "reflected origin {} with Access-Control-Allow-Credentials: true",
+                            p.origin
+                        ));
+                    }
+                }
+            }
+        }
+        CorsDeepReport {
+            findings,
+            reflects_origin,
+            credentials_with_star,
+            credentials_with_reflected_origin,
+        }
+    }
+
+    pub fn csp_policy_forensics(&self, policy: &str) -> CspForensicsReport {
+        let mut directives: BTreeMap<String, Vec<String>> = BTreeMap::new();
+        for part in policy.split(';') {
+            let part = part.trim();
+            if part.is_empty() {
+                continue;
+            }
+            let mut toks = part.split_whitespace();
+            if let Some(name) = toks.next() {
+                directives.insert(name.to_lowercase(), toks.map(|s| s.to_string()).collect());
+            }
+        }
+        let mut issues = Vec::new();
+        let mut score = 100u32;
+        let unsafe_tokens = ["'unsafe-inline'", "'unsafe-eval'", "data:", "*"];
+        for (dir, vals) in &directives {
+            for v in vals {
+                if unsafe_tokens.iter().any(|t| v.contains(t)) {
+                    issues.push(format!("{dir} contains {v}"));
+                    score = score.saturating_sub(15);
+                }
+            }
+        }
+        if !directives.contains_key("default-src") && !directives.contains_key("script-src") {
+            issues.push("missing default-src and script-src".into());
+            score = score.saturating_sub(25);
+        }
+        if !directives.contains_key("object-src") {
+            issues.push("consider object-src 'none'".into());
+            score = score.saturating_sub(5);
+        }
+        CspForensicsReport {
+            directives,
+            issues,
+            score,
+        }
+    }
+
+    pub fn oauth_oidc_misconfig(&self, cfg: &OidcConfig) -> OidcMisconfigReport {
+        let mut issues: Vec<String> = Vec::new();
+        if cfg.authorization_endpoint.starts_with("http://") {
+            issues.push("authorization_endpoint not HTTPS".into());
+        }
+        if cfg.token_endpoint.starts_with("http://") {
+            issues.push("token_endpoint not HTTPS".into());
+        }
+        if cfg.jwks_uri.is_none() {
+            issues.push("missing jwks_uri".into());
+        }
+        if cfg.response_types_supported.iter().any(|r| r == "token") {
+            issues.push("implicit flow (response_type=token) enabled".into());
+        }
+        if cfg
+            .grant_types_supported
+            .iter()
+            .any(|g| g == "password")
+        {
+            issues.push("resource-owner password credentials grant enabled".into());
+        }
+        let severity = if issues.iter().any(|i| i.contains("not HTTPS") || i.contains("password")) {
+            "high"
+        } else if issues.is_empty() {
+            "none"
+        } else {
+            "medium"
+        };
+        OidcMisconfigReport {
+            issues,
+            severity: severity.to_string(),
+        }
+    }
+
+    pub fn cookie_session_forensics(&self, cookies: &[CookieJarEntry]) -> CookieForensicsReport {
+        let mut issues = Vec::new();
+        let mut session_cookies = 0usize;
+        for c in cookies {
+            let sessionish = c.name.to_lowercase().contains("session")
+                || c.name.to_lowercase().contains("sid")
+                || c.max_age.is_none();
+            if sessionish {
+                session_cookies += 1;
+                if !c.secure {
+                    issues.push(format!("{} missing Secure", c.name));
+                }
+                if !c.http_only {
+                    issues.push(format!("{} missing HttpOnly", c.name));
+                }
+                match c.same_site.as_deref().map(|s| s.to_lowercase()) {
+                    Some(s) if s == "strict" || s == "lax" || s == "none" => {
+                        if s == "none" && !c.secure {
+                            issues.push(format!("{} SameSite=None without Secure", c.name));
+                        }
+                    }
+                    _ => issues.push(format!("{} missing/invalid SameSite", c.name)),
+                }
+            }
+            if c.value.len() > 4096 {
+                issues.push(format!("{} value exceeds 4KB", c.name));
+            }
+        }
+        CookieForensicsReport {
+            session_cookies,
+            issues,
+        }
+    }
+
+    /// Consent-aware: only flags fixation when login succeeds; always requires
+    /// `target_url` and gates via `require_lab_consent` before analysis.
+    pub fn session_fixation_lab(&self, probe: &SessionFixationProbe) -> Result<SessionFixationReport, String> {
+        if probe.target_url.trim().is_empty() {
+            return Err("session-fixation-lab requires target_url".into());
+        }
+        crate::net::consent::require_lab_consent(&probe.target_url, probe.lab_consent)?;
+        if probe.login_status < 200 || probe.login_status >= 400 {
+            return Ok(SessionFixationReport {
+                vulnerable: false,
+                detail: format!("login did not succeed (status {})", probe.login_status),
+            });
+        }
+        let vulnerable = !probe.pre_auth_session.is_empty()
+            && probe.pre_auth_session == probe.post_auth_session;
+        Ok(SessionFixationReport {
+            vulnerable,
+            detail: if vulnerable {
+                "session id unchanged across authentication".into()
+            } else {
+                "session rotated on login".into()
+            },
+        })
+    }
+
+    pub fn graphql_authz_matrix(&self, probes: &[GraphqlAuthzProbe]) -> GraphqlAuthzReport {
+        let mut escalations = 0usize;
+        let mut cells = Vec::new();
+        for p in probes {
+            let allowed = (200..300).contains(&p.status) && p.errors.is_empty();
+            let verdict = match (p.should_allow, allowed) {
+                (false, true) => {
+                    escalations += 1;
+                    "PRIVILEGE-ESCALATION"
+                }
+                (true, false) => "FALSE-DENY",
+                (true, true) => "OK-ALLOW",
+                (false, false) => "OK-DENY",
+            };
+            cells.push(format!(
+                "{} {} {}: {verdict}",
+                p.role, p.operation, p.field
+            ));
+        }
+        GraphqlAuthzReport { escalations, cells }
+    }
+
+    pub fn mass_assignment_diff(&self, diff: &MassAssignDiff) -> MassAssignReport {
+        let sent: std::collections::HashSet<_> = diff.sent_fields.iter().collect();
+        let accepted: std::collections::HashSet<_> = diff.accepted_fields.iter().collect();
+        let privileged: std::collections::HashSet<_> = diff.privileged_fields.iter().collect();
+        let unexpected: Vec<String> = accepted
+            .difference(&sent)
+            .map(|s| (*s).clone())
+            .collect();
+        let privileged_accepted: Vec<String> = accepted
+            .intersection(&privileged)
+            .map(|s| (*s).clone())
+            .collect();
+        let risk = if !privileged_accepted.is_empty() {
+            "high"
+        } else if !unexpected.is_empty() {
+            "medium"
+        } else {
+            "low"
+        };
+        MassAssignReport {
+            unexpected_writes: unexpected,
+            privileged_accepted,
+            risk: risk.to_string(),
+        }
+    }
+
+    pub fn race_window_repeater(&self, attempts: &[RaceAttempt]) -> RaceWindowReport {
+        let mut outcomes: BTreeMap<(u16, String), usize> = BTreeMap::new();
+        let mut min_start = u64::MAX;
+        let mut max_end = 0u64;
+        for a in attempts {
+            *outcomes
+                .entry((a.status, a.body_hash.clone()))
+                .or_default() += 1;
+            min_start = min_start.min(a.start_ms);
+            max_end = max_end.max(a.end_ms);
+        }
+        let unique_outcomes = outcomes.len();
+        let window_ms = if attempts.is_empty() {
+            0
+        } else {
+            max_end.saturating_sub(min_start)
+        };
+        let inconsistency = unique_outcomes > 1;
+        RaceWindowReport {
+            attempts: attempts.len(),
+            unique_outcomes,
+            window_ms,
+            inconsistency,
+            detail: if inconsistency {
+                format!("{unique_outcomes} distinct outcomes in {window_ms}ms window")
+            } else {
+                "consistent outcomes".into()
+            },
+        }
+    }
+
+    /// Consent-gated live parallel fetches → [`race_window_repeater`].
+    pub fn race_window_live(
+        &self,
+        url: &str,
+        count: usize,
+        lab_consent: bool,
+    ) -> Result<RaceWindowReport, String> {
+        if url.trim().is_empty() {
+            return Err("race-window live requires url".into());
+        }
+        crate::net::consent::require_lab_consent(url, lab_consent)?;
+        let n = count.clamp(2, 32);
+        let url = url.to_string();
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .map_err(|e| e.to_string())?;
+        let attempts = rt.block_on(async {
+            let client = reqwest::Client::builder()
+                .timeout(std::time::Duration::from_secs(15))
+                .build()
+                .unwrap_or_else(|_| reqwest::Client::new());
+            let start_wall = std::time::Instant::now();
+            let futs: Vec<_> = (0..n)
+                .map(|i| {
+                    let client = client.clone();
+                    let url = url.clone();
+                    async move {
+                        let t0 = start_wall.elapsed().as_millis() as u64;
+                        let (status, body) = match client.get(&url).send().await {
+                            Ok(resp) => {
+                                let status = resp.status().as_u16();
+                                let body = resp.text().await.unwrap_or_default();
+                                (status, body)
+                            }
+                            Err(e) => (0, e.to_string()),
+                        };
+                        let t1 = start_wall.elapsed().as_millis() as u64;
+                        let mut hash: u64 = 0xcbf29ce484222325;
+                        for b in body.as_bytes() {
+                            hash ^= *b as u64;
+                            hash = hash.wrapping_mul(0x100000001b3);
+                        }
+                        RaceAttempt {
+                            id: i as u32,
+                            status,
+                            body_hash: format!("{hash:016x}"),
+                            start_ms: t0,
+                            end_ms: t1,
+                        }
+                    }
+                })
+                .collect();
+            futures::future::join_all(futs).await
+        });
+        Ok(self.race_window_repeater(&attempts))
+    }
+
+    /// Consent-aware SSRF lab: labels blocked vs lab-allowed targets using the
+    /// same private/local + abuse-block helpers as fuzz gating.
+    /// Returns `Err` when any non-local public target lacks `lab_consent`.
+    pub fn ssrf_lab_harness(
+        &self,
+        targets: &[SsrfTarget],
+        lab_consent: bool,
+    ) -> Result<SsrfLabReport, String> {
+        for t in targets {
+            if crate::net::consent::is_blocked_abuse_target(&t.url) {
+                continue;
+            }
+            if !crate::net::consent::is_private_or_local_url(&t.url) && !lab_consent {
+                return Err(format!(
+                    "SSRF lab refused: public target without lab_consent: {}",
+                    t.url
+                ));
+            }
+        }
+        let mut blocked = Vec::new();
+        let mut allowed_lab = Vec::new();
+        let mut issues = Vec::new();
+        for t in targets {
+            if crate::net::consent::is_blocked_abuse_target(&t.url) {
+                blocked.push(t.url.clone());
+                issues.push(format!("blocked abuse/metadata target {}", t.url));
+                continue;
+            }
+            if crate::net::consent::is_private_or_local_url(&t.url) {
+                allowed_lab.push(t.url.clone());
+            } else if lab_consent {
+                allowed_lab.push(t.url.clone());
+                issues.push(format!("lab-consented public target {}", t.url));
+            } else {
+                blocked.push(t.url.clone());
+                issues.push(format!(
+                    "non-local target blocked without explicit lab consent: {}",
+                    t.url
+                ));
+            }
+            if let Some(ip) = &t.resolved_ip {
+                if ip.starts_with("169.254.") || ip == "0.0.0.0" || ip.starts_with("127.") {
+                    issues.push(format!("{} resolved to sensitive IP {ip}", t.url));
+                }
+            }
+        }
+        Ok(SsrfLabReport {
+            blocked,
+            allowed_lab,
+            issues,
+        })
+    }
+
+    pub fn sri_supply_chain_auditor(&self, scripts: &[SriScript]) -> SriAuditReport {
+        let mut missing_integrity = Vec::new();
+        let mut weak_algo = Vec::new();
+        let mut missing_crossorigin = Vec::new();
+        for s in scripts {
+            match &s.integrity {
+                None => missing_integrity.push(s.src.clone()),
+                Some(integ) => {
+                    let lower = integ.to_lowercase();
+                    if lower.starts_with("sha256-") || lower.starts_with("sha384-") || lower.starts_with("sha512-") {
+                        // ok
+                    } else if lower.starts_with("sha1-") || lower.starts_with("md5-") {
+                        weak_algo.push(s.src.clone());
+                    } else {
+                        weak_algo.push(s.src.clone());
+                    }
+                    if s.crossorigin.is_none() {
+                        missing_crossorigin.push(s.src.clone());
+                    }
+                }
+            }
+        }
+        SriAuditReport {
+            missing_integrity,
+            weak_algo,
+            missing_crossorigin,
+        }
+    }
+
+    pub fn websocket_authz_probe(&self, probes: &[WsAuthzProbe]) -> WsAuthzReport {
+        let mut escalations = 0usize;
+        let mut findings = Vec::new();
+        for p in probes {
+            match (p.should_allow, p.connected) {
+                (false, true) => {
+                    escalations += 1;
+                    findings.push(format!(
+                        "{} connected to {} but should be denied",
+                        p.role, p.url
+                    ));
+                }
+                (true, false) => findings.push(format!(
+                    "{} denied from {} unexpectedly",
+                    p.role, p.url
+                )),
+                _ => {}
+            }
+        }
+        WsAuthzReport {
+            escalations,
+            findings,
+        }
+    }
+
 }
 
 fn templatize_path(path: &str) -> String {
@@ -1169,8 +1856,46 @@ fn sha256(data: &[u8]) -> [u8; 32] {
     out
 }
 
-/// HMAC-SHA256 (RFC 2104).
-fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
+fn classify_dom_xss_sink(sink: &str) -> String {
+    let s = sink.to_lowercase();
+    if s.contains("innerhtml")
+        || s.contains("outerhtml")
+        || s.contains("insertadjacenthtml")
+        || s.contains("document.write")
+    {
+        "html".into()
+    } else if s.contains("eval")
+        || s.contains("function(")
+        || s.contains("settimeout")
+        || s.contains("setinterval")
+        || s.contains("script")
+    {
+        "js".into()
+    } else if s.contains("location")
+        || s.contains("href")
+        || s.contains("src")
+        || s.contains("action")
+        || s.contains("window.open")
+    {
+        "url".into()
+    } else if s.contains("setattribute") || s.contains("jquery") || s.contains("$(") {
+        "dom".into()
+    } else {
+        "unknown".into()
+    }
+}
+
+/// Hex-encode bytes (lowercase).
+pub(crate) fn hex_encode(bytes: &[u8]) -> String {
+    let mut s = String::with_capacity(bytes.len() * 2);
+    for b in bytes {
+        s.push_str(&format!("{b:02x}"));
+    }
+    s
+}
+
+/// HMAC-SHA256 (RFC 2104). Shared by JWT verify + webhook signature vault.
+pub(crate) fn hmac_sha256(key: &[u8], message: &[u8]) -> [u8; 32] {
     let mut block_key = [0u8; 64];
     if key.len() > 64 {
         let hashed = sha256(key);
@@ -1483,4 +2208,118 @@ mod tests {
         let md = e.promote_to_finding("Broken endpoint", "https://x", traces);
         assert!(md.contains("# Finding: Broken endpoint"));
     }
+
+    #[test]
+    fn test_csp_and_cors_wave2() {
+        let e = SecurityEngine::new();
+        let csp = e.csp_policy_forensics("default-src 'self'; script-src 'unsafe-inline'");
+        assert!(csp.score < 100);
+        assert!(!csp.issues.is_empty());
+        let cors = e.cors_deep_probe(&[CorsProbeResult {
+            origin: "https://evil.test".into(),
+            acao: Some("*".into()),
+            acac: Some("true".into()),
+            method: "GET".into(),
+        }]);
+        assert!(cors.credentials_with_star);
+        let reflect = e.cors_deep_probe(&[CorsProbeResult {
+            origin: "https://evil.test".into(),
+            acao: Some("https://evil.test".into()),
+            acac: Some("true".into()),
+            method: "GET".into(),
+        }]);
+        assert!(reflect.reflects_origin);
+        assert!(reflect.credentials_with_reflected_origin);
+    }
+
+    #[test]
+    fn test_session_fixation_and_mass_assign() {
+        let e = SecurityEngine::new();
+        assert!(e
+            .session_fixation_lab(&SessionFixationProbe {
+                pre_auth_session: "abc".into(),
+                post_auth_session: "abc".into(),
+                login_status: 200,
+                target_url: "".into(),
+                lab_consent: false,
+            })
+            .is_err());
+        let fix = e
+            .session_fixation_lab(&SessionFixationProbe {
+                pre_auth_session: "abc".into(),
+                post_auth_session: "abc".into(),
+                login_status: 200,
+                target_url: "http://127.0.0.1/login".into(),
+                lab_consent: false,
+            })
+            .unwrap();
+        assert!(fix.vulnerable);
+        assert!(e
+            .session_fixation_lab(&SessionFixationProbe {
+                pre_auth_session: "a".into(),
+                post_auth_session: "b".into(),
+                login_status: 200,
+                target_url: "https://example.com/login".into(),
+                lab_consent: false,
+            })
+            .is_err());
+        let ma = e.mass_assignment_diff(&MassAssignDiff {
+            sent_fields: vec!["name".into()],
+            accepted_fields: vec!["name".into(), "role".into()],
+            privileged_fields: vec!["role".into()],
+        });
+        assert_eq!(ma.risk, "high");
+    }
+
+    #[test]
+    fn test_ssrf_consent_and_dom_xss_taint() {
+        let e = SecurityEngine::new();
+        assert!(e
+            .ssrf_lab_harness(
+                &[SsrfTarget {
+                    url: "https://example.com/".into(),
+                    resolved_ip: None,
+                }],
+                false,
+            )
+            .is_err());
+        let ok = e
+            .ssrf_lab_harness(
+                &[SsrfTarget {
+                    url: "http://127.0.0.1/admin".into(),
+                    resolved_ip: Some("127.0.0.1".into()),
+                }],
+                false,
+            )
+            .unwrap();
+        assert!(!ok.allowed_lab.is_empty());
+        let flows = SecurityEngine::parse_dom_xss_taint_flows(
+            r#"[{"source":"location.hash","sink":"el.innerHTML","via":["assign"],"sanitized":false}]"#,
+        );
+        let t = e.dom_xss_taint_map(&flows);
+        assert_eq!(t.unsanitized, 1);
+        assert_eq!(t.by_sink_kind.get("html"), Some(&1));
+    }
+
+    #[test]
+    fn test_sri_and_graphql_authz() {
+        let e = SecurityEngine::new();
+        let sri = e.sri_supply_chain_auditor(&[SriScript {
+            src: "https://cdn/x.js".into(),
+            integrity: None,
+            crossorigin: None,
+            bytes: Some(10),
+        }]);
+        assert_eq!(sri.missing_integrity.len(), 1);
+        let g = e.graphql_authz_matrix(&[GraphqlAuthzProbe {
+            role: "user".into(),
+            operation: "query".into(),
+            field: "adminUsers".into(),
+            should_allow: false,
+            status: 200,
+            errors: vec![],
+        }]);
+        assert_eq!(g.escalations, 1);
+    }
+
 }

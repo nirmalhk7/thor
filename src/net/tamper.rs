@@ -21,7 +21,9 @@
 
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::sync::{Arc, RwLock};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, RwLock};
+use std::time::{Duration, Instant};
 
 /// Intercepted HTTP Request structure
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -72,14 +74,38 @@ pub enum TamperOutcome {
     Pause,
 }
 
-use std::sync::atomic::{AtomicBool, Ordering};
+/// What the Fetch handler should do after a Pause is resolved by the UI.
+#[derive(Debug, Clone)]
+pub enum PauseRelease {
+    Forward(InterceptedRequest),
+    Drop,
+}
 
-#[derive(Debug, Default)]
+#[derive(Debug)]
 struct TamperEngineInner {
     interception_enabled: AtomicBool,
+    /// When true with interception, unmatched requests Pause until forward/drop/timeout.
+    breakpoint_mode: AtomicBool,
     pending_interceptions: RwLock<Vec<InterceptedRequest>>,
+    /// Resolutions for Pause'd request ids (set by forward_request / drop_request).
+    pause_releases: Mutex<HashMap<String, PauseRelease>>,
+    pause_cv: Condvar,
     history: RwLock<Vec<(InterceptedRequest, Option<InterceptedResponse>)>>,
     rules: RwLock<Vec<TamperRule>>,
+}
+
+impl Default for TamperEngineInner {
+    fn default() -> Self {
+        Self {
+            interception_enabled: AtomicBool::new(false),
+            breakpoint_mode: AtomicBool::new(false),
+            pending_interceptions: RwLock::new(Vec::new()),
+            pause_releases: Mutex::new(HashMap::new()),
+            pause_cv: Condvar::new(),
+            history: RwLock::new(Vec::new()),
+            rules: RwLock::new(Vec::new()),
+        }
+    }
 }
 
 /// Central Interceptor & Repeater engine for Thor
@@ -98,10 +124,20 @@ impl TrafficTamperEngine {
     /// Toggle live traffic interception state
     pub fn set_interception_enabled(&self, enabled: bool) {
         self.inner.interception_enabled.store(enabled, Ordering::Release);
+        // Enabling intercept implies breakpoint hold until UI forward/drop (or timeout).
+        self.inner.breakpoint_mode.store(enabled, Ordering::Release);
     }
 
     pub fn is_interception_enabled(&self) -> bool {
         self.inner.interception_enabled.load(Ordering::Acquire)
+    }
+
+    pub fn set_breakpoint_mode(&self, enabled: bool) {
+        self.inner.breakpoint_mode.store(enabled, Ordering::Release);
+    }
+
+    pub fn is_breakpoint_mode(&self) -> bool {
+        self.inner.breakpoint_mode.load(Ordering::Acquire)
     }
 
     /// Process an outgoing request through rules and interception pipeline
@@ -150,9 +186,18 @@ impl TrafficTamperEngine {
 
         // If interception is active, queue request for manual review/modification
         if self.is_interception_enabled() {
-            let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
-            pending.push(req);
-            TamperOutcome::Pause
+            if self.is_breakpoint_mode() {
+                let mut pending = self
+                    .inner
+                    .pending_interceptions
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
+                pending.push(req);
+                TamperOutcome::Pause
+            } else {
+                // Observe mode: do not block; Fetch handler records history on Forward.
+                TamperOutcome::Forward(req)
+            }
         } else {
             TamperOutcome::Forward(req)
         }
@@ -168,7 +213,13 @@ impl TrafficTamperEngine {
         let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
         if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
             let req = pending.remove(pos);
-            return Some(edited_req.unwrap_or(req));
+            let out = edited_req.unwrap_or(req);
+            {
+                let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+                releases.insert(request_id.to_string(), PauseRelease::Forward(out.clone()));
+            }
+            self.inner.pause_cv.notify_all();
+            return Some(out);
         }
         None
     }
@@ -179,9 +230,52 @@ impl TrafficTamperEngine {
         if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
             let req = pending.remove(pos);
             self.record_history(req, None);
+            {
+                let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+                releases.insert(request_id.to_string(), PauseRelease::Drop);
+            }
+            self.inner.pause_cv.notify_all();
             return true;
         }
         false
+    }
+
+    /// Block until UI forwards/drops a Pause'd request, or `timeout` elapses.
+    /// On timeout, auto-continues with the original pending request (removed from queue).
+    pub fn wait_for_pause_release(
+        &self,
+        request_id: &str,
+        timeout: Duration,
+    ) -> PauseRelease {
+        let deadline = Instant::now() + timeout;
+        let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+        loop {
+            if let Some(action) = releases.remove(request_id) {
+                return action;
+            }
+            let now = Instant::now();
+            if now >= deadline {
+                // Timeout: pull from pending and forward as-is so the tab unsticks.
+                drop(releases);
+                let mut pending = self
+                    .inner
+                    .pending_interceptions
+                    .write()
+                    .unwrap_or_else(|e| e.into_inner());
+                if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
+                    let req = pending.remove(pos);
+                    return PauseRelease::Forward(req);
+                }
+                return PauseRelease::Drop;
+            }
+            let wait = deadline - now;
+            let (guard, _) = self
+                .inner
+                .pause_cv
+                .wait_timeout(releases, wait)
+                .unwrap_or_else(|e| e.into_inner());
+            releases = guard;
+        }
     }
 
     /// Record completed request/response pair into history for Repeater/Inspector (with SEC-027 secret redaction)
@@ -329,5 +423,33 @@ mod tests {
 
         assert!(engine.drop_request("req_drop"));
         assert_eq!(engine.get_pending_requests().len(), 0);
+    }
+
+    #[test]
+    fn test_pause_release_forward_unblocks() {
+        let engine = TrafficTamperEngine::new();
+        engine.set_interception_enabled(true);
+        assert!(engine.is_breakpoint_mode());
+        let req = InterceptedRequest {
+            id: "req_hold".into(),
+            timestamp: 1,
+            method: "GET".into(),
+            url: "https://example.test/hold".into(),
+            headers: HashMap::new(),
+            body: None,
+            is_modified: false,
+        };
+        assert!(matches!(
+            engine.evaluate_tamper_outcome(req),
+            TamperOutcome::Pause
+        ));
+        let engine2 = engine.clone();
+        let h = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(20));
+            engine2.forward_request("req_hold", None);
+        });
+        let release = engine.wait_for_pause_release("req_hold", Duration::from_secs(2));
+        assert!(matches!(release, PauseRelease::Forward(_)));
+        h.join().unwrap();
     }
 }

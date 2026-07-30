@@ -83,3 +83,9 @@ The **Decoder Studio** automatically identifies and decodes complex payload form
 2. **Web3 EVM & Solana Decoder (`web3_inspector.rs`)**:
    - Decodes EVM 4-byte ABI method selectors (e.g. `0xa9059cbb` $\rightarrow$ `transfer(address,uint256)`).
    - Validates EIP-55 checksummed Ethereum addresses.
+
+---
+
+## Security Domain Feature Suite
+
+Twenty-four Security `FeatureId`s (authz matrix, JWT deep, CORS/CSP forensics, consent-gated fixation/SSRF, GraphQL authz, race analyzer, SRI, OOB listener, and more) live under `src/features/security.rs` with lab consent in `src/net/consent.rs`. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

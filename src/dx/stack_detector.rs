@@ -132,12 +132,30 @@ impl TechStackDetector {
             });
         }
 
-        // 5. Astro
+        // 5. Astro & Remix & Solid & Qwik
         if html_lower.contains("astro") || html_lower.contains("data-astro-cid") {
             badges.push(TechBadge {
                 name: "Astro".into(),
                 category: "Framework".into(),
                 icon: "🚀".into(),
+            });
+        } else if html_lower.contains("__remix") || html_lower.contains("remix-context") {
+            badges.push(TechBadge {
+                name: "Remix".into(),
+                category: "Framework".into(),
+                icon: "💿".into(),
+            });
+        } else if html_lower.contains("solid-js") || html_lower.contains("data-solid") {
+            badges.push(TechBadge {
+                name: "SolidJS".into(),
+                category: "UI".into(),
+                icon: "🔷".into(),
+            });
+        } else if html_lower.contains("qwik") || html_lower.contains("q:container") {
+            badges.push(TechBadge {
+                name: "Qwik".into(),
+                category: "Framework".into(),
+                icon: "⚡".into(),
             });
         }
 
@@ -155,7 +173,7 @@ impl TechStackDetector {
             });
         }
 
-        // 7. Tailwind CSS & Bootstrap
+        // 7. Tailwind CSS & Bootstrap & UI Libraries
         if html_lower.contains("tailwindcss")
             || html_lower.contains("tailwind")
             || html_snippet.contains("flex items-center")
@@ -173,7 +191,7 @@ impl TechStackDetector {
             });
         }
 
-        // 8. TypeScript & htmx & Alpine.js
+        // 8. TypeScript & htmx & Alpine.js & jQuery
         if html_lower.contains("typescript") || html_lower.contains(".ts") {
             badges.push(TechBadge {
                 name: "TypeScript".into(),
@@ -198,8 +216,40 @@ impl TechStackDetector {
             });
         }
 
-        // 9. Meta Generator Tag Inspection
-        if html_lower.contains("wordpress") || html_lower.contains("wp-content") {
+        if html_lower.contains("jquery") || html_lower.contains("jquery.min.js") {
+            badges.push(TechBadge {
+                name: "jQuery".into(),
+                category: "Library".into(),
+                icon: "💲".into(),
+            });
+        }
+
+        // 9. Meta Generator, CMS & SaaS Platforms Tag Inspection
+        if html_lower.contains("shopify") || html_lower.contains("cdn.shopify.com") {
+            badges.push(TechBadge {
+                name: "Shopify".into(),
+                category: "SaaS".into(),
+                icon: "🛍️".into(),
+            });
+        } else if html_lower.contains("webflow") || html_lower.contains("uploads-ssl.webflow.com") {
+            badges.push(TechBadge {
+                name: "Webflow".into(),
+                category: "SaaS".into(),
+                icon: "🎨".into(),
+            });
+        } else if html_lower.contains("squarespace") {
+            badges.push(TechBadge {
+                name: "Squarespace".into(),
+                category: "SaaS".into(),
+                icon: "⬛".into(),
+            });
+        } else if html_lower.contains("wix.com") || html_lower.contains("wixstatic.com") {
+            badges.push(TechBadge {
+                name: "Wix".into(),
+                category: "SaaS".into(),
+                icon: "✨".into(),
+            });
+        } else if html_lower.contains("wordpress") || html_lower.contains("wp-content") {
             badges.push(TechBadge {
                 name: "WordPress (PHP)".into(),
                 category: "CMS".into(),
@@ -217,11 +267,108 @@ impl TechStackDetector {
                 category: "SSG".into(),
                 icon: "💎".into(),
             });
+        } else if html_lower.contains("ghost") {
+            badges.push(TechBadge {
+                name: "Ghost (Node)".into(),
+                category: "CMS".into(),
+                icon: "👻".into(),
+            });
         }
 
-        // 10. Backend Languages & Frameworks from Headers
+        // 9b. Analytics, Product Tools & APIs
+        if html_lower.contains("googletagmanager.com") || html_lower.contains("gtm.js") {
+            badges.push(TechBadge {
+                name: "Google Tag Manager".into(),
+                category: "Analytics".into(),
+                icon: "📊".into(),
+            });
+        }
+        if html_lower.contains("segment.com") || html_lower.contains("analytics.js") {
+            badges.push(TechBadge {
+                name: "Segment".into(),
+                category: "Analytics".into(),
+                icon: "📈".into(),
+            });
+        }
+        if html_lower.contains("mixpanel") {
+            badges.push(TechBadge {
+                name: "Mixpanel".into(),
+                category: "Analytics".into(),
+                icon: "🟣".into(),
+            });
+        }
+        if html_lower.contains("posthog") {
+            badges.push(TechBadge {
+                name: "PostHog".into(),
+                category: "Analytics".into(),
+                icon: "🦔".into(),
+            });
+        }
+        if html_lower.contains("intercom") || html_lower.contains("widget.intercom.io") {
+            badges.push(TechBadge {
+                name: "Intercom".into(),
+                category: "Support".into(),
+                icon: "💬".into(),
+            });
+        }
+        if html_lower.contains("stripe.com") || html_lower.contains("js.stripe.com") {
+            badges.push(TechBadge {
+                name: "Stripe".into(),
+                category: "Payments".into(),
+                icon: "💳".into(),
+            });
+        }
+        if html_lower.contains("supabase") {
+            badges.push(TechBadge {
+                name: "Supabase".into(),
+                category: "Database".into(),
+                icon: "⚡".into(),
+            });
+        }
+        if html_lower.contains("firebase") || html_lower.contains("firestore") {
+            badges.push(TechBadge {
+                name: "Firebase".into(),
+                category: "Backend".into(),
+                icon: "🔥".into(),
+            });
+        }
+        if html_lower.contains("graphql") || html_lower.contains("__schema") {
+            badges.push(TechBadge {
+                name: "GraphQL".into(),
+                category: "API".into(),
+                icon: "🕸️".into(),
+            });
+        }
+
+        // 10. Infrastructure, Servers & CDNs from Headers
         if let Some(srv) = &server_header {
             let srv_lower = srv.to_lowercase();
+            if srv_lower.contains("cloudflare") {
+                badges.push(TechBadge {
+                    name: "Cloudflare CDN".into(),
+                    category: "Infra".into(),
+                    icon: "☁️".into(),
+                });
+            } else if srv_lower.contains("nginx") {
+                badges.push(TechBadge {
+                    name: "Nginx".into(),
+                    category: "Server".into(),
+                    icon: "🟢".into(),
+                });
+            } else if srv_lower.contains("apache") {
+                badges.push(TechBadge {
+                    name: "Apache".into(),
+                    category: "Server".into(),
+                    icon: "🪶".into(),
+                });
+            } else if srv_lower.contains("caddy") {
+                badges.push(TechBadge {
+                    name: "Caddy".into(),
+                    category: "Server".into(),
+                    icon: "🔒".into(),
+                });
+            }
+
             if srv_lower.contains("gunicorn") || srv_lower.contains("uvicorn") || srv_lower.contains("django") {
                 badges.push(TechBadge {
                     name: "Python (Django)".into(),
@@ -261,6 +408,12 @@ impl TechStackDetector {
                         icon: "🐘".into(),
                     });
                 }
+            } else if pow_lower.contains("asp.net") {
+                badges.push(TechBadge {
+                    name: "ASP.NET (.NET)".into(),
+                    category: "Backend".into(),
+                    icon: "🔷".into(),
+                });
             }
         }
 

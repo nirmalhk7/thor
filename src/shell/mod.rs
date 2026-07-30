@@ -27,6 +27,7 @@ use crate::dx::cmd_palette::{
 };
 use crate::dx::decoder::{DecoderStudio, PayloadType};
 use crate::dx::stack_detector::TechStackDetector;
+use crate::features::cdp_bridge::CdpBridge;
 use crate::net::locust::LocustScoredMetrics;
 
 /// Toolbar strip height (logical px).
@@ -385,7 +386,10 @@ pub(crate) fn content_hotkey_script() -> &'static str {
 
             function defaultSettingsItems() {
                 return [
+                    { icon: '⬇️', title: 'Downloads', action_key: 'open_downloads', badge: 'Files' },
                     { icon: '🛠️', title: 'Toggle Developer Tools', action_key: 'toggle_devtools', badge: 'F12' },
+                    { icon: '⧉', title: 'Picture-in-Picture', action_key: 'toggle_pip', badge: 'video' },
+                    { icon: '🛰️', title: 'Passive Visit Recon', action_key: 'visit_recon_run', badge: 'security' },
                     { icon: 'ℹ️', title: 'Engine status', action_key: 'engine_status', badge: 'chromium' },
                     { icon: '👤', title: 'Toggle profile', action_key: 'toggle_profile', badge: '⌘⇧P' },
                     { icon: '📊', title: 'Load test (Locust)', action_key: 'locust_active_origin', badge: '⌘⇧L' },
@@ -394,10 +398,13 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                     { icon: '🚀', title: 'Open in WebStorm', action_key: 'open_ide_webstorm', badge: 'path' },
                     { icon: '🛡️', title: 'SSL CA install', action_key: 'show_ssl_details', badge: 'CA' },
                     { icon: '🛡️', title: 'Tracker shield', action_key: 'toggle_security_shield', badge: 'strip' },
+                    { icon: '🔑', title: 'Bitwarden vault', action_key: 'open_bitwarden_vault', badge: 'bw' },
                     { icon: '🗑️', title: 'Clear history', action_key: 'clear_history', badge: 'privacy' },
                     { icon: '❄️', title: 'Compact idle tabs', action_key: 'trigger_memory_compaction', badge: 'GC' },
                     { icon: '📊', title: 'Web Vitals', action_key: 'show_web_vitals', badge: 'CWV' },
-                    { icon: '📈', title: 'SLA readout', action_key: 'show_sla_metrics', badge: 'M2' }
+                    { icon: '📈', title: 'SLA readout', action_key: 'show_sla_metrics', badge: 'M2' },
+                    { icon: '🔀', title: 'Toggle Fetch intercept', action_key: 'toggle_interception', badge: 'MitM' },
+                    { icon: '📋', title: 'List intercepted requests', action_key: 'list_intercepted', badge: 'pending' }
                 ];
             }
 
@@ -490,7 +497,7 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                 thorItems.forEach(function(it, idx) {
                     var el = document.createElement('div');
                     el.className = 'item' + (idx === thorSelected ? ' selected' : '');
-                    el.innerHTML = '<div><div class="title">' + (it.icon || '⚡') + ' ' + (it.title || '') + '</div><div class="sub">' + (it.url || it.action_key || '') + '</div></div><div class="badge">' + (it.badge || '') + '</div>';
+                    el.innerHTML = '<div><div class="title">' + (it.icon || '⚡') + ' ' + (it.title || '') + '</div><div class="sub">' + (it.url || it.path_or_url || it.action_key || '') + '</div></div><div class="badge">' + (it.badge || '') + '</div>';
                     el.addEventListener('mousedown', function(e) { e.preventDefault(); selectThorItem(it); });
                     list.appendChild(el);
                 });
@@ -508,16 +515,25 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                     closeThorModal();
                     return;
                 }
+                if (it.action_key && String(it.action_key).indexOf('bitwarden_autofill_') === 0) {
+                    sendIpc(JSON.stringify({ cmd: 'open_tool', action_key: String(it.action_key) }));
+                    closeThorModal();
+                    return;
+                }
                 if (it.action_key) {
                     sendIpc(JSON.stringify({ cmd: 'open_tool', action_key: String(it.action_key) }));
                     closeThorModal();
                     return;
                 }
-                if (it.url && String(it.url).indexOf('Thor://') !== 0 && String(it.url).indexOf('thor://') !== 0) {
-                    sendIpc(JSON.stringify({ cmd: 'navigate', url: it.url }));
+                var navUrl = it.url || it.path_or_url;
+                if (navUrl && String(navUrl).indexOf('Thor://') !== 0 && String(navUrl).indexOf('thor://') !== 0) {
+                    sendIpc(JSON.stringify({ cmd: 'navigate', url: navUrl }));
                 }
                 closeThorModal();
             }
+
+            window.__thorBitwardenStatus = window.__thorBitwardenStatus || function() {};
+            window.__thorBitwardenMatches = window.__thorBitwardenMatches || function() {};
 
             window.openThorModal = function(type) {
                 thorModalMode = (type === 'settings' || type === 'tools') ? 'settings' : 'nav';
@@ -555,6 +571,15 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                     e.preventDefault();
                     e.stopPropagation();
                     sendIpc(JSON.stringify({ cmd: 'hotkey_cmd_shift_k' }));
+                } else if (e.shiftKey && (key === 'c' || code === 'keyc')) {
+                    e.preventDefault();
+                    e.stopPropagation();
+                    sendIpc(JSON.stringify({
+                        cmd: 'copy_llm_clean_context',
+                        html: (document.documentElement && document.documentElement.outerHTML) || '',
+                        url: location.href || '',
+                        title: document.title || ''
+                    }));
                 } else if (!e.shiftKey && (key === 'k' || code === 'keyk')) {
                     e.preventDefault();
                     e.stopPropagation();
@@ -901,7 +926,7 @@ fn create_palette_webview(
           if (row) row.style.display = 'none';
           document.documentElement.style.background = 'transparent';
           if (document.body) document.body.style.background = 'transparent';
-          ['stackDetectorBar','locustBar','interceptorBar','decoderBar'].forEach(function (id) {
+          ['stackDetectorBar','locustBar','interceptorBar','decoderBar','vaultBar'].forEach(function (id) {
             var el = document.getElementById(id);
             if (el) el.style.display = 'none';
           });
@@ -976,7 +1001,10 @@ fn create_palette_webview(
                     let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                     let _ = proxy_for_ipc.send_event(UserEvent::ClosePalette);
                 }
-                "feature_list" | "feature_invoke" | "lens_payload" => {
+                "feature_list" | "feature_invoke" | "lens_payload"
+                | "bitwarden_status" | "bitwarden_login" | "bitwarden_unlock" | "bitwarden_lock"
+                | "bitwarden_logout" | "bitwarden_search" | "bitwarden_matches"
+                | "bitwarden_autofill" => {
                     let _ = proxy_for_ipc.send_event(UserEvent::FeatureIpc(payload.clone()));
                 }
                 "log" => {
@@ -1070,7 +1098,31 @@ fn open_cmd_k_in_active_tab(tabs: &ShellTabs) {
     let history = AppState::global()
         .tab_history()
         .palette_items_for_tab(&tabs.active);
-    let payload_js = match cmd_k_payload_json(&bookmarks, &history, &open_items) {
+    let mut items = match cmd_k_payload_json(&bookmarks, &history, &open_items) {
+        Ok(json) => serde_json::from_str::<Vec<serde_json::Value>>(&json).unwrap_or_default(),
+        Err(_) => Vec::new(),
+    };
+    let vault = AppState::global().vault();
+    let status = vault.status();
+    let url = tabs
+        .meta
+        .get(&tabs.active)
+        .map(|m| m.url.clone())
+        .unwrap_or_default();
+    let matches = if vault.has_session() && !url.is_empty() {
+        vault.list_for_url(&url).unwrap_or_default()
+    } else {
+        Vec::new()
+    };
+    let vault_items = crate::dx::bitwarden::vault_palette_items(&status, &matches);
+    if let Ok(extra) = serde_json::to_value(&vault_items) {
+        if let Some(arr) = extra.as_array() {
+            for v in arr {
+                items.push(v.clone());
+            }
+        }
+    }
+    let payload_js = match serde_json::to_string(&items) {
         Ok(json) => format!("window.__thorCmdKPayload = {json};"),
         Err(_) => "window.__thorCmdKPayload = [];".to_string(),
     };
@@ -1269,6 +1321,21 @@ fn open_tool_in_omnibar(
                     "Tracker strip: OFF"
                 });
             }
+            native_toolbar::ChromeToolMode::Vault => {
+                let st = AppState::global().vault().status();
+                tb.set_tool_mode(mode);
+                let label = match st.state {
+                    crate::dx::bitwarden::VaultState::MissingCli => "bw CLI missing",
+                    crate::dx::bitwarden::VaultState::Unauthenticated => {
+                        "Not logged in — unlock after bw login"
+                    }
+                    crate::dx::bitwarden::VaultState::Locked => {
+                        "Vault locked — enter master password"
+                    }
+                    crate::dx::bitwarden::VaultState::Unlocked => "Vault unlocked",
+                };
+                tb.set_status(label);
+            }
             native_toolbar::ChromeToolMode::Engine | native_toolbar::ChromeToolMode::Sla => {
                 let s = engine_status::engine_status();
                 tb.set_tool_mode(mode);
@@ -1413,33 +1480,9 @@ fn run_omnibar_tool_go(
         }
         native_toolbar::ChromeToolMode::WebVitals => {
             if let Some(wv) = tabs.webviews.get(&tabs.active) {
-                let script = r#"(function(){
-                  try {
-                    var lcp = null, cls = 0, inp = null;
-                    try {
-                      var entries = performance.getEntriesByType('largest-contentful-paint');
-                      if (entries && entries.length) lcp = entries[entries.length-1].startTime;
-                    } catch(e) {}
-                    try {
-                      performance.getEntriesByType('layout-shift').forEach(function(e){
-                        if (!e.hadRecentInput) cls += e.value;
-                      });
-                    } catch(e) {}
-                    var nav = performance.getEntriesByType('navigation')[0];
-                    var ttfb = nav ? nav.responseStart : null;
-                    var summary = 'LCP=' + (lcp!=null?Math.round(lcp)+'ms':'?')
-                      + ' CLS=' + cls.toFixed(3)
-                      + ' TTFB=' + (ttfb!=null?Math.round(ttfb)+'ms':'?');
-                    var msg = JSON.stringify({cmd:'web_vitals_result', summary: summary});
-                    if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(msg);
-                    else if (window.webkit && window.webkit.messageHandlers && window.webkit.messageHandlers.ipc)
-                      window.webkit.messageHandlers.ipc.postMessage(msg);
-                  } catch (e) {
-                    var msg2 = JSON.stringify({cmd:'web_vitals_result', summary: 'vitals error'});
-                    if (window.ipc && window.ipc.postMessage) window.ipc.postMessage(msg2);
-                  }
-                })();"#;
-                let _ = wv.evaluate_script(script);
+                // Real PerformanceObserver path (same as BrowserRunner) — no invented CWV.
+                let script = CdpBridge::web_vitals_shell_capture_script(false);
+                let _ = wv.evaluate_script(&script);
                 tb.set_status("Capturing…");
             }
             false
@@ -1447,6 +1490,39 @@ fn run_omnibar_tool_go(
         native_toolbar::ChromeToolMode::Idor => {
             tb.set_status("Running IDOR scan…");
             false
+        }
+        native_toolbar::ChromeToolMode::Vault => {
+            let password = tb.read_vault_password();
+            if password.is_empty() {
+                tb.set_status("Enter master password");
+                return false;
+            }
+            let vault = AppState::global().vault();
+            let st = vault.status();
+            let result = match st.state {
+                crate::dx::bitwarden::VaultState::Unauthenticated => {
+                    // Field format: "email master-password" (first whitespace split).
+                    let mut parts = password.splitn(2, char::is_whitespace);
+                    let email = parts.next().unwrap_or("").trim();
+                    let pass = parts.next().unwrap_or("").trim();
+                    if email.is_empty() || pass.is_empty() {
+                        tb.set_status("Login: email + password");
+                        return false;
+                    }
+                    vault.login(email, pass)
+                }
+                _ => vault.unlock(&password),
+            };
+            match result {
+                Ok(()) => {
+                    tb.set_status("Vault unlocked");
+                    true
+                }
+                Err(e) => {
+                    tb.set_status(&format!("{e}"));
+                    false
+                }
+            }
         }
     }
 }
@@ -1624,19 +1700,8 @@ pub(crate) fn setup_macos_app_icon() {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    let dual = std::env::var("THOR_DUAL_WINDOW").ok();
-    
-    #[cfg(not(debug_assertions))]
-    let use_chromium = dual.map(|v| v == "1").unwrap_or(true);
-    
-    #[cfg(debug_assertions)]
-    let use_chromium = dual.map(|v| v == "1").unwrap_or(false);
-
-    if use_chromium {
-        chromium_shell::run_chromium_shell()
-    } else {
-        run_wry_shell()
-    }
+    crate::thor_info!("thor::shell", "Launching Thor Developer Browser UI...");
+    chromium_shell::run_chromium_shell()
 }
 
 
@@ -1790,12 +1855,24 @@ fn run_wry_shell() -> anyhow::Result<()> {
             }
 
             Event::UserEvent(UserEvent::OpenTool(ref action_key)) => {
-                #[cfg(target_os = "macos")]
-                {
-                    let key = action_key.clone();
-                    let tabs_slot = tabs_for_loop.borrow();
-                    let mut tb = toolbar_for_loop.borrow_mut();
-                    open_tool_in_omnibar(&tabs_slot, &mut *tb, &key);
+                if let Some(id) = action_key.strip_prefix("bitwarden_autofill_") {
+                    eprintln!(
+                        "⚡ [Thor Vault] autofill {id} requires Chromium dual-window shell (CDP)"
+                    );
+                } else if action_key == "bitwarden_lock" {
+                    let _ = AppState::global().vault().lock();
+                    #[cfg(target_os = "macos")]
+                    if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
+                        tb.set_status("Vault locked");
+                    }
+                } else {
+                    #[cfg(target_os = "macos")]
+                    {
+                        let key = action_key.clone();
+                        let tabs_slot = tabs_for_loop.borrow();
+                        let mut tb = toolbar_for_loop.borrow_mut();
+                        open_tool_in_omnibar(&tabs_slot, &mut *tb, &key);
+                    }
                 }
             }
 
@@ -1844,19 +1921,34 @@ fn run_wry_shell() -> anyhow::Result<()> {
                         let hook = match cmd.as_str() {
                             "feature_list" => "__thorFeatureList",
                             "lens_payload" => "__thorLensPayload",
+                            "bitwarden_search" | "bitwarden_matches" => "__thorBitwardenMatches",
+                            c if c.starts_with("bitwarden_") => "__thorBitwardenStatus",
                             _ => "__thorFeatureResult",
                         };
                         let chrome = chrome_for_loop.borrow();
                         chrome_eval(&chrome, &format!("window.{hook} && window.{hook}({json});"));
+                    }
+                    ipc_dispatch::DispatchResult::Message(ref m) => {
+                        if let Some(id) = m.strip_prefix("bitwarden:autofill:") {
+                            // Wry content path: no Chromium CDP autofill here.
+                            eprintln!(
+                                "⚡ [Thor Vault] autofill {id} requires Chromium dual-window shell"
+                            );
+                        }
                     }
                     ipc_dispatch::DispatchResult::Err(e) => {
                         eprintln!("⚡ [Thor Feature IPC] {cmd} error: {e}");
                         let err = serde_json::json!({ "error": e });
                         let json = serde_json::to_string(&err).unwrap_or_else(|_| "null".into());
                         let chrome = chrome_for_loop.borrow();
+                        let hook = if cmd.starts_with("bitwarden_") {
+                            "__thorBitwardenStatus"
+                        } else {
+                            "__thorFeatureResult"
+                        };
                         chrome_eval(
                             &chrome,
-                            &format!("window.__thorFeatureResult && window.__thorFeatureResult({json});"),
+                            &format!("window.{hook} && window.{hook}({json});"),
                         );
                     }
                     _ => {}
@@ -2114,6 +2206,25 @@ pub(crate) fn open_tool_in_omnibar_chromium(
     toolbar: &mut Option<native_toolbar::NativeToolbar>,
     action_key: &str,
 ) {
+    if action_key == "toggle_pip" {
+        match tabs.toggle_pip_active() {
+            Some(r) => println!("⚡ [Thor PiP] active={} ({})", r.active, r.detail),
+            None => eprintln!("⚡ [Thor PiP] no active tab"),
+        }
+        return;
+    }
+    if action_key == "visit_recon_run" {
+        if let Some(report) = tabs.run_visit_recon_active() {
+            println!(
+                "⚡ [Thor Recon] {} grade={} findings={}",
+                report.url,
+                report.grade,
+                report.findings.len()
+            );
+        }
+        return;
+    }
+
     let Some(mode) = native_toolbar::ChromeToolMode::from_action_key(action_key) else {
         eprintln!("⚡ [Thor] unknown tool action_key: {action_key}");
         return;
@@ -2169,6 +2280,17 @@ pub(crate) fn open_tool_in_omnibar_chromium(
                 } else {
                     "Tracker strip: OFF"
                 });
+            }
+            native_toolbar::ChromeToolMode::Vault => {
+                let st = AppState::global().vault().status();
+                tb.set_tool_mode(mode);
+                let label = match st.state {
+                    crate::dx::bitwarden::VaultState::MissingCli => "bw CLI missing",
+                    crate::dx::bitwarden::VaultState::Unauthenticated => "Not logged in — unlock after bw login",
+                    crate::dx::bitwarden::VaultState::Locked => "Vault locked — enter master password",
+                    crate::dx::bitwarden::VaultState::Unlocked => "Vault unlocked",
+                };
+                tb.set_status(label);
             }
             native_toolbar::ChromeToolMode::Engine | native_toolbar::ChromeToolMode::Sla => {
                 let s = engine_status::engine_status();
@@ -2306,37 +2428,48 @@ pub(crate) fn run_omnibar_tool_go_chromium(
             true
         }
         native_toolbar::ChromeToolMode::WebVitals => {
-            let script = r#"(function(){
-              try {
-                var lcp = null, cls = 0;
-                try {
-                  var entries = performance.getEntriesByType('largest-contentful-paint');
-                  if (entries && entries.length) lcp = entries[entries.length-1].startTime;
-                } catch(e) {}
-                try {
-                  performance.getEntriesByType('layout-shift').forEach(function(e){
-                    if (!e.hadRecentInput) cls += e.value;
-                  });
-                } catch(e) {}
-                var nav = performance.getEntriesByType('navigation')[0];
-                var ttfb = nav ? nav.responseStart : null;
-                var summary = 'LCP=' + (lcp!=null?Math.round(lcp)+'ms':'?')
-                  + ' CLS=' + cls.toFixed(3)
-                  + ' TTFB=' + (ttfb!=null?Math.round(ttfb)+'ms':'?');
-                window.__thorIpcQueue = window.__thorIpcQueue || [];
-                window.__thorIpcQueue.push(JSON.stringify({cmd:'web_vitals_result', summary: summary}));
-              } catch (e) {
-                window.__thorIpcQueue = window.__thorIpcQueue || [];
-                window.__thorIpcQueue.push(JSON.stringify({cmd:'web_vitals_result', summary: 'vitals error'}));
-              }
-            })();"#;
-            let _ = tabs.evaluate_active(script);
+            // Real PerformanceObserver path (same as BrowserRunner) — no invented CWV.
+            let script = CdpBridge::web_vitals_shell_capture_script(true);
+            let _ = tabs.evaluate_active(&script);
             tb.set_status("Capturing…");
             false
         }
         native_toolbar::ChromeToolMode::Idor => {
             tb.set_status("Running IDOR scan…");
             false
+        }
+        native_toolbar::ChromeToolMode::Vault => {
+            let password = tb.read_vault_password();
+            if password.is_empty() {
+                tb.set_status("Enter master password");
+                return false;
+            }
+            let vault = AppState::global().vault();
+            let st = vault.status();
+            let result = match st.state {
+                crate::dx::bitwarden::VaultState::Unauthenticated => {
+                    // Field format: "email master-password" (first whitespace split).
+                    let mut parts = password.splitn(2, char::is_whitespace);
+                    let email = parts.next().unwrap_or("").trim();
+                    let pass = parts.next().unwrap_or("").trim();
+                    if email.is_empty() || pass.is_empty() {
+                        tb.set_status("Login: email + password");
+                        return false;
+                    }
+                    vault.login(email, pass)
+                }
+                _ => vault.unlock(&password),
+            };
+            match result {
+                Ok(()) => {
+                    tb.set_status("Vault unlocked");
+                    true
+                }
+                Err(e) => {
+                    tb.set_status(&format!("{e}"));
+                    false
+                }
+            }
         }
     }
 }

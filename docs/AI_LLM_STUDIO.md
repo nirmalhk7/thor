@@ -67,3 +67,9 @@ Wired to `Cmd+Shift+C` shortcut, `src/dx/llm_clean_context.rs` provides 1-click 
 2. **Markdown Conversion**: Converts main article/code content to structured GitHub-Flavored Markdown.
 3. **Metadata Header**: Prepends Page Title, Source URL, and ISO timestamp.
 4. **Clipboard Injection**: Automatically calculates estimated token count and copies the payload to the OS clipboard.
+
+---
+
+## AI Domain Feature Suite
+
+Twenty-four AI `FeatureId`s (tool-call forensics with honest SSE `tool_result` merge, cache-hit ledger → `saved_usd`, JSON Schema guard, MCP traffic lens, streaming SLO gates from waterfall, eval dataset miner, and more) live under `src/features/ai.rs` and deepen `llm_studio` pricing/SSE. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

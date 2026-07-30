@@ -3,3 +3,6 @@
 *.user
 *.suo
 .DS_Store
+.thor_chromium_src_path
+dist/Thor.app/Contents/Frameworks/
+*.app/Contents/Frameworks/Chromium.app/

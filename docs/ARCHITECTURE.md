@@ -14,7 +14,8 @@
 1. **Chromium Internals for Semantics**: Native Chromium tab target management via Chrome DevTools Protocol (CDP) for modern web compatibility and Web Vitals observation.
 2. **CDP for Developer Instrumentation**: Zero-friction network interception, DOM querying, layout vector rendering, and metrics collection.
 3. **Rust for Orchestration**: High-concurrency event indexing, lock-free metrics aggregation, polyglot test generation, and protocol load generation.
-4. **Zero Stub/Fake UI**: Every UI element in Thor is backed by real Rust state in `AppState::global()` — no simulated RNG or fake metrics.
+4. **Zero Stub/Fake UI**: Every UI element in Thor is backed by real Rust state in `AppState::global()` — no simulated RNG or fake metrics. Offline-only Feature Suite tools are labeled **Analyzer (offline)**; live labs are consent-gated.
+5. **Engineer Feature Suite**: Process-wide `FeatureEngine` (144 IDs) + `FeatureOrchestrator` IPC from Developer Control Center (`Cmd+⇧K`).
 
 ---
 
@@ -93,10 +94,11 @@ Thor supports dual execution runtime models:
 
 - **`src/main.rs`**: Entry point (mimalloc allocator + Tokio multi-thread runtime + shell runner).
 - **`src/lib.rs`**: Library crate `thor`.
-- **`src/app_state.rs`**: Global thread-safe singleton state (`AppState::global()`).
-- **`src/engine/`**: Chromium runtime launcher, CDP tab session manager, prewarm pool, and lifecycle freezer.
-- **`src/shell/`**: Native AppKit toolbar, chrome UI HTML/JS renderer (`gui.rs`), and IPC dispatch handlers.
-- **`src/dx/`**: Command palette (`Cmd+K`), CSS layout overlay, LLM studio, clean context builder (`Cmd+Shift+C`), Web3 inspector, polyglot test generator, and IDE bridge.
-- **`src/net/`**: Security shield, IDOR matrix scanner, traffic tamper engine, SSL CA generator, and Locust load testing proxy.
+- **`src/app_state.rs`**: Global thread-safe singleton state (`AppState::global()`), including `FeatureEngine` + `EngineHandle`.
+- **`src/engine/`**: Chromium runtime launcher, CDP tab session manager, prewarm pool, lifecycle freezer (Instant-timed freeze samples), and `TabEvalHandle` for DevCC `from_active_tab`.
+- **`src/shell/`**: Native AppKit toolbar, chrome UI HTML/JS renderer (`gui.rs` Developer Control Center), and IPC dispatch (`feature_list` / `feature_invoke` / `lens_payload`).
+- **`src/features/`**: Engineer Feature Suite — **144** `FeatureId`s across Frontend / Backend / Security / Performance / QA / AI; `FeatureOrchestrator`, CDP bridge, and feature-path SLAs.
+- **`src/dx/`**: Command palette (`Cmd+K`), CSS layout overlay, LLM studio, clean context builder (`Cmd+Shift+C`), Web3 inspector, polyglot test generator (Promote to Test + CI compose), and IDE bridge.
+- **`src/net/`**: Security shield, IDOR matrix scanner, traffic tamper engine, SSL CA generator, Locust load testing proxy, and lab consent / abuse-target gates.
 - **`src/mcp/`**: Model Context Protocol (MCP) server (`server.rs`) and 8 browser automation tools (`tools.rs`).
-- **`src/load/`**: Thor load engine, scenario compiler, lock-free atomic metrics collector, browser Web Vitals runner, and Rust protocol scale runner.
+- **`src/load/`**: Thor load engine, scenario compiler, lock-free atomic metrics (SoftNav + transfer bytes), browser Web Vitals runner, and Rust protocol scale runner.

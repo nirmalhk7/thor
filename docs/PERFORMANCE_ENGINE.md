@@ -65,3 +65,9 @@ Thor enforces strict memory efficiency to remain lighter than Chrome and Firefox
   - **Active Tab**: ~42.5 MB RAM
   - **Soft-Frozen Tab**: ~8.2 MB RAM
   - **Discarded Tab**: < 0.5 MB RAM (retains scroll position and URL)
+
+---
+
+## Performance Domain Feature Suite
+
+Twenty-five Performance `FeatureId`s (budgets, waterfall, INP, flame graph, LCP element forensics, long-task radar, freeze–resume bench, soft-nav vitals, conn-pool / HTTP/3 / compression / media gates, continuous profiler, and more) live under `src/features/perf_features.rs` and are invocable from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

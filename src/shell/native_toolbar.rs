@@ -4,6 +4,7 @@
 
 #![cfg(target_os = "macos")]
 
+use std::cell::Cell;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Mutex, OnceLock};
 
@@ -14,7 +15,7 @@ use cocoa::foundation::{NSPoint, NSRect, NSSize, NSString};
 use objc::declare::ClassDecl;
 use objc::runtime::{Class, Object, Sel};
 use objc::{class, msg_send, sel, sel_impl};
-use tao::dpi::LogicalPosition;
+use tao::dpi::{LogicalPosition, LogicalSize};
 use tao::event_loop::EventLoopProxy;
 use tao::platform::macos::WindowExtMacOS;
 use tao::window::Window;
@@ -26,6 +27,66 @@ const TRAFFIC_LIGHT_SIZE: f64 = 12.0;
 const TRAFFIC_LIGHT_X: f64 = 14.0;
 const ROW_H: f64 = 28.0;
 const FIELD_INSET_Y: f64 = 5.0; // vertical pad so caret/baseline sits mid-glass
+const TOOLBAR_TRANSITION_SECS: f64 = 0.14;
+
+fn prefers_reduced_motion() -> bool {
+    unsafe {
+        let workspace: id = msg_send![class!(NSWorkspace), sharedWorkspace];
+        if workspace == nil {
+            return false;
+        }
+        let selector = sel!(accessibilityDisplayShouldReduceMotion);
+        let responds: bool = msg_send![workspace, respondsToSelector: selector];
+        responds && msg_send![workspace, accessibilityDisplayShouldReduceMotion]
+    }
+}
+
+fn set_view_frame(view: id, frame: NSRect) {
+    unsafe {
+        let _: () = msg_send![view, setFrame: frame];
+    }
+}
+
+fn cue_mode_change(view: id, animated: bool) {
+    if !animated || prefers_reduced_motion() {
+        return;
+    }
+    unsafe {
+        // A short opacity settle makes deliberate mode changes legible without
+        // animating layout or competing with the resize path.
+        let _: () = msg_send![view, setAlphaValue: 0.82f64];
+        let _: () = msg_send![class!(NSAnimationContext), beginGrouping];
+        let context: id = msg_send![class!(NSAnimationContext), currentContext];
+        let _: () = msg_send![context, setDuration: TOOLBAR_TRANSITION_SECS];
+        let animator: id = msg_send![view, animator];
+        let _: () = msg_send![animator, setAlphaValue: 1.0f64];
+        let _: () = msg_send![class!(NSAnimationContext), endGrouping];
+    }
+}
+
+fn set_omnibox_focus_appearance(field: id, focused: bool) {
+    unsafe {
+        let glass: id = msg_send![field, superview];
+        if glass == nil {
+            return;
+        }
+        let layer: id = msg_send![glass, layer];
+        if layer == nil {
+            return;
+        }
+        let border = if focused {
+            ns_color_rgba(0.23, 0.51, 0.96, 0.82)
+        } else {
+            ns_color_rgba(1.0, 1.0, 1.0, 0.10)
+        };
+        let border: id = msg_send![border, CGColor];
+        let _: () = msg_send![layer, setBorderColor: border];
+        let _: () = msg_send![layer, setBorderWidth: if focused { 1.25f64 } else { 1.0f64 }];
+        let _: () = msg_send![layer, setShadowOpacity: if focused { 0.32f32 } else { 0.0f32 }];
+        let _: () = msg_send![layer, setShadowRadius: if focused { 6.0f64 } else { 0.0f64 }];
+        let _: () = msg_send![layer, setShadowOffset: NSSize::new(0.0, 1.0)];
+    }
+}
 
 fn traffic_light_inset_y() -> f64 {
     // Tao positions the lights from the titlebar's upper-left corner. Match
@@ -91,6 +152,16 @@ fn make_flush_button(title: &str, tag: i64, frame: NSRect) -> id {
         let _: () = msg_send![btn, setTarget: toolbar_target()];
         let _: () = msg_send![btn, setAction: sel!(thorToolbarClick:)];
         let _: () = msg_send![btn, setFocusRingType: 1u64];
+        let _: () = msg_send![btn, setToolTip: nsstring(match tag {
+            4 => "New Tab (⌘T)",
+            42 => "Close tool (Esc)",
+            _ => title,
+        })];
+        let _: () = msg_send![btn, setAccessibilityLabel: nsstring(match tag {
+            4 => "New Tab",
+            42 => "Close tool",
+            _ => title,
+        })];
         let _: () = msg_send![btn, setWantsLayer: YES];
         let font: id = msg_send![class!(NSFont), systemFontOfSize: 15.0f64];
         let _: () = msg_send![btn, setFont: font];
@@ -103,76 +174,49 @@ fn make_flush_button(title: &str, tag: i64, frame: NSRect) -> id {
     }
 }
 
-/// Tao uses the vertical traffic-light inset to size the titlebar container,
-/// but leaves the buttons at their former y-coordinate. Pin them to the
-/// container's lower edge so their visual center matches the toolbar row.
-fn align_traffic_lights(window: &Window) {
-    unsafe {
-        let ns_window = window.ns_window() as id;
-        if ns_window == nil {
-            return;
-        }
-        let close: id = msg_send![ns_window, standardWindowButton: 0u64];
-        let minimize: id = msg_send![ns_window, standardWindowButton: 1u64];
-        let zoom: id = msg_send![ns_window, standardWindowButton: 2u64];
-        if close == nil || minimize == nil || zoom == nil {
-            return;
-        }
-
-        let titlebar: id = msg_send![close, superview];
-        let titlebar: id = msg_send![titlebar, superview];
-        if titlebar == nil {
-            return;
-        }
-        let window_frame: NSRect = msg_send![ns_window, frame];
-        let mut titlebar_frame: NSRect = msg_send![titlebar, frame];
-        titlebar_frame.size.height = TRAFFIC_LIGHT_SIZE + traffic_light_inset_y();
-        titlebar_frame.origin.y = window_frame.size.height - titlebar_frame.size.height;
-        let _: () = msg_send![titlebar, setFrame: titlebar_frame];
-
-        let close_frame: NSRect = msg_send![close, frame];
-        let minimize_frame: NSRect = msg_send![minimize, frame];
-        let spacing = minimize_frame.origin.x - close_frame.origin.x;
-        for (index, button) in [close, minimize, zoom].into_iter().enumerate() {
-            let mut frame: NSRect = msg_send![button, frame];
-            frame.origin.x = TRAFFIC_LIGHT_X + index as f64 * spacing;
-            frame.origin.y = 0.0;
-            let _: () = msg_send![button, setFrame: frame];
-        }
-    }
-}
-
 fn style_inline_field(field: id, placeholder: &str) {
     unsafe {
+        // Match the glass omnibox: translucent fill, hairline border, 6px radius.
         let _: () = msg_send![field, setBezeled: NO];
         let _: () = msg_send![field, setBordered: NO];
-        let _: () = msg_send![field, setDrawsBackground: YES];
-        let _: () = msg_send![field, setBackgroundColor: ns_color_rgba(0.0, 0.0, 0.0, 0.28)];
+        let _: () = msg_send![field, setDrawsBackground: NO];
         let _: () = msg_send![field, setEditable: YES];
         let _: () = msg_send![field, setSelectable: YES];
         let _: () = msg_send![field, setRefusesFirstResponder: NO];
         let _: () = msg_send![field, setFocusRingType: 1u64];
-        let font: id = msg_send![class!(NSFont), systemFontOfSize: 11.0f64];
+        let font: id = msg_send![class!(NSFont), systemFontOfSize: 13.0f64];
         let _: () = msg_send![field, setFont: font];
         let _: () = msg_send![field, setTextColor: ns_color_rgba(0.95, 0.96, 0.98, 1.0)];
-        let _: () = msg_send![field, setAlignment: 1u64]; // NSTextAlignmentCenter
+        let _: () = msg_send![field, setToolTip: nsstring(placeholder)];
+        let _: () = msg_send![field, setAccessibilityLabel: nsstring(placeholder)];
+        let _: () = msg_send![field, setAlignment: 0u64]; // left — same as URL field
         let _: () = msg_send![field, setWantsLayer: YES];
         let layer: id = msg_send![field, layer];
         if layer != nil {
-            let _: () = msg_send![layer, setCornerRadius: 5.0f64];
+            let _: () = msg_send![layer, setCornerRadius: 6.0f64];
+            let _: () = msg_send![layer, setMasksToBounds: YES];
+            let bg = ns_color_rgba(1.0, 1.0, 1.0, 0.08);
+            let cg: id = msg_send![bg, CGColor];
+            let _: () = msg_send![layer, setBackgroundColor: cg];
+            let _: () = msg_send![layer, setBorderWidth: 1.0f64];
+            let border = ns_color_rgba(1.0, 1.0, 1.0, 0.10);
+            let bcg: id = msg_send![border, CGColor];
+            let _: () = msg_send![layer, setBorderColor: bcg];
         }
         let cell: id = msg_send![field, cell];
         if cell != nil {
             let _: () = msg_send![cell, setWraps: NO];
             let _: () = msg_send![cell, setScrollable: YES];
             let _: () = msg_send![cell, setUsesSingleLineMode: YES];
+            let _: () = msg_send![cell, setLineBreakMode: 5u64];
             let _: () = msg_send![cell, setPlaceholderString: nsstring(placeholder)];
         }
     }
 }
 
 /// Glass omnibox shell + stock NSTextField (no custom cell — that broke typing).
-fn make_glass_omnibox(frame: NSRect) -> (id, id) {
+/// Returns `(glass, field, load_bar)`.
+fn make_glass_omnibox(frame: NSRect) -> (id, id, id) {
     unsafe {
         let glass: id = msg_send![class!(NSView), alloc];
         let glass: id = msg_send![glass, initWithFrame: frame];
@@ -210,6 +254,8 @@ fn make_glass_omnibox(frame: NSRect) -> (id, id) {
         let font: id = msg_send![class!(NSFont), systemFontOfSize: 13.0f64];
         let _: () = msg_send![field, setFont: font];
         let _: () = msg_send![field, setTextColor: ns_color_rgba(0.95, 0.96, 0.98, 1.0)];
+        let _: () = msg_send![field, setToolTip: nsstring("Address or search query")];
+        let _: () = msg_send![field, setAccessibilityLabel: nsstring("Address or search query")];
         let _: () = msg_send![field, setAlignment: 0u64]; // left
         let cell: id = msg_send![field, cell];
         if cell != nil {
@@ -225,7 +271,25 @@ fn make_glass_omnibox(frame: NSRect) -> (id, id) {
         let _: () = msg_send![field, setAutoresizingMask: (1u64 << 1)];
         let _: () = msg_send![glass, addSubview: field];
 
-        (glass, field)
+        // Red load bar along the bottom edge of the omnibar.
+        let load_h = 2.5f64;
+        let load_bar: id = msg_send![class!(NSView), alloc];
+        let load_bar: id = msg_send![
+            load_bar,
+            initWithFrame: NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(0.0, load_h))
+        ];
+        let _: () = msg_send![load_bar, setWantsLayer: YES];
+        let load_layer: id = msg_send![load_bar, layer];
+        if load_layer != nil {
+            // #ef4444
+            let red = ns_color_rgba(0.937, 0.267, 0.267, 1.0);
+            let rcg: id = msg_send![red, CGColor];
+            let _: () = msg_send![load_layer, setBackgroundColor: rcg];
+        }
+        let _: () = msg_send![load_bar, setHidden: YES];
+        let _: () = msg_send![glass, addSubview: load_bar];
+
+        (glass, field, load_bar)
     }
 }
 
@@ -238,6 +302,22 @@ fn sync_omnibox_inner(glass: id, field: id) {
             NSSize::new((gf.size.width - 20.0).max(40.0), inner_h),
         );
         let _: () = msg_send![field, setFrame: fr];
+    }
+}
+
+fn sync_omnibox_load_bar(glass: id, load_bar: id, progress: f64) {
+    unsafe {
+        let gf: NSRect = msg_send![glass, frame];
+        let load_h = 2.5f64;
+        let pct = progress.clamp(0.0, 1.0);
+        let w = if pct <= 0.0 {
+            0.0
+        } else {
+            (gf.size.width * pct).max(4.0)
+        };
+        let fr = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(w, load_h));
+        let _: () = msg_send![load_bar, setFrame: fr];
+        let _: () = msg_send![load_bar, setHidden: if pct <= 0.0 { YES } else { NO }];
     }
 }
 
@@ -295,6 +375,14 @@ fn omnibox_field_class() -> &'static Class {
                     sel!(mouseDown:),
                     omnibox_mouse_down as extern "C" fn(&Object, Sel, id),
                 );
+                decl.add_method(
+                    sel!(becomeFirstResponder),
+                    omnibox_become_first_responder as extern "C" fn(&Object, Sel) -> bool,
+                );
+                decl.add_method(
+                    sel!(resignFirstResponder),
+                    omnibox_resign_first_responder as extern "C" fn(&Object, Sel) -> bool,
+                );
             }
             decl.register()
         })
@@ -312,6 +400,26 @@ extern "C" fn omnibox_mouse_down(this: &Object, _sel: Sel, event: id) {
         if editor != nil {
             let _: () = msg_send![editor, selectAll: nil];
         }
+    }
+}
+
+extern "C" fn omnibox_become_first_responder(this: &Object, _sel: Sel) -> bool {
+    unsafe {
+        let accepted: bool = msg_send![super(this, class!(NSTextField)), becomeFirstResponder];
+        if accepted {
+            set_omnibox_focus_appearance(this as *const Object as id, true);
+        }
+        accepted
+    }
+}
+
+extern "C" fn omnibox_resign_first_responder(this: &Object, _sel: Sel) -> bool {
+    unsafe {
+        let accepted: bool = msg_send![super(this, class!(NSTextField)), resignFirstResponder];
+        if accepted {
+            set_omnibox_focus_appearance(this as *const Object as id, false);
+        }
+        accepted
     }
 }
 
@@ -519,7 +627,6 @@ pub fn configure_unified_titlebar(window: &Window) {
         TRAFFIC_LIGHT_X,
         traffic_light_inset_y(),
     ));
-    align_traffic_lights(window);
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -539,6 +646,7 @@ pub enum ChromeToolMode {
     WebVitals,
     Sla,
     Idor,
+    Vault,
 }
 
 impl ChromeToolMode {
@@ -558,6 +666,7 @@ impl ChromeToolMode {
             "show_web_vitals" => Some(Self::WebVitals),
             "show_sla_metrics" => Some(Self::Sla),
             "run_idor_matrix" | "idor" => Some(Self::Idor),
+            "open_bitwarden_vault" | "bitwarden_vault" | "toggle_vault" => Some(Self::Vault),
             _ => None,
         }
     }
@@ -580,6 +689,8 @@ pub struct NativeToolbar {
     pub root: id,
     pub url_glass: id,
     pub url_field: id,
+    load_bar: id,
+    load_progress: Cell<f64>,
     plus_btn: id,
     tool_f0: id,
     tool_f1: id,
@@ -596,6 +707,9 @@ impl NativeToolbar {
     pub(crate) fn attach(window: &Window, proxy: EventLoopProxy<UserEvent>) -> Self {
         *proxy_slot().lock().unwrap() = Some(proxy);
         configure_unified_titlebar(window);
+        // Tool modes keep their controls readable instead of allowing the
+        // omnibox and action buttons to overlap at compressed window widths.
+        window.set_min_inner_size(Some(LogicalSize::new(760.0, 480.0)));
 
         let ns_view = window.ns_view() as id;
         let scale = window.scale_factor();
@@ -634,10 +748,8 @@ impl NativeToolbar {
 
             let trail = 12.0;
             let field_w = (w - x - trail).max(160.0);
-            let (glass, field) = make_glass_omnibox(NSRect::new(
-                NSPoint::new(x, y),
-                NSSize::new(field_w, ROW_H),
-            ));
+            let (glass, field, load_bar) =
+                make_glass_omnibox(NSRect::new(NSPoint::new(x, y), NSSize::new(field_w, ROW_H)));
             let _: () = msg_send![root, addSubview: glass];
 
             let mk_field = |placeholder: &str, value: &str, fx: f64, fw: f64| -> id {
@@ -698,7 +810,6 @@ impl NativeToolbar {
                 TRAFFIC_LIGHT_X,
                 traffic_light_inset_y(),
             ));
-            align_traffic_lights(window);
 
             println!("⚡ [Thor] Minimal chrome ({w}×{CHROME_HEIGHT}) — + · omnibox · tools");
             install_palette_key_equivalents();
@@ -708,6 +819,8 @@ impl NativeToolbar {
                 root,
                 url_glass: glass,
                 url_field: field,
+                load_bar,
+                load_progress: Cell::new(0.0),
                 plus_btn: plus,
                 tool_f0,
                 tool_f1,
@@ -719,7 +832,7 @@ impl NativeToolbar {
                 mode: ChromeToolMode::Browse,
                 bar_width: w,
             };
-            tb.layout_browse();
+            tb.layout_browse(false);
             tb.raise();
             tb
         }
@@ -749,29 +862,32 @@ impl NativeToolbar {
         }
     }
 
-    fn layout_browse(&self) {
+    fn layout_browse(&self, animated: bool) {
         unsafe {
             let y = row_y();
             let plus_x = Self::content_leading();
-            let _: () = msg_send![
+            set_view_frame(
                 self.plus_btn,
-                setFrame: NSRect::new(NSPoint::new(plus_x, y), NSSize::new(Self::plus_w(), ROW_H))
-            ];
+                NSRect::new(NSPoint::new(plus_x, y), NSSize::new(Self::plus_w(), ROW_H)),
+            );
             let leading = plus_x + Self::plus_w() + 8.0;
             let trail = 12.0;
             let field_w = (self.bar_width - leading - trail).max(160.0);
-            let _: () = msg_send![
+            set_view_frame(
                 self.url_glass,
-                setFrame: NSRect::new(NSPoint::new(leading, y), NSSize::new(field_w, ROW_H))
-            ];
+                NSRect::new(NSPoint::new(leading, y), NSSize::new(field_w, ROW_H)),
+            );
             let _: () = msg_send![self.url_glass, setHidden: NO];
             sync_omnibox_inner(self.url_glass, self.url_field);
+            sync_omnibox_load_bar(self.url_glass, self.load_bar, self.load_progress.get());
             self.hide_tool_controls();
+            cue_mode_change(self.url_glass, animated);
         }
     }
 
     fn place_row(
         &self,
+        animated: bool,
         omni_frac: f64,
         fields: &[(id, f64)],
         status_w: f64,
@@ -781,10 +897,10 @@ impl NativeToolbar {
         unsafe {
             let y = row_y();
             let plus_x = Self::content_leading();
-            let _: () = msg_send![
+            set_view_frame(
                 self.plus_btn,
-                setFrame: NSRect::new(NSPoint::new(plus_x, y), NSSize::new(Self::plus_w(), ROW_H))
-            ];
+                NSRect::new(NSPoint::new(plus_x, y), NSSize::new(Self::plus_w(), ROW_H)),
+            );
             let leading = plus_x + Self::plus_w() + 8.0;
             let trail = 12.0;
             let avail = (self.bar_width - leading - trail).max(200.0);
@@ -796,43 +912,45 @@ impl NativeToolbar {
             let omni_w = (avail * omni_frac)
                 .max(100.0)
                 .min((avail - tools_min).max(100.0));
-            let _: () = msg_send![
+            set_view_frame(
                 self.url_glass,
-                setFrame: NSRect::new(NSPoint::new(leading, y), NSSize::new(omni_w, ROW_H))
-            ];
+                NSRect::new(NSPoint::new(leading, y), NSSize::new(omni_w, ROW_H)),
+            );
             let _: () = msg_send![self.url_glass, setHidden: NO];
             sync_omnibox_inner(self.url_glass, self.url_field);
+            sync_omnibox_load_bar(self.url_glass, self.load_bar, self.load_progress.get());
 
             self.hide_tool_controls();
             let mut x = leading + omni_w + 8.0;
             for (field, fw) in fields {
-                let _: () = msg_send![
+                set_view_frame(
                     *field,
-                    setFrame: NSRect::new(NSPoint::new(x, y), NSSize::new(*fw, ROW_H))
-                ];
+                    NSRect::new(NSPoint::new(x, y), NSSize::new(*fw, ROW_H)),
+                );
                 let _: () = msg_send![*field, setHidden: NO];
                 x += *fw + 4.0;
             }
             if status_w > 0.0 {
-                let _: () = msg_send![
+                set_view_frame(
                     self.status_label,
-                    setFrame: NSRect::new(NSPoint::new(x, y), NSSize::new(status_w, ROW_H))
-                ];
+                    NSRect::new(NSPoint::new(x, y), NSSize::new(status_w, ROW_H)),
+                );
                 let _: () = msg_send![self.status_label, setHidden: NO];
                 x += status_w + 4.0;
             }
             let _: () = msg_send![self.go_btn, setTitle: nsstring(go_title)];
-            let _: () = msg_send![
+            set_view_frame(
                 self.go_btn,
-                setFrame: NSRect::new(NSPoint::new(x, y), NSSize::new(go_w, ROW_H))
-            ];
+                NSRect::new(NSPoint::new(x, y), NSSize::new(go_w, ROW_H)),
+            );
             let _: () = msg_send![self.go_btn, setHidden: NO];
             x += go_w + 4.0;
-            let _: () = msg_send![
+            set_view_frame(
                 self.cancel_btn,
-                setFrame: NSRect::new(NSPoint::new(x, y), NSSize::new(28.0, ROW_H))
-            ];
+                NSRect::new(NSPoint::new(x, y), NSSize::new(28.0, ROW_H)),
+            );
             let _: () = msg_send![self.cancel_btn, setHidden: NO];
+            cue_mode_change(self.url_glass, animated);
         }
     }
 
@@ -858,8 +976,9 @@ impl NativeToolbar {
     }
 
     pub fn set_tool_mode(&mut self, mode: ChromeToolMode) {
+        let changed = self.mode != mode;
         self.mode = mode;
-        self.apply_mode_layout();
+        self.apply_mode_layout(changed);
     }
 
     /// Back-compat for Locust toggle.
@@ -871,21 +990,22 @@ impl NativeToolbar {
         });
     }
 
-    fn apply_mode_layout(&self) {
+    fn apply_mode_layout(&self, animated: bool) {
         match self.mode {
-            ChromeToolMode::Browse => self.layout_browse(),
+            ChromeToolMode::Browse => self.layout_browse(animated),
             ChromeToolMode::Locust => {
                 self.set_field(self.tool_f0, "5", "users", true);
                 self.set_field(self.tool_f1, "1", "ramp", true);
                 self.set_field(self.tool_f2, "30", "secs", true);
                 self.set_field(self.tool_f3, "constant", "profile", true);
                 self.place_row(
+                    animated,
                     0.32,
                     &[
-                        (self.tool_f0, 48.0),
-                        (self.tool_f1, 48.0),
-                        (self.tool_f2, 48.0),
-                        (self.tool_f3, 78.0),
+                        (self.tool_f0, 56.0),
+                        (self.tool_f1, 56.0),
+                        (self.tool_f2, 56.0),
+                        (self.tool_f3, 88.0),
                     ],
                     0.0,
                     "Go",
@@ -894,15 +1014,15 @@ impl NativeToolbar {
             }
             ChromeToolMode::DevTools => {
                 self.set_status("WebKit Inspector");
-                self.place_row(0.45, &[], 160.0, "Toggle", 56.0);
+                self.place_row(animated, 0.45, &[], 160.0, "Toggle", 56.0);
             }
             ChromeToolMode::Engine => {
                 self.set_status("chromium · M2 · CDP");
-                self.place_row(0.40, &[], 220.0, "Refresh", 56.0);
+                self.place_row(animated, 0.40, &[], 220.0, "Refresh", 56.0);
             }
             ChromeToolMode::Profile => {
                 self.set_status("DevHost ↔ Stealth");
-                self.place_row(0.45, &[], 160.0, "Switch", 56.0);
+                self.place_row(animated, 0.45, &[], 160.0, "Switch", 56.0);
             }
             ChromeToolMode::IdeVscode | ChromeToolMode::IdeCursor | ChromeToolMode::IdeWebstorm => {
                 let name = match self.mode {
@@ -912,35 +1032,47 @@ impl NativeToolbar {
                 };
                 self.set_field(self.tool_f0, ".", "path", true);
                 self.set_status(name);
-                self.place_row(0.35, &[(self.tool_f0, 160.0)], 80.0, "Open", 48.0);
+                self.place_row(animated, 0.35, &[(self.tool_f0, 160.0)], 80.0, "Open", 48.0);
             }
             ChromeToolMode::Ssl => {
                 self.set_status("ECDSA P-256 local CA");
-                self.place_row(0.40, &[], 180.0, "Install", 56.0);
+                self.place_row(animated, 0.40, &[], 180.0, "Install", 56.0);
             }
             ChromeToolMode::Shield => {
                 self.set_status("Strip utm_*/gclid/fbclid");
-                self.place_row(0.40, &[], 180.0, "Toggle", 56.0);
+                self.place_row(animated, 0.40, &[], 180.0, "Toggle", 56.0);
             }
             ChromeToolMode::ClearHistory => {
                 self.set_status("Clear all tab visit history?");
-                self.place_row(0.40, &[], 200.0, "Clear", 52.0);
+                self.place_row(animated, 0.40, &[], 200.0, "Clear", 52.0);
             }
             ChromeToolMode::Memory => {
                 self.set_status("Close idle tabs (≥24h)");
-                self.place_row(0.40, &[], 180.0, "Run", 48.0);
+                self.place_row(animated, 0.40, &[], 180.0, "Run", 48.0);
             }
             ChromeToolMode::WebVitals => {
                 self.set_status("LCP / CLS / INP from page");
-                self.place_row(0.35, &[], 180.0, "Capture", 56.0);
+                self.place_row(animated, 0.35, &[], 180.0, "Capture", 56.0);
             }
             ChromeToolMode::Sla => {
                 self.set_status("Honest M1 capability readout");
-                self.place_row(0.35, &[], 200.0, "Show", 48.0);
+                self.place_row(animated, 0.35, &[], 200.0, "Show", 48.0);
             }
             ChromeToolMode::Idor => {
                 self.set_status("Run IDOR Matrix Scan");
-                self.place_row(0.40, &[], 180.0, "Scan", 52.0);
+                self.place_row(animated, 0.40, &[], 180.0, "Scan", 52.0);
+            }
+            ChromeToolMode::Vault => {
+                self.set_field(self.tool_f0, "", "master password", true);
+                self.set_status("Bitwarden vault");
+                self.place_row(
+                    animated,
+                    0.30,
+                    &[(self.tool_f0, 220.0)],
+                    60.0,
+                    "Unlock",
+                    56.0,
+                );
             }
         }
         self.raise();
@@ -981,10 +1113,32 @@ impl NativeToolbar {
         }
     }
 
+    /// Master password from Vault tool field (never logged by callers).
+    pub fn read_vault_password(&self) -> String {
+        read_nsstring(self.tool_f0)
+    }
+
     pub fn set_url(&self, url: &str) {
         unsafe {
             let _: () = msg_send![self.url_field, setStringValue: nsstring(url)];
         }
+    }
+
+    /// Show/hide the red omnibar load bar. `true` → indeterminate mid-fill; `false` → clear.
+    pub fn set_omnibox_loading(&self, loading: bool) {
+        if loading {
+            self.set_omnibox_progress(0.35);
+        } else {
+            self.set_omnibox_progress(1.0);
+            self.set_omnibox_progress(0.0);
+        }
+    }
+
+    /// `progress` in 0.0..=1.0. Zero hides the red bar.
+    pub fn set_omnibox_progress(&self, progress: f64) {
+        let pct = progress.clamp(0.0, 1.0);
+        self.load_progress.set(pct);
+        sync_omnibox_load_bar(self.url_glass, self.load_bar, pct);
     }
 
     pub fn read_url(&self) -> String {
@@ -1033,7 +1187,8 @@ impl NativeToolbar {
                 ChromeToolMode::Locust
                 | ChromeToolMode::IdeVscode
                 | ChromeToolMode::IdeCursor
-                | ChromeToolMode::IdeWebstorm => self.tool_f0,
+                | ChromeToolMode::IdeWebstorm
+                | ChromeToolMode::Vault => self.tool_f0,
                 _ => self.go_btn,
             };
             let _: () = msg_send![window, makeFirstResponder: target];
@@ -1054,6 +1209,6 @@ impl NativeToolbar {
         }
         self.bar_width = parent_width;
         self.raise();
-        self.apply_mode_layout();
+        self.apply_mode_layout(false);
     }
 }

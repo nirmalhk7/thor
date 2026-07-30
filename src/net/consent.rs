@@ -59,7 +59,33 @@ pub fn is_private_or_local_url(url: &str) -> bool {
 /// Block obvious cloud-metadata / link-local abuse targets (SEC-066).
 pub fn is_blocked_abuse_target(url: &str) -> bool {
     let lower = url.to_lowercase();
-    lower.contains("169.254.169.254") || lower.contains("metadata.google")
+    let host = host_from_url(url).unwrap_or_default();
+    lower.contains("169.254.169.254")
+        || lower.contains("metadata.google")
+        || lower.contains("metadata.goog")
+        || lower.contains("metadata.azure.com")
+        || lower.contains("instance-data")
+        || lower.contains("100.100.100.200")
+        || lower.contains("168.63.129.16")
+        || lower.contains("[fd00:ec2::254]")
+        || lower.contains("fd00:ec2::254")
+        || host == "metadata"
+        || host.ends_with(".internal") && lower.contains("metadata")
+        || host == "kubernetes.default"
+        || host == "kubernetes.default.svc"
+}
+
+/// Require explicit lab consent for non-local public targets.
+pub fn require_lab_consent(url: &str, lab_consent: bool) -> Result<(), String> {
+    if is_blocked_abuse_target(url) {
+        return Err(format!("blocked abuse/metadata target: {url}"));
+    }
+    if !is_private_or_local_url(url) && !lab_consent {
+        return Err(format!(
+            "public target requires lab_consent (authorized testing only): {url}"
+        ));
+    }
+    Ok(())
 }
 
 #[derive(Debug, Clone)]
@@ -152,6 +178,24 @@ mod tests {
             public_ack: true,
         })
         .is_ok());
+    }
+
+    #[test]
+    fn blocked_abuse_targets_expanded() {
+        assert!(is_blocked_abuse_target("http://169.254.169.254/latest/meta-data/"));
+        assert!(is_blocked_abuse_target("http://metadata.google.internal/"));
+        assert!(is_blocked_abuse_target("http://100.100.100.200/latest/meta-data/"));
+        assert!(is_blocked_abuse_target("http://168.63.129.16/metadata/instance"));
+        assert!(is_blocked_abuse_target("http://[fd00:ec2::254]/latest/meta-data/"));
+        assert!(!is_blocked_abuse_target("https://example.com/"));
+    }
+
+    #[test]
+    fn lab_consent_gate() {
+        assert!(require_lab_consent("https://example.com/", false).is_err());
+        assert!(require_lab_consent("https://example.com/", true).is_ok());
+        assert!(require_lab_consent("http://127.0.0.1:9/", false).is_ok());
+        assert!(require_lab_consent("http://169.254.169.254/", true).is_err());
     }
 
     #[test]

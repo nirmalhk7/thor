@@ -1,0 +1,9 @@
+{
+  "name": "com.thor.labs",
+  "description": "Thor Labs Rust sidecar (FeatureEngine, load, consent, MCP bridge)",
+  "path": "THOR_LABS_HOST_PATH",
+  "type": "stdio",
+  "allowed_origins": [
+    "chrome-extension://thor-labs-bridge/"
+  ]
+}

@@ -1,4 +1,4 @@
-//! Backend specialist features (12).
+//! Backend specialist features (12 + 12 wave-2).
 //!
 //! API workbench, auth vault, contract validation, webhook sink, IDOR matrix,
 //! request chaining, gRPC/GraphQL inspection, trace adjacency, mock/stub server,
@@ -51,6 +51,8 @@ pub enum AuthScheme {
     Bearer { token: String },
     Basic { username: String, password: String },
     ApiKey { header: String, key: String },
+    /// Shared secret for webhook HMAC verification (WebhookSignatureVault).
+    WebhookSecret { secret: String },
 }
 
 // ---------------------------------------------------------------------------
@@ -272,6 +274,22 @@ struct WebhookSinkHandle {
     running: Arc<AtomicBool>,
 }
 
+struct LiveStubHandle {
+    port: u16,
+    running: Arc<AtomicBool>,
+    hit_count: Arc<std::sync::atomic::AtomicU64>,
+    #[allow(dead_code)]
+    routes: Arc<Mutex<Vec<StubRouteSpec>>>,
+}
+
+struct SseLabHandle {
+    port: u16,
+    running: Arc<AtomicBool>,
+    event_count: Arc<std::sync::atomic::AtomicU64>,
+    #[allow(dead_code)]
+    events: Arc<Mutex<Vec<StreamLabEvent>>>,
+}
+
 /// Backend specialist engine.
 pub struct BackendEngine {
     // 1. API workbench history
@@ -285,12 +303,256 @@ pub struct BackendEngine {
     mocks: Mutex<Vec<MockRoute>>,
     // 10. Chaos rules
     chaos: Mutex<Vec<ChaosRule>>,
+    live_stub: Mutex<Option<LiveStubHandle>>,
+    sse_lab: Mutex<Option<SseLabHandle>>,
 }
 
 impl Default for BackendEngine {
     fn default() -> Self {
         Self::new()
     }
+}
+
+
+// ===========================================================================
+// Wave-2 backend features (12)
+// ===========================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSigInput {
+    pub payload: String,
+    pub secret: String,
+    pub provided_signature: String,
+    #[serde(default = "default_algo")]
+    pub algorithm: String,
+    #[serde(default)]
+    pub timestamp: Option<i64>,
+    #[serde(default)]
+    pub now: Option<i64>,
+    #[serde(default = "default_tol")]
+    pub tolerance_secs: i64,
+}
+
+fn default_algo() -> String { "sha256".into() }
+fn default_tol() -> i64 { 300 }
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct WebhookSigReport {
+    pub valid: bool,
+    pub expected_prefix: String,
+    pub timestamp_ok: bool,
+    pub detail: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitSample {
+    pub status: u16,
+    pub retry_after_secs: Option<f64>,
+    pub remaining: Option<i64>,
+    pub limit: Option<i64>,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RateLimitReport {
+    pub limited_count: usize,
+    pub inferred_limit: Option<i64>,
+    pub avg_retry_after: Option<f64>,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PageSlice {
+    pub page: u32,
+    pub page_size: u32,
+    pub items: usize,
+    pub total: Option<u64>,
+    pub next_cursor: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PaginationReport {
+    pub pages: usize,
+    pub issues: Vec<String>,
+    pub estimated_total: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheSemanticsEntry {
+    pub url: String,
+    pub method: String,
+    pub cache_control: String,
+    pub etag: Option<String>,
+    pub vary: Option<String>,
+    pub status: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CacheSemanticsReport {
+    pub findings: Vec<String>,
+    pub cacheable: usize,
+    pub non_cacheable: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipartPart {
+    pub name: String,
+    pub filename: Option<String>,
+    pub content_type: Option<String>,
+    pub size: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MultipartReport {
+    pub parts: usize,
+    pub total_bytes: usize,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StreamLabEvent {
+    pub kind: String,
+    pub payload: String,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct SseWsLabReport {
+    pub event_count: usize,
+    pub kinds: BTreeMap<String, usize>,
+    pub max_gap_ms: u64,
+    pub issues: Vec<String>,
+    #[serde(default)]
+    pub bound_port: Option<u16>,
+    #[serde(default)]
+    pub live: bool,
+    #[serde(default)]
+    pub live_event_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenApiPath {
+    pub path: String,
+    pub method: String,
+    pub operation_id: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenApiDiffReport {
+    pub added: Vec<String>,
+    pub removed: Vec<String>,
+    pub changed: Vec<String>,
+    pub breaking: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ActualInteraction {
+    pub method: String,
+    pub path: String,
+    pub status: u16,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OpenApiTrafficReport {
+    pub matched: usize,
+    pub unmatched: Vec<String>,
+    pub undeclared_methods: Vec<String>,
+    pub ok: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OauthFlowStep {
+    pub step: String,
+    pub url: String,
+    pub params: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OauthFlowReport {
+    pub steps: usize,
+    pub issues: Vec<String>,
+    pub has_pkce: bool,
+    pub has_state: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueHop {
+    pub from: String,
+    pub to: String,
+    pub latency_ms: f64,
+    pub topic: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct QueueAdjacencyReport {
+    pub nodes: Vec<String>,
+    pub edges: Vec<(String, String)>,
+    pub hottest_topic: Option<String>,
+    pub max_latency_ms: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrpcStreamFrame {
+    pub stream_id: u32,
+    pub flags: String,
+    pub message_bytes: usize,
+    pub timestamp_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GrpcStreamReport {
+    pub frames: usize,
+    pub total_bytes: usize,
+    pub streams: usize,
+    pub issues: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct StubRouteSpec {
+    pub method: String,
+    pub path: String,
+    pub status: u16,
+    pub body: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct LiveStubReport {
+    pub routes: usize,
+    pub collisions: Vec<String>,
+    pub open_paths: Vec<String>,
+    #[serde(default)]
+    pub bound_port: Option<u16>,
+    #[serde(default)]
+    pub live: bool,
+    #[serde(default)]
+    pub hit_count: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderContract {
+    pub required: Vec<String>,
+    pub forbidden: Vec<String>,
+    pub patterns: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderFuzzCase {
+    pub mutation: String,
+    pub headers: BTreeMap<String, String>,
+    /// HTTP status when `execute` ran this case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<u16>,
+    /// Transport / consent error when execute failed for this case.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct HeaderFuzzReport {
+    pub cases: Vec<HeaderFuzzCase>,
+    /// True when cases were sent via consent-gated `send_blocking`.
+    #[serde(default)]
+    pub executed: bool,
 }
 
 impl BackendEngine {
@@ -302,6 +564,8 @@ impl BackendEngine {
             webhook_sink: Mutex::new(None),
             mocks: Mutex::new(Vec::new()),
             chaos: Mutex::new(Vec::new()),
+            live_stub: Mutex::new(None),
+            sse_lab: Mutex::new(None),
         }
     }
 
@@ -406,7 +670,16 @@ impl BackendEngine {
                 ("Authorization".into(), format!("Basic {enc}"))
             }
             AuthScheme::ApiKey { header, key } => (header, key),
+            AuthScheme::WebhookSecret { secret } => ("X-Thor-Webhook-Secret".into(), secret),
         })
+    }
+
+    /// Resolve a stored webhook HMAC secret from the auth vault (by context name).
+    pub fn webhook_secret(&self, name: &str) -> Option<String> {
+        match self.vault.lock().get(name)? {
+            AuthScheme::WebhookSecret { secret } => Some(secret.clone()),
+            _ => None,
+        }
     }
 
     pub fn apply_auth(&self, name: &str, req: &mut ApiRequest) -> bool {
@@ -966,6 +1239,735 @@ impl BackendEngine {
             cache_misses: misses,
         }
     }
+
+    // ---- Wave-2 backend ---------------------------------------------------
+
+    pub fn webhook_signature_vault(&self, input: &WebhookSigInput) -> WebhookSigReport {
+        let mut secret = input.secret.clone();
+        // Prefer vault-stored WebhookSecret when `secret` looks like a context name.
+        if secret.is_empty() || (!secret.contains(' ') && secret.len() < 64) {
+            if let Some(stored) = self.webhook_secret(&input.secret) {
+                secret = stored;
+            }
+        }
+        let algo = input.algorithm.to_lowercase();
+        let signed = if let Some(ts) = input.timestamp {
+            format!("{}.{}", ts, input.payload)
+        } else {
+            input.payload.clone()
+        };
+        let mac = crate::features::security::hmac_sha256(secret.as_bytes(), signed.as_bytes());
+        let hex = crate::features::security::hex_encode(&mac);
+        let expected = if algo.contains("sha256") || algo == "hmac" {
+            format!("sha256={hex}")
+        } else {
+            format!("{algo}={hex}")
+        };
+        let provided = input.provided_signature.trim().to_lowercase();
+        let expected_l = expected.to_lowercase();
+        let valid = provided == expected_l
+            || provided == hex
+            || provided.strip_prefix("sha256=").map(|s| s == hex.as_str()).unwrap_or(false)
+            || provided.strip_prefix("v1=").map(|s| s == hex.as_str()).unwrap_or(false);
+        let mut timestamp_ok = true;
+        if let (Some(ts), Some(now)) = (input.timestamp, input.now) {
+            timestamp_ok = (now - ts).abs() <= input.tolerance_secs;
+        }
+        WebhookSigReport {
+            valid: valid && timestamp_ok,
+            expected_prefix: expected.chars().take(20).collect(),
+            timestamp_ok,
+            detail: if valid && timestamp_ok {
+                "hmac-sha256 signature ok".into()
+            } else if !timestamp_ok {
+                "timestamp outside tolerance".into()
+            } else {
+                "signature mismatch".into()
+            },
+        }
+    }
+
+    pub fn rate_limit_probe(&self, samples: &[RateLimitSample]) -> RateLimitReport {
+        let limited: Vec<_> = samples.iter().filter(|s| s.status == 429 || s.remaining == Some(0)).collect();
+        let inferred_limit = samples.iter().filter_map(|s| s.limit).max();
+        let retries: Vec<f64> = limited.iter().filter_map(|s| s.retry_after_secs).collect();
+        let avg_retry_after = if retries.is_empty() {
+            None
+        } else {
+            Some(retries.iter().sum::<f64>() / retries.len() as f64)
+        };
+        let mut issues = Vec::new();
+        if !limited.is_empty() && retries.is_empty() {
+            issues.push("429/exhausted without Retry-After".into());
+        }
+        for s in samples {
+            if let (Some(rem), Some(lim)) = (s.remaining, s.limit) {
+                if rem > lim {
+                    issues.push(format!("remaining {rem} exceeds limit {lim}"));
+                }
+            }
+        }
+        RateLimitReport {
+            limited_count: limited.len(),
+            inferred_limit,
+            avg_retry_after,
+            issues,
+        }
+    }
+
+    /// Hit `url` repeatedly via reqwest; consent required for public targets.
+    pub fn rate_limit_probe_http(
+        &self,
+        url: &str,
+        count: usize,
+        lab_consent: bool,
+    ) -> Result<RateLimitReport, String> {
+        crate::net::consent::require_lab_consent(url, lab_consent)?;
+        let n = count.clamp(1, 50);
+        let mut samples = Vec::with_capacity(n);
+        for i in 0..n {
+            let resp = self.send_blocking(&ApiRequest {
+                method: "GET".into(),
+                url: url.to_string(),
+                headers: HashMap::new(),
+                body: None,
+            })?;
+            let remaining = resp
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("x-ratelimit-remaining"))
+                .and_then(|(_, v)| v.parse().ok());
+            let limit = resp
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("x-ratelimit-limit"))
+                .and_then(|(_, v)| v.parse().ok());
+            let retry_after_secs = resp
+                .headers
+                .iter()
+                .find(|(k, _)| k.eq_ignore_ascii_case("retry-after"))
+                .and_then(|(_, v)| v.parse().ok());
+            samples.push(RateLimitSample {
+                status: resp.status,
+                retry_after_secs,
+                remaining,
+                limit,
+                timestamp_ms: i as u64,
+            });
+        }
+        Ok(self.rate_limit_probe(&samples))
+    }
+
+    pub fn pagination_auditor(&self, pages: &[PageSlice]) -> PaginationReport {
+        let mut issues = Vec::new();
+        let mut estimated_total = None;
+        for (i, p) in pages.iter().enumerate() {
+            if p.page_size == 0 {
+                issues.push(format!("page {i}: zero page_size"));
+            }
+            if p.items > p.page_size as usize {
+                issues.push(format!(
+                    "page {}: items {} > page_size {}",
+                    p.page, p.items, p.page_size
+                ));
+            }
+            if let Some(t) = p.total {
+                estimated_total = Some(t);
+            }
+            if i + 1 < pages.len() {
+                let n = &pages[i + 1];
+                if p.next_cursor.is_none() && n.page != p.page + 1 && p.page_size > 0 {
+                    if n.page != p.page + 1 {
+                        issues.push(format!(
+                            "non-sequential page jump {} -> {}",
+                            p.page, n.page
+                        ));
+                    }
+                }
+            }
+        }
+        if let Some(last) = pages.last() {
+            if last.items == last.page_size as usize && last.next_cursor.is_none() && last.total.is_none()
+            {
+                issues.push("last page full-sized without next cursor/total — may be truncated".into());
+            }
+        }
+        PaginationReport {
+            pages: pages.len(),
+            issues,
+            estimated_total,
+        }
+    }
+
+    /// Fetch paginated URLs via reqwest and analyze JSON arrays / `items` fields.
+    pub fn pagination_auditor_http(
+        &self,
+        urls: &[String],
+        page_size_hint: u32,
+        lab_consent: bool,
+    ) -> Result<PaginationReport, String> {
+        for u in urls {
+            crate::net::consent::require_lab_consent(u, lab_consent)?;
+        }
+        let mut pages = Vec::new();
+        for (i, url) in urls.iter().enumerate() {
+            let resp = self.send_blocking(&ApiRequest {
+                method: "GET".into(),
+                url: url.clone(),
+                headers: HashMap::new(),
+                body: None,
+            })?;
+            let items = count_page_items(&resp.body);
+            let total = serde_json::from_str::<serde_json::Value>(&resp.body)
+                .ok()
+                .and_then(|v| {
+                    v.get("total")
+                        .or_else(|| v.get("count"))
+                        .and_then(|t| t.as_u64())
+                });
+            let next_cursor = serde_json::from_str::<serde_json::Value>(&resp.body)
+                .ok()
+                .and_then(|v| {
+                    v.get("next")
+                        .or_else(|| v.get("next_cursor"))
+                        .and_then(|n| n.as_str())
+                        .map(|s| s.to_string())
+                });
+            pages.push(PageSlice {
+                page: (i as u32) + 1,
+                page_size: page_size_hint.max(1),
+                items,
+                total,
+                next_cursor,
+            });
+        }
+        Ok(self.pagination_auditor(&pages))
+    }
+
+    pub fn cache_semantics_lens(&self, entries: &[CacheSemanticsEntry]) -> CacheSemanticsReport {
+        let mut findings = Vec::new();
+        let mut cacheable = 0usize;
+        let mut non_cacheable = 0usize;
+        for e in entries {
+            let cc = e.cache_control.to_lowercase();
+            let no_store = cc.contains("no-store") || cc.contains("private");
+            let method_ok = matches!(e.method.to_uppercase().as_str(), "GET" | "HEAD");
+            if no_store || !method_ok || e.status >= 400 {
+                non_cacheable += 1;
+                if method_ok && e.status < 400 && cc.is_empty() {
+                    findings.push(format!("{} missing Cache-Control", e.url));
+                }
+            } else {
+                cacheable += 1;
+                if e.etag.is_none() && !cc.contains("max-age") {
+                    findings.push(format!("{} cacheable without ETag or max-age", e.url));
+                }
+            }
+            if let Some(v) = &e.vary {
+                if v.to_lowercase().contains("*") {
+                    findings.push(format!("{} Vary: * disables shared caches", e.url));
+                }
+            }
+        }
+        CacheSemanticsReport {
+            findings,
+            cacheable,
+            non_cacheable,
+        }
+    }
+
+    pub fn multipart_workbench(&self, parts: &[MultipartPart]) -> MultipartReport {
+        let mut issues = Vec::new();
+        let total_bytes: usize = parts.iter().map(|p| p.size).sum();
+        let mut names = BTreeMap::<String, usize>::new();
+        for p in parts {
+            *names.entry(p.name.clone()).or_default() += 1;
+            if p.filename.is_some() && p.content_type.is_none() {
+                issues.push(format!("part '{}' file missing content-type", p.name));
+            }
+            if p.size > 10_000_000 {
+                issues.push(format!("part '{}' exceeds 10MB ({})", p.name, p.size));
+            }
+            if p.name.is_empty() {
+                issues.push("unnamed multipart part".into());
+            }
+        }
+        for (n, c) in names {
+            if c > 1 {
+                issues.push(format!("duplicate part name '{n}' x{c}"));
+            }
+        }
+        MultipartReport {
+            parts: parts.len(),
+            total_bytes,
+            issues,
+        }
+    }
+
+    pub fn sse_ws_server_lab(&self, events: &[StreamLabEvent]) -> SseWsLabReport {
+        let mut kinds: BTreeMap<String, usize> = BTreeMap::new();
+        let mut max_gap = 0u64;
+        let mut issues = Vec::new();
+        for e in events {
+            *kinds.entry(e.kind.clone()).or_default() += 1;
+            if e.payload.is_empty() {
+                issues.push(format!("empty payload for kind {}", e.kind));
+            }
+        }
+        for w in events.windows(2) {
+            let gap = w[1].timestamp_ms.saturating_sub(w[0].timestamp_ms);
+            max_gap = max_gap.max(gap);
+        }
+        if max_gap > 30_000 {
+            issues.push(format!("max inter-event gap {max_gap}ms (>30s)"));
+        }
+        let (bound_port, live, live_event_count) = {
+            let slot = self.sse_lab.lock();
+            match slot.as_ref() {
+                Some(h) => (
+                    Some(h.port),
+                    true,
+                    h.event_count.load(Ordering::SeqCst),
+                ),
+                None => (None, false, 0),
+            }
+        };
+        SseWsLabReport {
+            event_count: events.len(),
+            kinds,
+            max_gap_ms: max_gap,
+            issues,
+            bound_port,
+            live,
+            live_event_count,
+        }
+    }
+
+    /// Start SSE lab on 127.0.0.1 only. Non-local advertise URLs are refused.
+    pub fn start_sse_ws_server_lab(
+        &self,
+        port: u16,
+        events: Vec<StreamLabEvent>,
+        advertise_url: Option<&str>,
+    ) -> Result<u16, String> {
+        if let Some(url) = advertise_url {
+            if !crate::net::consent::is_private_or_local_url(url) {
+                return Err(format!(
+                    "SSE/WS lab refuses non-local advertise URL: {url}"
+                ));
+            }
+        }
+        let mut slot = self.sse_lab.lock();
+        if let Some(h) = slot.take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
+        let bound = listener
+            .local_addr()
+            .map_err(|e| e.to_string())?
+            .port();
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| e.to_string())?;
+        let running = Arc::new(AtomicBool::new(true));
+        let event_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let events = Arc::new(Mutex::new(events));
+        let flag = running.clone();
+        let ec = event_count.clone();
+        let ev = events.clone();
+        std::thread::spawn(move || sse_lab_loop(listener, flag, ec, ev));
+        *slot = Some(SseLabHandle {
+            port: bound,
+            running,
+            event_count,
+            events,
+        });
+        Ok(bound)
+    }
+
+    pub fn stop_sse_ws_server_lab(&self) {
+        if let Some(h) = self.sse_lab.lock().take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn sse_ws_server_lab_port(&self) -> Option<u16> {
+        self.sse_lab.lock().as_ref().map(|h| h.port)
+    }
+
+    pub fn openapi_diff_gate(
+        &self,
+        before: &[OpenApiPath],
+        after: &[OpenApiPath],
+    ) -> OpenApiDiffReport {
+        let key = |p: &OpenApiPath| format!("{} {}", p.method.to_uppercase(), p.path);
+        let bset: BTreeMap<String, &OpenApiPath> = before.iter().map(|p| (key(p), p)).collect();
+        let aset: BTreeMap<String, &OpenApiPath> = after.iter().map(|p| (key(p), p)).collect();
+        let mut added = Vec::new();
+        let mut removed = Vec::new();
+        let mut changed = Vec::new();
+        for (k, p) in &aset {
+            if !bset.contains_key(k) {
+                added.push(k.clone());
+            } else if bset[k].operation_id != p.operation_id {
+                changed.push(format!("{k} operationId drift"));
+            }
+        }
+        for k in bset.keys() {
+            if !aset.contains_key(k) {
+                removed.push(k.clone());
+            }
+        }
+        let breaking = !removed.is_empty();
+        OpenApiDiffReport {
+            added,
+            removed,
+            changed,
+            breaking,
+        }
+    }
+
+    /// Parse OpenAPI 3.x / Swagger 2 JSON into path+method rows.
+    pub fn parse_openapi_paths(doc: &serde_json::Value) -> Vec<OpenApiPath> {
+        let mut out = Vec::new();
+        let paths = match doc.get("paths").and_then(|p| p.as_object()) {
+            Some(p) => p,
+            None => return out,
+        };
+        for (path, item) in paths {
+            let Some(obj) = item.as_object() else { continue };
+            for (method, op) in obj {
+                let m = method.to_lowercase();
+                if !matches!(
+                    m.as_str(),
+                    "get" | "post" | "put" | "patch" | "delete" | "head" | "options" | "trace"
+                ) {
+                    continue;
+                }
+                let operation_id = op
+                    .get("operationId")
+                    .and_then(|v| v.as_str())
+                    .map(|s| s.to_string());
+                out.push(OpenApiPath {
+                    path: path.clone(),
+                    method: m.to_uppercase(),
+                    operation_id,
+                });
+            }
+        }
+        out
+    }
+
+    /// Validate captured HTTP interactions against declared OpenAPI paths.
+    pub fn openapi_validate_traffic(
+        &self,
+        paths: &[OpenApiPath],
+        interactions: &[ActualInteraction],
+    ) -> OpenApiTrafficReport {
+        let declared: BTreeMap<String, &OpenApiPath> = paths
+            .iter()
+            .map(|p| (format!("{} {}", p.method.to_uppercase(), normalize_api_path(&p.path)), p))
+            .collect();
+        let mut matched = 0usize;
+        let mut unmatched = Vec::new();
+        let mut undeclared_methods = Vec::new();
+        for i in interactions {
+            let path = normalize_api_path(&i.path);
+            let key = format!("{} {}", i.method.to_uppercase(), path);
+            if declared.contains_key(&key) {
+                matched += 1;
+            } else {
+                // Same path, different method?
+                let path_exists = paths.iter().any(|p| normalize_api_path(&p.path) == path);
+                if path_exists {
+                    undeclared_methods.push(key.clone());
+                }
+                unmatched.push(key);
+            }
+        }
+        let ok = unmatched.is_empty();
+        OpenApiTrafficReport {
+            matched,
+            unmatched,
+            undeclared_methods,
+            ok,
+        }
+    }
+
+    pub fn oauth_flow_capture(&self, steps: &[OauthFlowStep]) -> OauthFlowReport {
+        let mut issues = Vec::new();
+        let mut has_pkce = false;
+        let mut has_state = false;
+        for s in steps {
+            if s.params.contains_key("code_challenge") || s.params.contains_key("code_verifier") {
+                has_pkce = true;
+            }
+            if s.params.contains_key("state") {
+                has_state = true;
+            }
+            if s.step == "authorize" && !s.params.contains_key("redirect_uri") {
+                issues.push("authorize missing redirect_uri".into());
+            }
+            if s.step == "token" && s.params.get("grant_type").map(|g| g.as_str()) == Some("authorization_code")
+                && !s.params.contains_key("code")
+            {
+                issues.push("token exchange missing code".into());
+            }
+            if s.url.contains("http://") && !s.url.contains("localhost") && !s.url.contains("127.0.0.1") {
+                issues.push(format!("insecure http endpoint: {}", s.url));
+            }
+        }
+        if !has_state {
+            issues.push("flow missing CSRF state parameter".into());
+        }
+        if !has_pkce {
+            issues.push("flow missing PKCE".into());
+        }
+        OauthFlowReport {
+            steps: steps.len(),
+            issues,
+            has_pkce,
+            has_state,
+        }
+    }
+
+    pub fn queue_adjacency(&self, hops: &[QueueHop]) -> QueueAdjacencyReport {
+        let mut nodes = BTreeMap::<String, ()>::new();
+        let mut edges = Vec::new();
+        let mut topic_hits: BTreeMap<String, usize> = BTreeMap::new();
+        let mut max_latency = 0.0f64;
+        for h in hops {
+            nodes.insert(h.from.clone(), ());
+            nodes.insert(h.to.clone(), ());
+            edges.push((h.from.clone(), h.to.clone()));
+            *topic_hits.entry(h.topic.clone()).or_default() += 1;
+            max_latency = max_latency.max(h.latency_ms);
+        }
+        let hottest_topic = topic_hits
+            .into_iter()
+            .max_by_key(|(_, c)| *c)
+            .map(|(t, _)| t);
+        QueueAdjacencyReport {
+            nodes: nodes.into_keys().collect(),
+            edges,
+            hottest_topic,
+            max_latency_ms: max_latency,
+        }
+    }
+
+    pub fn grpc_stream_workbench(&self, frames: &[GrpcStreamFrame]) -> GrpcStreamReport {
+        let mut streams = BTreeMap::<u32, usize>::new();
+        let mut total_bytes = 0usize;
+        let mut issues = Vec::new();
+        for f in frames {
+            *streams.entry(f.stream_id).or_default() += 1;
+            total_bytes += f.message_bytes;
+            if f.flags.contains("END") && f.message_bytes == 0 && streams[&f.stream_id] == 1 {
+                issues.push(format!("stream {} ended with empty sole frame", f.stream_id));
+            }
+        }
+        for w in frames.windows(2) {
+            if w[0].stream_id == w[1].stream_id
+                && w[1].timestamp_ms < w[0].timestamp_ms
+            {
+                issues.push(format!("out-of-order timestamps on stream {}", w[0].stream_id));
+            }
+        }
+        GrpcStreamReport {
+            frames: frames.len(),
+            total_bytes,
+            streams: streams.len(),
+            issues,
+        }
+    }
+
+    pub fn live_stub_server(&self, routes: &[StubRouteSpec]) -> LiveStubReport {
+        let mut seen: BTreeMap<String, usize> = BTreeMap::new();
+        let mut collisions = Vec::new();
+        let mut open_paths = Vec::new();
+        for r in routes {
+            let k = format!("{} {}", r.method.to_uppercase(), r.path);
+            let c = seen.entry(k.clone()).or_insert(0);
+            *c += 1;
+            if *c == 2 {
+                collisions.push(k.clone());
+            }
+            if r.path.contains("*") || r.path.contains("{") {
+                open_paths.push(k);
+            }
+        }
+        let (bound_port, live, hit_count) = {
+            let slot = self.live_stub.lock();
+            match slot.as_ref() {
+                Some(h) => (Some(h.port), true, h.hit_count.load(Ordering::SeqCst)),
+                None => (None, false, 0),
+            }
+        };
+        LiveStubReport {
+            routes: routes.len(),
+            collisions,
+            open_paths,
+            bound_port,
+            live,
+            hit_count,
+        }
+    }
+
+    /// Bind a stub HTTP server on 127.0.0.1. Refuses non-local advertise URLs.
+    pub fn start_live_stub_server(
+        &self,
+        port: u16,
+        routes: Vec<StubRouteSpec>,
+        advertise_url: Option<&str>,
+    ) -> Result<u16, String> {
+        if let Some(url) = advertise_url {
+            if !crate::net::consent::is_private_or_local_url(url) {
+                return Err(format!(
+                    "live stub refuses non-local advertise URL: {url}"
+                ));
+            }
+        }
+        let mut slot = self.live_stub.lock();
+        if let Some(h) = slot.take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+        let listener =
+            TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
+        let bound = listener
+            .local_addr()
+            .map_err(|e| e.to_string())?
+            .port();
+        listener
+            .set_nonblocking(true)
+            .map_err(|e| e.to_string())?;
+        let running = Arc::new(AtomicBool::new(true));
+        let hit_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
+        let routes = Arc::new(Mutex::new(routes));
+        let flag = running.clone();
+        let hits = hit_count.clone();
+        let rts = routes.clone();
+        std::thread::spawn(move || live_stub_loop(listener, flag, hits, rts));
+        *slot = Some(LiveStubHandle {
+            port: bound,
+            running,
+            hit_count,
+            routes,
+        });
+        Ok(bound)
+    }
+
+    pub fn stop_live_stub_server(&self) {
+        if let Some(h) = self.live_stub.lock().take() {
+            h.running.store(false, Ordering::SeqCst);
+        }
+    }
+
+    pub fn live_stub_server_port(&self) -> Option<u16> {
+        self.live_stub.lock().as_ref().map(|h| h.port)
+    }
+
+    pub fn header_contract_fuzzer(
+        &self,
+        base: &BTreeMap<String, String>,
+        contract: &HeaderContract,
+    ) -> HeaderFuzzReport {
+        self.header_contract_fuzzer_gated(base, contract, None, false, false)
+            .expect("non-execute header fuzz cannot fail")
+    }
+
+    /// Generate header mutation cases; when `execute` + `url`, consent-gated
+    /// `send_blocking` records status per case.
+    pub fn header_contract_fuzzer_gated(
+        &self,
+        base: &BTreeMap<String, String>,
+        contract: &HeaderContract,
+        url: Option<&str>,
+        execute: bool,
+        lab_consent: bool,
+    ) -> Result<HeaderFuzzReport, String> {
+        let mut cases = Vec::new();
+        for reqh in &contract.required {
+            let mut h = base.clone();
+            h.remove(reqh);
+            cases.push(HeaderFuzzCase {
+                mutation: format!("drop:{reqh}"),
+                headers: h,
+                status: None,
+                error: None,
+            });
+        }
+        for forb in &contract.forbidden {
+            let mut h = base.clone();
+            h.insert(forb.clone(), "1".into());
+            cases.push(HeaderFuzzCase {
+                mutation: format!("inject:{forb}"),
+                headers: h,
+                status: None,
+                error: None,
+            });
+        }
+        for (name, _pat) in &contract.patterns {
+            let mut h = base.clone();
+            h.insert(name.clone(), "!!!invalid!!!".into());
+            cases.push(HeaderFuzzCase {
+                mutation: format!("break-pattern:{name}"),
+                headers: h,
+                status: None,
+                error: None,
+            });
+        }
+        if let Some(ct) = base.get("content-type").cloned() {
+            let mut h = base.clone();
+            h.insert("Content-Type".into(), ct);
+            h.remove("content-type");
+            cases.push(HeaderFuzzCase {
+                mutation: "case-smash:content-type".into(),
+                headers: h,
+                status: None,
+                error: None,
+            });
+        }
+
+        if !execute {
+            return Ok(HeaderFuzzReport {
+                cases,
+                executed: false,
+            });
+        }
+        let url = url
+            .map(str::trim)
+            .filter(|u| !u.is_empty())
+            .ok_or_else(|| "header-contract-fuzzer execute requires url".to_string())?;
+        crate::net::consent::require_lab_consent(url, lab_consent)?;
+        for case in &mut cases {
+            let mut headers = HashMap::new();
+            for (k, v) in &case.headers {
+                headers.insert(k.clone(), v.clone());
+            }
+            let req = ApiRequest {
+                method: "GET".into(),
+                url: url.to_string(),
+                headers,
+                body: None,
+            };
+            match self.send_blocking(&req) {
+                Ok(resp) => {
+                    case.status = Some(resp.status);
+                    case.error = None;
+                }
+                Err(e) => {
+                    case.status = None;
+                    case.error = Some(e);
+                }
+            }
+        }
+        Ok(HeaderFuzzReport {
+            cases,
+            executed: true,
+        })
+    }
+
 }
 
 /// Extract the path (no scheme/host/query) from a URL, defaulting to `/`.
@@ -997,6 +1999,133 @@ fn webhook_sink_loop(listener: TcpListener, running: Arc<AtomicBool>) {
             }
             Err(_) => break,
         }
+    }
+}
+
+fn live_stub_loop(
+    listener: TcpListener,
+    running: Arc<AtomicBool>,
+    hits: Arc<std::sync::atomic::AtomicU64>,
+    routes: Arc<Mutex<Vec<StubRouteSpec>>>,
+) {
+    while running.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, _addr)) => {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                hits.fetch_add(1, Ordering::SeqCst);
+                let mut buf = [0u8; 8192];
+                let n = stream.read(&mut buf).unwrap_or(0);
+                let raw = String::from_utf8_lossy(&buf[..n]);
+                let (method, path) = parse_request_line(&raw);
+                let route = {
+                    let rts = routes.lock();
+                    rts.iter()
+                        .find(|r| {
+                            r.method.eq_ignore_ascii_case(&method)
+                                && (r.path == path
+                                    || r.path == "*"
+                                    || path_matches_template(&r.path, &path))
+                        })
+                        .cloned()
+                };
+                let (status, body) = match route {
+                    Some(r) => (r.status, r.body),
+                    None => (404, "{\"error\":\"not found\"}".into()),
+                };
+                let resp = format!(
+                    "HTTP/1.1 {status} OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn sse_lab_loop(
+    listener: TcpListener,
+    running: Arc<AtomicBool>,
+    event_count: Arc<std::sync::atomic::AtomicU64>,
+    events: Arc<Mutex<Vec<StreamLabEvent>>>,
+) {
+    while running.load(Ordering::SeqCst) {
+        match listener.accept() {
+            Ok((mut stream, _addr)) => {
+                let _ = stream.set_nonblocking(false);
+                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
+                let mut buf = [0u8; 4096];
+                let _ = stream.read(&mut buf);
+                let snapshot = events.lock().clone();
+                let mut body = String::from("retry: 1000\n\n");
+                for e in &snapshot {
+                    body.push_str(&format!("event: {}\ndata: {}\n\n", e.kind, e.payload));
+                    event_count.fetch_add(1, Ordering::SeqCst);
+                }
+                let resp = format!(
+                    "HTTP/1.1 200 OK\r\nContent-Type: text/event-stream\r\nCache-Control: no-cache\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{body}",
+                    body.len()
+                );
+                let _ = stream.write_all(resp.as_bytes());
+            }
+            Err(ref e) if e.kind() == std::io::ErrorKind::WouldBlock => {
+                std::thread::sleep(Duration::from_millis(50));
+            }
+            Err(_) => break,
+        }
+    }
+}
+
+fn parse_request_line(raw: &str) -> (String, String) {
+    let line = raw.lines().next().unwrap_or("");
+    let mut parts = line.split_whitespace();
+    let method = parts.next().unwrap_or("GET").to_string();
+    let path = parts
+        .next()
+        .unwrap_or("/")
+        .split('?')
+        .next()
+        .unwrap_or("/")
+        .to_string();
+    (method, path)
+}
+
+fn path_matches_template(template: &str, path: &str) -> bool {
+    let t: Vec<&str> = template.trim_matches('/').split('/').collect();
+    let p: Vec<&str> = path.trim_matches('/').split('/').collect();
+    if t.len() != p.len() {
+        return false;
+    }
+    t.iter().zip(p.iter()).all(|(a, b)| {
+        a.starts_with('{') && a.ends_with('}') || *a == "*" || *a == *b
+    })
+}
+
+fn count_page_items(body: &str) -> usize {
+    let Ok(v) = serde_json::from_str::<serde_json::Value>(body) else {
+        return 0;
+    };
+    if let Some(arr) = v.as_array() {
+        return arr.len();
+    }
+    for key in ["items", "data", "results", "records"] {
+        if let Some(arr) = v.get(key).and_then(|x| x.as_array()) {
+            return arr.len();
+        }
+    }
+    0
+}
+
+fn normalize_api_path(path: &str) -> String {
+    let p = path.split('?').next().unwrap_or(path);
+    if p.starts_with('/') {
+        p.to_string()
+    } else {
+        format!("/{p}")
     }
 }
 
@@ -1487,4 +2616,171 @@ mod tests {
             .contains(&"orders".to_string()));
         assert!(r.n_plus_one.iter().any(|q| q.count >= 5));
     }
+
+    #[test]
+    fn test_webhook_sig_and_rate_limit() {
+        let e = BackendEngine::new();
+        // Known HMAC-SHA256 vector: key="key", msg="The quick brown fox jumps over the lazy dog"
+        // → f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8
+        let secret = "key";
+        let payload = "The quick brown fox jumps over the lazy dog";
+        let expected_hex = "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8";
+        e.store_auth(
+            "wh",
+            AuthScheme::WebhookSecret {
+                secret: secret.into(),
+            },
+        );
+        let r = e.webhook_signature_vault(&WebhookSigInput {
+            payload: payload.into(),
+            secret: "wh".into(), // resolve from vault
+            provided_signature: format!("sha256={expected_hex}"),
+            algorithm: "sha256".into(),
+            timestamp: None,
+            now: None,
+            tolerance_secs: 300,
+        });
+        assert!(r.valid, "{}", r.detail);
+        let rl = e.rate_limit_probe(&[RateLimitSample {
+            status: 429,
+            retry_after_secs: Some(1.5),
+            remaining: Some(0),
+            limit: Some(100),
+            timestamp_ms: 1,
+        }]);
+        assert_eq!(rl.limited_count, 1);
+    }
+
+    #[test]
+    fn test_openapi_parse_and_validate_traffic() {
+        let e = BackendEngine::new();
+        let doc = serde_json::json!({
+            "openapi": "3.0.0",
+            "paths": {
+                "/users": {
+                    "get": { "operationId": "listUsers" },
+                    "post": { "operationId": "createUser" }
+                }
+            }
+        });
+        let paths = BackendEngine::parse_openapi_paths(&doc);
+        assert_eq!(paths.len(), 2);
+        let traffic = e.openapi_validate_traffic(
+            &paths,
+            &[
+                ActualInteraction {
+                    method: "GET".into(),
+                    path: "/users".into(),
+                    status: 200,
+                },
+                ActualInteraction {
+                    method: "DELETE".into(),
+                    path: "/users".into(),
+                    status: 204,
+                },
+            ],
+        );
+        assert_eq!(traffic.matched, 1);
+        assert!(!traffic.ok);
+        assert!(!traffic.undeclared_methods.is_empty());
+    }
+
+    #[test]
+    fn test_live_stub_and_sse_loopback() {
+        let e = BackendEngine::new();
+        assert!(e
+            .start_live_stub_server(
+                0,
+                vec![StubRouteSpec {
+                    method: "GET".into(),
+                    path: "/ping".into(),
+                    status: 200,
+                    body: "{\"ok\":true}".into(),
+                }],
+                Some("https://evil.example.com/"),
+            )
+            .is_err());
+        let port = e
+            .start_live_stub_server(
+                0,
+                vec![StubRouteSpec {
+                    method: "GET".into(),
+                    path: "/ping".into(),
+                    status: 200,
+                    body: "{\"ok\":true}".into(),
+                }],
+                Some("http://127.0.0.1/"),
+            )
+            .expect("bind stub");
+        let url = format!("http://127.0.0.1:{port}/ping");
+        let resp = e
+            .send_blocking(&ApiRequest {
+                method: "GET".into(),
+                url,
+                headers: HashMap::new(),
+                body: None,
+            })
+            .expect("reqwest");
+        assert_eq!(resp.status, 200);
+        assert!(resp.body.contains("ok"));
+        let report = e.live_stub_server(&[]);
+        assert!(report.live);
+        assert_eq!(report.bound_port, Some(port));
+        assert!(report.hit_count >= 1);
+        e.stop_live_stub_server();
+
+        let sse_port = e
+            .start_sse_ws_server_lab(
+                0,
+                vec![StreamLabEvent {
+                    kind: "message".into(),
+                    payload: "hello".into(),
+                    timestamp_ms: 1,
+                }],
+                None,
+            )
+            .expect("sse");
+        let sse_url = format!("http://127.0.0.1:{sse_port}/events");
+        let sse = e
+            .send_blocking(&ApiRequest {
+                method: "GET".into(),
+                url: sse_url,
+                headers: HashMap::new(),
+                body: None,
+            })
+            .expect("sse get");
+        assert_eq!(sse.status, 200);
+        assert!(sse.body.contains("hello") || sse.body.contains("event:"));
+        let srep = e.sse_ws_server_lab(&[]);
+        assert!(srep.live);
+        assert_eq!(srep.bound_port, Some(sse_port));
+        e.stop_sse_ws_server_lab();
+    }
+
+    #[test]
+    fn test_openapi_diff_breaking() {
+        let e = BackendEngine::new();
+        let before = vec![OpenApiPath { path: "/a".into(), method: "GET".into(), operation_id: Some("getA".into()) }];
+        let after = vec![];
+        let d = e.openapi_diff_gate(&before, &after);
+        assert!(d.breaking);
+        assert_eq!(d.removed.len(), 1);
+    }
+
+    #[test]
+    fn test_oauth_and_pagination() {
+        let e = BackendEngine::new();
+        let o = e.oauth_flow_capture(&[OauthFlowStep {
+            step: "authorize".into(),
+            url: "https://idp/auth".into(),
+            params: BTreeMap::new(),
+        }]);
+        assert!(!o.has_pkce);
+        assert!(!o.issues.is_empty());
+        let p = e.pagination_auditor(&[PageSlice {
+            page: 1, page_size: 10, items: 10, total: None, next_cursor: None,
+        }]);
+        assert!(!p.issues.is_empty());
+    }
+
 }

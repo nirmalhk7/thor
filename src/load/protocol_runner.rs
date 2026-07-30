@@ -194,11 +194,15 @@ impl ProtocolRunner {
                     collector.record_sample(0, latency, 0, false);
                 }
             }
-            ScenarioStep::Click { .. }
-            | ScenarioStep::Fill { .. }
-            | ScenarioStep::CustomScript { .. } => {
-                sleep(Duration::from_millis(5)).await;
-                collector.record_sample(200, 5.0, 0, true);
+            ScenarioStep::Click { .. } | ScenarioStep::Fill { .. } => {
+                // No DOM in ProtocolRunner — fail sample, never invent success.
+                // Prefer BrowserRunner for Click/Fill.
+                collector.record_sample(0, 0.0, 0, false);
+            }
+            ScenarioStep::CustomScript { name, .. } => {
+                // Unsupported here — fail sample (no silent 200/success theater).
+                let _ = name;
+                collector.record_sample(0, 0.0, 0, false);
             }
         }
     }

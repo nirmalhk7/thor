@@ -263,6 +263,38 @@ pub struct DownloadItem {
     pub error_reason: Option<String>,
 }
 
+impl DownloadItem {
+    pub fn file_name(&self) -> String {
+        std::path::Path::new(&self.target_path)
+            .file_name()
+            .and_then(|n| n.to_str())
+            .filter(|s| !s.is_empty())
+            .unwrap_or("download")
+            .to_string()
+    }
+
+    pub fn progress_pct(&self) -> Option<u8> {
+        if self.total_bytes == 0 {
+            return None;
+        }
+        let pct = (self.received_bytes.saturating_mul(100) / self.total_bytes).min(100);
+        Some(pct as u8)
+    }
+
+    pub fn state_badge(&self) -> String {
+        match self.state {
+            DownloadState::Pending => "Pending".into(),
+            DownloadState::InProgress => self
+                .progress_pct()
+                .map(|p| format!("{p}%"))
+                .unwrap_or_else(|| "Downloading".into()),
+            DownloadState::Completed => "Done".into(),
+            DownloadState::Cancelled => "Cancelled".into(),
+            DownloadState::Failed => "Failed".into(),
+        }
+    }
+}
+
 #[derive(Debug, Default)]
 pub struct DownloadManager {
     downloads: Arc<Mutex<HashMap<String, DownloadItem>>>,
@@ -279,6 +311,9 @@ impl DownloadManager {
             .map(|d| d.as_nanos())
             .unwrap_or(0);
         let id = format!("dl_{nanos}");
+        if let Some(parent) = std::path::Path::new(target_path).parent() {
+            let _ = std::fs::create_dir_all(parent);
+        }
         let item = DownloadItem {
             id: id.clone(),
             url: url.to_string(),
@@ -659,5 +694,112 @@ mod tests {
         assert_eq!(metrics.total_bytes, 3072);
         assert!(metrics.total_overhead_ms > 2.5);
         assert!(metrics.avg_overhead_per_req_ms > 0.0);
+    }
+}
+
+// ============================================================================
+// Picture-in-Picture (standard HTMLVideoElement / Document PiP APIs via CDP evaluate)
+// ============================================================================
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PipResult {
+    pub active: bool,
+    pub mode: String,
+    pub detail: String,
+}
+
+/// Controls browser Picture-in-Picture via page JS (Chromium-native PiP window).
+pub struct PictureInPicture;
+
+impl PictureInPicture {
+    /// Enter or exit video PiP for the largest playing (or first) `<video>`.
+    pub fn toggle_video(session: &TabSession) -> ChromiumResult<PipResult> {
+        let js = r#"(async function() {
+  try {
+    if (document.pictureInPictureElement) {
+      await document.exitPictureInPicture();
+      return { active: false, mode: 'video', detail: 'exited' };
+    }
+    const videos = Array.from(document.querySelectorAll('video'));
+    let target = videos.find(v => !v.paused && v.readyState >= 2)
+      || videos.find(v => v.readyState >= 2)
+      || videos[0];
+    if (!target) {
+      return { active: false, mode: 'video', detail: 'no-video' };
+    }
+    if (target.paused) { try { await target.play(); } catch (_) {} }
+    await target.requestPictureInPicture();
+    return { active: true, mode: 'video', detail: 'entered' };
+  } catch (e) {
+    return { active: false, mode: 'video', detail: String(e && e.message ? e.message : e) };
+  }
+})()"#;
+        Self::eval_pip(session, js)
+    }
+
+    /// Document Picture-in-Picture (Chromium Document PiP API when available).
+    pub fn toggle_document(session: &TabSession) -> ChromiumResult<PipResult> {
+        let js = r#"(async function() {
+  try {
+    if (!window.documentPictureInPicture) {
+      return { active: false, mode: 'document', detail: 'unsupported' };
+    }
+    if (window.documentPictureInPicture.window) {
+      window.documentPictureInPicture.window.close();
+      return { active: false, mode: 'document', detail: 'closed' };
+    }
+    const win = await window.documentPictureInPicture.requestWindow({ width: 420, height: 280 });
+    const clone = document.body.cloneNode(true);
+    win.document.body.appendChild(clone);
+    return { active: true, mode: 'document', detail: 'opened' };
+  } catch (e) {
+    return { active: false, mode: 'document', detail: String(e && e.message ? e.message : e) };
+  }
+})()"#;
+        Self::eval_pip(session, js)
+    }
+
+    /// Script injected on new documents when auto-PiP is enabled.
+    pub fn auto_pip_injection_script() -> &'static str {
+        r#"(function(){
+  if (window.__thorAutoPipInstalled) return;
+  window.__thorAutoPipInstalled = true;
+  document.addEventListener('visibilitychange', async function() {
+    if (document.visibilityState !== 'hidden') return;
+    if (document.pictureInPictureElement) return;
+    const v = Array.from(document.querySelectorAll('video')).find(x => !x.paused && x.readyState >= 2);
+    if (!v || !document.pictureInPictureEnabled) return;
+    try { await v.requestPictureInPicture(); } catch (_) {}
+  }, { passive: true });
+})();"#
+    }
+
+    fn eval_pip(session: &TabSession, js: &str) -> ChromiumResult<PipResult> {
+        let val = session.evaluate_js_blocking(js).unwrap_or_default();
+        Ok(PipResult {
+            active: val.get("active").and_then(|v| v.as_bool()).unwrap_or(false),
+            mode: val
+                .get("mode")
+                .and_then(|v| v.as_str())
+                .unwrap_or("video")
+                .to_string(),
+            detail: val
+                .get("detail")
+                .and_then(|v| v.as_str())
+                .unwrap_or("")
+                .to_string(),
+        })
+    }
+}
+
+#[cfg(test)]
+mod pip_tests {
+    use super::*;
+
+    #[test]
+    fn auto_pip_script_is_idempotent_guard() {
+        let s = PictureInPicture::auto_pip_injection_script();
+        assert!(s.contains("__thorAutoPipInstalled"));
+        assert!(s.contains("requestPictureInPicture"));
     }
 }

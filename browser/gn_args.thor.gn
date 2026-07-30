@@ -1,0 +1,14 @@
+# Thor out/Thor args — copied to $THOR_CHROMIUM_SRC/src/out/Thor/args.gn
+# Component build for faster iteration; switch is_debug=false for packaging.
+
+is_debug = true
+is_component_build = true
+symbol_level = 1
+enable_nacl = false
+blink_symbol_level = 0
+# Remote debugging for Rust Labs self-CDP attach
+# (also pass --remote-debugging-port=9222 at runtime)
+proprietary_codecs = false
+ffmpeg_branding = "Chromium"
+is_official_build = false
+target_cpu = "arm64"

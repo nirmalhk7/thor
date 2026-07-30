@@ -61,10 +61,7 @@ impl EvidenceStore {
     pub fn redact_secrets(headers: &mut HashMap<String, String>) {
         let sensitive = ["authorization", "cookie", "set-cookie", "x-api-key"];
         for key in sensitive {
-            let lower_key = key.to_lowercase();
-            // Since HashMap keys might be lowercased or not, 
-            // a proper implementation would check case-insensitively.
-            // Assuming they are already normalized by caller or we check directly:
+            // Keys are expected normalized lowercase by callers.
             if headers.contains_key(key) {
                 headers.insert(key.to_string(), "[REDACTED]".to_string());
             }

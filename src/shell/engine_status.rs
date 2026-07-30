@@ -1,24 +1,54 @@
 //! Honest content-engine capability reporting (FS-003).
 //!
-//! M2 live shell = AppKit chrome + headful Chromium content via CDP (dual-window).
-//! CEF single-window embed and Fetch intercept UI are still later.
+//! Product default = Thor-owned Chromium (downstream / snapshot) with self-CDP Labs.
+//! Legacy dual-window = AppKit + separate Chromium process (`THOR_LEGACY_DUAL_WINDOW=1`).
 
 use serde_json::{json, Value};
 
+use crate::engine::product::{discover_owned_chromium_path, legacy_dual_window_requested};
+
 /// Process-wide engine status for UI / IPC consumers.
 pub fn engine_status() -> Value {
+    let legacy = legacy_dual_window_requested();
+    let owned = discover_owned_chromium_path();
+    let (shell, milestone, freeze, freeze_reason) = if legacy {
+        (
+            "legacy-dual-window",
+            "M2-legacy",
+            "soft-cdp",
+            "Legacy dual-window: CDP Page.setWebLifecycleState; transitional only.",
+        )
+    } else if owned.is_some() {
+        (
+            "chromium-downstream",
+            "M3-downstream",
+            "chromium-hooks+self-cdp",
+            "Product: Thor-owned Chromium; prefer WebContents freeze/discard (see browser/isolation/MAPPING.md); Labs via self-CDP.",
+        )
+    } else {
+        (
+            "chromium-downstream-missing",
+            "M3-downstream",
+            "unavailable",
+            "Owned Chromium not found — run ./scripts/bootstrap_chromium_snapshot.sh or build_chromium.sh.",
+        )
+    };
+
     json!({
         "brand": "Thor",
         "backend": "chromium",
+        "product": "chromium-downstream",
+        "owned_chromium": owned.as_ref().map(|p| p.display().to_string()),
         "cdp": true,
+        "self_cdp": !legacy,
         "intercept": false,
-        "intercept_reason": "CDP Fetch interception UI not wired yet (M2+).",
-        "freeze": "soft-cdp",
-        "freeze_reason": "Background tabs soft-freeze via CDP Page.setWebLifecycleState when available; bring-to-front on activate.",
+        "intercept_reason": "CDP Fetch interception UI not wired yet.",
+        "freeze": freeze,
+        "freeze_reason": freeze_reason,
         "mv3": false,
         "sync": false,
-        "milestone": "M2",
-        "shell": "dual-window",
+        "milestone": milestone,
+        "shell": shell,
     })
 }
 
@@ -34,12 +64,12 @@ mod tests {
     use super::*;
 
     #[test]
-    fn status_is_honest_chromium_m2() {
+    fn status_is_honest_chromium_downstream() {
         let s = engine_status();
         assert_eq!(s["backend"], "chromium");
         assert_eq!(s["cdp"], true);
+        assert_eq!(s["product"], "chromium-downstream");
         assert_eq!(s["intercept"], false);
-        assert_eq!(s["milestone"], "M2");
-        assert_eq!(s["shell"], "dual-window");
+        assert!(s["shell"].as_str().unwrap().contains("chromium") || s["shell"] == "legacy-dual-window");
     }
 }

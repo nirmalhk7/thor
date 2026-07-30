@@ -46,6 +46,10 @@ path = "src/lib.rs"
 name = "Thor"
 path = "src/main.rs"
 
+[[bin]]
+name = "thor-labs"
+path = "src/bin/thor_labs.rs"
+
 [dev-dependencies]
 criterion = "0.5"
 

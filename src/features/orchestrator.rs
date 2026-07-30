@@ -1,7 +1,7 @@
 //! Feature orchestrator.
 //!
 //! Single entry point that routes a `(slug, payload)` pair to the real logic of
-//! any of the 72 engineer features. The shell / IPC layer calls
+//! any registered engineer feature. The shell / IPC layer calls
 //! [`FeatureOrchestrator::invoke`]; it resolves the slug through the shared
 //! [`FeatureEngine`] (recording the invocation and honoring the enabled flag),
 //! deserializes the JSON payload into each feature's concrete inputs, calls the
@@ -63,7 +63,28 @@ impl FeatureOrchestrator {
         use FeatureId::*;
         match id {
             // ---------------- Frontend ----------------
-            ComponentTreeLens => ok(f.frontend().build_component_tree(&req(p, "root")?)),
+            ComponentTreeLens => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let react_raw = f
+                        .evaluate_on_active(frontend::FrontendEngine::react_devtools_probe_script())
+                        .unwrap_or_else(|_| "{\"present\":false}".into());
+                    let raw =
+                        f.evaluate_on_active(frontend::FrontendEngine::a11y_dom_probe_script())?;
+                    let nodes: Vec<frontend::DomNode> = serde_json::from_str(&raw)
+                        .map_err(|e| format!("invalid DOM probe JSON: {e}"))?;
+                    let root = nodes.into_iter().next().unwrap_or_default();
+                    let tree = f.frontend().build_component_tree(&root);
+                    let mut out = serde_json::to_value(&tree)
+                        .map_err(|e| format!("serialize tree: {e}"))?;
+                    if let Some(obj) = out.as_object_mut() {
+                        let react: Value = serde_json::from_str(&react_raw).unwrap_or(json!({}));
+                        obj.insert("react_devtools".into(), react);
+                    }
+                    Ok(out)
+                } else {
+                    ok(f.frontend().build_component_tree(&req(p, "root")?))
+                }
+            }
             ResponsiveMatrix => ok(f.frontend().responsive_matrix(&reqv(p, "captures")?)),
             CssCascade => ok(f.frontend().resolve_cascade(&reqv(p, "declarations")?)),
             DesignTokens => {
@@ -73,7 +94,17 @@ impl FeatureOrchestrator {
                     None => ok(f.frontend().extract_design_tokens(&declarations)),
                 }
             }
-            A11yLens => ok(f.frontend().a11y_matrix(&reqv(p, "nodes")?)),
+            A11yLens => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw =
+                        f.evaluate_on_active(frontend::FrontendEngine::a11y_dom_probe_script())?;
+                    let nodes: Vec<frontend::DomNode> = serde_json::from_str(&raw)
+                        .map_err(|e| format!("invalid a11y DOM probe JSON: {e}"))?;
+                    ok(f.frontend().a11y_matrix(&nodes))
+                } else {
+                    ok(f.frontend().a11y_matrix(&reqv(p, "nodes")?))
+                }
+            }
             StateTimeTravel => match op(p) {
                 "record" => ok(json!({
                     "index": f.frontend().record_state(str_req(p, "label")?, opt_val(p, "state"))
@@ -84,7 +115,16 @@ impl FeatureOrchestrator {
                 "diff" => ok(f.frontend().state_diff(req(p, "from")?, req(p, "to")?)),
                 _ => ok(f.frontend().state_snapshots()),
             },
-            ClsHeatmap => ok(f.frontend().cls_heatmap(&reqv(p, "entries")?)),
+            ClsHeatmap => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw = f.evaluate_on_active(frontend::FrontendEngine::cls_entries_probe_script())?;
+                    let entries: Vec<frontend::LayoutShiftEntry> = serde_json::from_str(&raw)
+                        .map_err(|e| format!("invalid CLS probe JSON: {e}"))?;
+                    ok(f.frontend().cls_heatmap(&entries))
+                } else {
+                    ok(f.frontend().cls_heatmap(&reqv(p, "entries")?))
+                }
+            }
             ComponentSandbox => ok(json!({
                 "html": f.frontend().component_sandbox(
                     str_req(p, "tag")?,
@@ -99,6 +139,78 @@ impl FeatureOrchestrator {
                 .frontend()
                 .audit_fonts(&reqv(p, "faces")?, &opt_vec(p, "used_families").unwrap_or_default())),
             ZIndexVisualizer => ok(f.frontend().visualize_zindex(&reqv(p, "elements")?)),
+
+            HydrationDiffLens => ok(f.frontend().hydration_diff_lens(
+                str_req(p, "server_html")?,
+                str_req(p, "client_html")?,
+            )),
+            CssCoverageMap => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw = f.evaluate_on_active(frontend::FrontendEngine::css_coverage_probe_script())?;
+                    let rules: Vec<frontend::CssRuleCoverage> =
+                        serde_json::from_str(&raw).map_err(|e| format!("invalid CSS coverage probe JSON: {e}"))?;
+                    ok(f.frontend().css_coverage_map(&rules))
+                } else if let Some(json) = opt_str(p, "coverage_json") {
+                    ok(frontend::FrontendEngine::css_coverage_from_take_coverage_delta(&json))
+                } else {
+                    ok(f.frontend().css_coverage_map(&reqv(p, "rules")?))
+                }
+            }
+            FocusOrderOverlay => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw = f.evaluate_on_active(frontend::FrontendEngine::focus_order_probe_script())?;
+                    let nodes = frontend::FrontendEngine::parse_focus_order_probe(&raw)
+                        .ok_or_else(|| "invalid focus probe JSON from active tab".to_string())?;
+                    ok(f.frontend().focus_order_overlay(&nodes))
+                } else if let Some(json) = opt_str(p, "probe_json") {
+                    let nodes = frontend::FrontendEngine::parse_focus_order_probe(&json)
+                        .ok_or_else(|| "invalid focus probe JSON".to_string())?;
+                    ok(f.frontend().focus_order_overlay(&nodes))
+                } else {
+                    ok(f.frontend().focus_order_overlay(&reqv(p, "nodes")?))
+                }
+            }
+            EventListenerMap => ok(f.frontend().event_listener_map(&reqv(p, "entries")?)),
+            CssVariableInspector => ok(f.frontend().css_variable_inspector(
+                &req(p, "definitions")?,
+                &reqv(p, "references")?,
+            )),
+            LayoutThrashDetector => ok(f.frontend().layout_thrash_detector(&reqv(p, "ops")?)),
+            MediaCqMatrix => ok(f.frontend().media_cq_matrix(&reqv(p, "captures")?)),
+            ImageDeliveryAuditor => {
+                let from_live = opt::<bool>(p, "from_network").unwrap_or(false)
+                    || opt::<bool>(p, "from_active_tab").unwrap_or(false);
+                let images: Vec<frontend::ImageAsset> = if from_live {
+                    f.cdp().images_from_network()
+                } else if let Some(imgs) = opt_vec(p, "images") {
+                    imgs
+                } else {
+                    f.cdp().images_from_network()
+                };
+                ok(f.frontend().image_delivery_auditor(&images))
+            }
+            CssContainmentAdvisor => ok(f.frontend().css_containment_advisor(&reqv(p, "nodes")?)),
+            AriaLiveMonitor => ok(f.frontend().aria_live_monitor(&reqv(p, "events")?)),
+            SelectorSpecificityBudget => ok(f.frontend().selector_specificity_budget(
+                &reqv(p, "selectors")?,
+                opt(p, "budget").unwrap_or([0, 3, 2]),
+            )),
+            DomSnapshotCapture => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw = f.evaluate_on_active(
+                        crate::features::cdp_bridge::CdpBridge::dom_snapshot_capture_script(),
+                    )?;
+                    let root = crate::features::cdp_bridge::CdpBridge::parse_dom_snapshot(&raw)
+                        .ok_or_else(|| "invalid DOM snapshot JSON from active tab".to_string())?;
+                    ok(f.frontend().dom_snapshot_capture(&root))
+                } else if let Some(json) = opt_str(p, "json").or_else(|| opt_str(p, "dom_json")) {
+                    let root = crate::features::cdp_bridge::CdpBridge::parse_dom_snapshot(&json)
+                        .ok_or_else(|| "invalid DOM snapshot JSON".to_string())?;
+                    ok(f.frontend().dom_snapshot_capture(&root))
+                } else {
+                    ok(f.frontend().dom_snapshot_capture(&req(p, "root")?))
+                }
+            }
 
             // ---------------- Backend ----------------
             ApiWorkbench => {
@@ -135,8 +247,36 @@ impl FeatureOrchestrator {
                 _ => ok(json!({ "port": f.backend().webhook_sink_port() })),
             },
             IdorMatrix => {
-                let request: backend::ApiRequest = req(p, "request")?;
-                let contexts: Vec<String> = req(p, "contexts")?;
+                let from_live = opt::<bool>(p, "from_active_tab").unwrap_or(false)
+                    || opt::<bool>(p, "from_tamper").unwrap_or(false);
+                let request: backend::ApiRequest = if let Some(r) =
+                    opt::<backend::ApiRequest>(p, "request")
+                {
+                    r
+                } else if from_live || p.get("request").is_none() {
+                    let hist = AppState::global()
+                        .tamper()
+                        .get_latest_request()
+                        .ok_or_else(|| {
+                            "idor-matrix: no request payload and no tamper history — browse with intercept on first"
+                                .to_string()
+                        })?;
+                    backend::ApiRequest {
+                        method: hist.method,
+                        url: hist.url,
+                        headers: hist.headers,
+                        body: hist.body,
+                    }
+                } else {
+                    return Err("idor-matrix requires 'request'".into());
+                };
+                let contexts: Vec<String> = opt_vec(p, "contexts").unwrap_or_else(|| {
+                    vec![
+                        "anonymous".into(),
+                        "user".into(),
+                        "admin".into(),
+                    ]
+                });
                 let owner = opt_str(p, "owner_context");
                 ok(f
                     .backend()
@@ -184,6 +324,108 @@ impl FeatureOrchestrator {
                 match opt_vec::<backend::CacheOp>(p, "cache_ops") {
                     Some(ops) => ok(f.backend().analyze_db_cache(&queries, &ops)),
                     None => ok(f.backend().analyze_db(&queries)),
+                }
+            }
+
+            WebhookSignatureVault => ok(f.backend().webhook_signature_vault(&req(p, "input")?)),
+            RateLimitProbe => {
+                if let Some(url) = opt_str(p, "url") {
+                    match f.backend().rate_limit_probe_http(
+                        &url,
+                        opt(p, "count").unwrap_or(5),
+                        opt(p, "lab_consent").unwrap_or(false),
+                    ) {
+                        Ok(r) => ok(r),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    ok(f.backend().rate_limit_probe(&reqv(p, "samples")?))
+                }
+            }
+            PaginationAuditor => {
+                if let Some(urls) = opt_vec::<String>(p, "urls") {
+                    match f.backend().pagination_auditor_http(
+                        &urls,
+                        opt(p, "page_size").unwrap_or(20),
+                        opt(p, "lab_consent").unwrap_or(false),
+                    ) {
+                        Ok(r) => ok(r),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    ok(f.backend().pagination_auditor(&reqv(p, "pages")?))
+                }
+            }
+            CacheSemanticsLens => ok(f.backend().cache_semantics_lens(&reqv(p, "entries")?)),
+            MultipartWorkbench => ok(f.backend().multipart_workbench(&reqv(p, "parts")?)),
+            SseWsServerLab => match op(p) {
+                "start" => match f.backend().start_sse_ws_server_lab(
+                    opt(p, "port").unwrap_or(0),
+                    opt_vec(p, "events").unwrap_or_default(),
+                    opt_str(p, "advertise_url").as_deref(),
+                ) {
+                    Ok(port) => ok(json!({ "port": port })),
+                    Err(e) => Err(e),
+                },
+                "stop" => {
+                    f.backend().stop_sse_ws_server_lab();
+                    ok(json!({ "stopped": true }))
+                }
+                _ => ok(f.backend().sse_ws_server_lab(&opt_vec(p, "events").unwrap_or_default())),
+            },
+            OpenApiDiffGate => {
+                if let Some(doc) = p.get("openapi").cloned() {
+                    let paths = backend::BackendEngine::parse_openapi_paths(&doc);
+                    if let Some(interactions) = opt_vec::<backend::ActualInteraction>(p, "interactions")
+                    {
+                        ok(f.backend().openapi_validate_traffic(&paths, &interactions))
+                    } else {
+                        let after = opt_vec(p, "after").unwrap_or(paths.clone());
+                        let before = opt_vec(p, "before").unwrap_or(paths);
+                        ok(f.backend().openapi_diff_gate(&before, &after))
+                    }
+                } else if let Some(interactions) = opt_vec::<backend::ActualInteraction>(p, "interactions")
+                {
+                    ok(f.backend().openapi_validate_traffic(&reqv(p, "paths")?, &interactions))
+                } else {
+                    ok(f.backend().openapi_diff_gate(&reqv(p, "before")?, &reqv(p, "after")?))
+                }
+            }
+            OauthFlowCapture => ok(f.backend().oauth_flow_capture(&reqv(p, "steps")?)),
+            QueueAdjacency => ok(f.backend().queue_adjacency(&reqv(p, "hops")?)),
+            GrpcStreamWorkbench => ok(f.backend().grpc_stream_workbench(&reqv(p, "frames")?)),
+            LiveStubServer => match op(p) {
+                "start" => match f.backend().start_live_stub_server(
+                    opt(p, "port").unwrap_or(0),
+                    opt_vec(p, "routes").unwrap_or_default(),
+                    opt_str(p, "advertise_url").as_deref(),
+                ) {
+                    Ok(port) => ok(json!({ "port": port })),
+                    Err(e) => Err(e),
+                },
+                "stop" => {
+                    f.backend().stop_live_stub_server();
+                    ok(json!({ "stopped": true }))
+                }
+                _ => ok(f.backend().live_stub_server(&opt_vec(p, "routes").unwrap_or_default())),
+            },
+            HeaderContractFuzzer => {
+                let base = req(p, "base")?;
+                let contract = req(p, "contract")?;
+                let execute = opt::<bool>(p, "execute").unwrap_or(false);
+                if execute {
+                    match f.backend().header_contract_fuzzer_gated(
+                        &base,
+                        &contract,
+                        opt_str(p, "url").as_deref(),
+                        true,
+                        opt(p, "lab_consent").unwrap_or(false),
+                    ) {
+                        Ok(r) => ok(r),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    ok(f.backend().header_contract_fuzzer(&base, &contract))
                 }
             }
 
@@ -246,24 +488,100 @@ impl FeatureOrchestrator {
                 _ => ok(json!({ "port": f.security().oob_listener_port() })),
             },
 
+            DomXssTaintMap => {
+                if let Some(json) = opt_str(p, "flows_json") {
+                    let flows = security::SecurityEngine::parse_dom_xss_taint_flows(&json);
+                    ok(f.security().dom_xss_taint_map(&flows))
+                } else {
+                    ok(f.security().dom_xss_taint_map(&reqv(p, "flows")?))
+                }
+            }
+            CorsDeepProbe => ok(f.security().cors_deep_probe(&reqv(p, "probes")?)),
+            CspPolicyForensics => ok(f.security().csp_policy_forensics(str_req(p, "policy")?)),
+            OauthOidcMisconfig => ok(f.security().oauth_oidc_misconfig(&req(p, "config")?)),
+            CookieSessionForensics => ok(f.security().cookie_session_forensics(&reqv(p, "cookies")?)),
+            SessionFixationLab => match f.security().session_fixation_lab(&req(p, "probe")?) {
+                Ok(r) => ok(r),
+                Err(e) => Err(e),
+            },
+            GraphqlAuthzMatrix => ok(f.security().graphql_authz_matrix(&reqv(p, "probes")?)),
+            MassAssignmentDiff => ok(f.security().mass_assignment_diff(&req(p, "diff")?)),
+            RaceWindowRepeater => {
+                if opt::<bool>(p, "live").unwrap_or(false) {
+                    match f.security().race_window_live(
+                        str_req(p, "url")?,
+                        opt(p, "count").unwrap_or(8),
+                        opt(p, "lab_consent").unwrap_or(false),
+                    ) {
+                        Ok(r) => ok(r),
+                        Err(e) => Err(e),
+                    }
+                } else {
+                    ok(f.security().race_window_repeater(&reqv(p, "attempts")?))
+                }
+            }
+            SsrfLabHarness => match f.security().ssrf_lab_harness(
+                &reqv(p, "targets")?,
+                opt(p, "lab_consent").unwrap_or(false),
+            ) {
+                Ok(r) => ok(r),
+                Err(e) => Err(e),
+            },
+            SriSupplyChainAuditor => ok(f.security().sri_supply_chain_auditor(&reqv(p, "scripts")?)),
+            WebsocketAuthzProbe => ok(f.security().websocket_authz_probe(&reqv(p, "probes")?)),
+
             // ---------------- Performance ----------------
             PerfBudgets => {
-                let budgets: crate::load::PerformanceBudgets = req(p, "budgets")?;
-                let vitals: Option<crate::load::BrowserMetrics> = opt(p, "vitals");
+                let budgets: crate::load::PerformanceBudgets = if let Some(b) =
+                    opt::<crate::load::PerformanceBudgets>(p, "budgets")
+                {
+                    b
+                } else {
+                    crate::load::PerformanceBudgets::core_web_vitals()
+                };
+                let vitals: Option<crate::load::BrowserMetrics> =
+                    if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                        let _ = f.evaluate_on_active(
+                            crate::features::cdp_bridge::CdpBridge::web_vitals_injection_script(),
+                        );
+                        let raw = f.evaluate_on_active(
+                            "(function(){ return (typeof window.__thorCollectWebVitals==='function') ? window.__thorCollectWebVitals() : '{}'; })()",
+                        )?;
+                        crate::features::cdp_bridge::CdpBridge::parse_web_vitals(&raw)
+                    } else {
+                        opt(p, "vitals")
+                    };
                 let load: Option<crate::load::LoadMetrics> = opt(p, "load");
-                ok(f
-                    .perf()
-                    .check_budgets(&budgets, vitals.as_ref(), load.as_ref()))
+                let resources: Option<perf_features::ResourceBudgetInputs> = opt(p, "resources");
+                ok(f.perf().check_budgets_with_resources(
+                    &budgets,
+                    vitals.as_ref(),
+                    load.as_ref(),
+                    resources.as_ref(),
+                ))
             }
             TraceDiff => ok(f.perf().diff_traces(
                 &req(p, "before")?,
                 &req(p, "after")?,
                 opt(p, "regression_threshold_pct").unwrap_or(10.0),
             )),
-            WaterfallForensics => match opt_vec::<perf_features::InitiatedResource>(p, "initiated") {
-                Some(res) => ok(f.perf().blocking_chain(&res)),
-                None => ok(f.perf().analyze_waterfall(&reqv(p, "resources")?)),
-            },
+            WaterfallForensics => {
+                if opt::<bool>(p, "from_network").unwrap_or(false)
+                    || opt::<bool>(p, "from_active_tab").unwrap_or(false)
+                {
+                    let initiated = f.cdp().initiated_resources();
+                    if !initiated.is_empty() {
+                        ok(f.perf().blocking_chain(&initiated))
+                    } else {
+                        ok(f.perf().analyze_waterfall(&f.cdp().resource_timings()))
+                    }
+                } else {
+                    match opt_vec::<perf_features::InitiatedResource>(p, "initiated") {
+                        Some(res) => ok(f.perf().blocking_chain(&res)),
+                        None => ok(f.perf().analyze_waterfall(&reqv(p, "resources")?)),
+                    }
+                }
+            }
             MemoryLeakHunter => ok(f.perf().detect_leak(&reqv(p, "samples")?)),
             SyntheticMonitor => {
                 if let Some(session) = opt::<crate::dx::test_generator::RecordedSession>(p, "session")
@@ -289,7 +607,35 @@ impl FeatureOrchestrator {
                     "percentiles": f.perf().percentile_table(&hist),
                 }))
             }
-            InpAttribution => ok(f.perf().attribute_inp(&reqv(p, "interactions")?)),
+            InpAttribution => {
+                if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let raw = f.evaluate_on_active(
+                        r#"(function(){
+  var out=[];
+  try {
+    var list=performance.getEntriesByType('event')||[];
+    for (var i=0;i<list.length;i++){
+      var e=list[i];
+      if (!e || (e.name!=='click' && e.name!=='keydown' && e.name!=='pointerdown')) continue;
+      var target=(e.target&& (e.target.id?('#'+e.target.id):(e.target.tagName||'node').toLowerCase()))||'unknown';
+      var processing=(e.processingEnd&&e.processingStart)?(e.processingEnd-e.processingStart):0;
+      var inputDelay=(e.processingStart&&e.startTime)?(e.processingStart-e.startTime):0;
+      var presentation=(e.duration||0)-processing-inputDelay;
+      if (presentation<0) presentation=0;
+      out.push({target:target, input_delay_ms:inputDelay, processing_ms:processing, presentation_ms:presentation});
+    }
+  } catch(err){}
+  return JSON.stringify(out);
+})()"#,
+                    )?;
+                    let interactions: Vec<perf_features::InteractionEvent> =
+                        serde_json::from_str(&raw)
+                            .map_err(|e| format!("invalid INP probe JSON: {e}"))?;
+                    ok(f.perf().attribute_inp(&interactions))
+                } else {
+                    ok(f.perf().attribute_inp(&reqv(p, "interactions")?))
+                }
+            }
             CdnCache => ok(f.perf().analyze_cache(&reqv(p, "entries")?)),
             VitalsUnderLoad => ok(json!({
                 "knee_vus": f.perf().vitals_knee(
@@ -310,6 +656,39 @@ impl FeatureOrchestrator {
             ThirdPartyAttribution => ok(f
                 .perf()
                 .attribute_third_party(str_req(p, "first_party")?, &reqv(p, "resources")?)),
+            LcpElementForensics => ok(f.perf().lcp_element_forensics(&req(p, "payload")?)),
+            LongTaskRadar => ok(f.perf().long_task_radar(&reqv(p, "tasks")?)),
+            MainThreadBlockMap => ok(f.perf().main_thread_block_map(&reqv(p, "slices")?)),
+            BfCacheProbe => ok(f.perf().bfcache_probe(&reqv(p, "samples")?)),
+            FreezeResumeBench => ok(f.perf().freeze_resume_bench(&reqv(p, "samples")?)),
+            SoftNavVitals => {
+                let records = if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                    let _ = f.evaluate_on_active(
+                        crate::features::cdp_bridge::CdpBridge::soft_nav_and_speculation_script(),
+                    );
+                    let raw = f.evaluate_on_active(
+                        "(function(){ return (typeof window.__thorCollectSoftNavs==='function') ? window.__thorCollectSoftNavs() : '[]'; })()",
+                    )?;
+                    crate::features::cdp_bridge::CdpBridge::parse_soft_navs(&raw)
+                } else {
+                    reqv(p, "records")?
+                };
+                ok(f.perf().soft_nav_vitals(&records)?)
+            }
+            SpeculationLab => ok(f.perf().speculation_lab(&reqv(p, "trials")?)),
+            ConnPoolInspector => ok(f.perf().conn_pool_inspect(&reqv(p, "entries")?)),
+            Http3PathAudit => ok(f.perf().http3_path_audit(&reqv(p, "samples")?)),
+            CompressionBudget => ok(f.perf().compression_budget(
+                &reqv(p, "entries")?,
+                opt(p, "max_inflation_ratio").unwrap_or(4.0),
+            )),
+            MediaWeightGate => ok(f.perf().media_weight_gate(
+                &reqv(p, "resources")?,
+                opt(p, "max_image_bytes").unwrap_or(1_500_000),
+                opt(p, "max_video_bytes").unwrap_or(5_000_000),
+                opt(p, "max_lcp_media_bytes").unwrap_or(500_000),
+            )),
+            ContinuousProfiler => ok(f.perf().continuous_profile(&reqv(p, "samples")?)),
             PerformanceSla => {
                 let results: Vec<Value> = f
                     .sla()
@@ -375,19 +754,112 @@ impl FeatureOrchestrator {
             ContractTesting => ok(f
                 .qa()
                 .verify_contract(&reqv(p, "interactions")?, &reqv(p, "actuals")?)),
-            DeflakedExport => ok(json!({
-                "playwright": f.qa().export_deflaked(&req(p, "session")?)
-            })),
-            CiBundle => ok(f.qa().export_ci_bundle_manifest(&req(p, "session")?)),
-            TimeTravelTrace => match op(p) {
-                "record" => ok(json!({
-                    "index": f.qa().record_trace_frame(
-                        str_req(p, "test")?,
-                        opt_str(p, "step").unwrap_or_default().as_str(),
-                        opt_str(p, "action").unwrap_or_default().as_str(),
-                        opt_str(p, "dom").unwrap_or_default().as_str(),
+            DeflakedExport => {
+                let session: crate::dx::test_generator::RecordedSession =
+                    if let Some(s) = opt(p, "session") {
+                        s
+                    } else if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                        let url = f
+                            .evaluate_on_active("location.href")
+                            .unwrap_or_else(|_| "about:blank".into());
+                        let mut session =
+                            crate::dx::test_generator::RecordedSession::new("live-export", url);
+                        for (req, _) in AppState::global().tamper().get_history() {
+                            session.traces.push(crate::dx::test_generator::NetworkTrace {
+                                method: req.method,
+                                url: req.url,
+                                status: 0,
+                                headers: req.headers,
+                                body: req.body,
+                            });
+                        }
+                        session
+                    } else {
+                        req(p, "session")?
+                    };
+                let playwright = if let Some(obs) = opt::<qa::OracleObservation>(p, "observation") {
+                    f.qa().export_with_oracles(&session, &obs)
+                } else {
+                    f.qa().export_with_oracles(
+                        &session,
+                        &qa::OracleObservation {
+                            dom_digest: None,
+                            status: Some(200),
+                            headers: Default::default(),
+                            vitals: None,
+                            storage: Default::default(),
+                        },
                     )
-                })),
+                };
+                ok(json!({ "playwright": playwright }))
+            }
+            CiBundle => {
+                let session: crate::dx::test_generator::RecordedSession =
+                    if let Some(s) = opt(p, "session") {
+                        s
+                    } else if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                        let url = f
+                            .evaluate_on_active("location.href")
+                            .unwrap_or_else(|_| "about:blank".into());
+                        let mut session =
+                            crate::dx::test_generator::RecordedSession::new("live-ci", url);
+                        for (req, resp) in AppState::global().tamper().get_history() {
+                            session.traces.push(crate::dx::test_generator::NetworkTrace {
+                                method: req.method,
+                                url: req.url,
+                                status: resp.map(|r| r.status_code).unwrap_or(0),
+                                headers: req.headers,
+                                body: req.body,
+                            });
+                        }
+                        session
+                    } else {
+                        req(p, "session")?
+                    };
+                let obs = opt::<qa::OracleObservation>(p, "observation");
+                let mut bundle = f.qa().export_ci_bundle_composed(&session, obs.as_ref());
+                // P0-6: orch path must never serialize empty promote artifacts.
+                if bundle.playwright_ts.trim().is_empty() {
+                    bundle.playwright_ts = String::from(
+                        "// Thor CI bundle stub\nimport { test } from '@playwright/test';\ntest('stub', async () => {});\n",
+                    );
+                }
+                if bundle.hermetic_ts.trim().is_empty() {
+                    bundle.hermetic_ts = String::from(
+                        "// Thor hermetic fixture stub\nimport { test } from '@playwright/test';\ntest.describe('hermetic stub', () => {});\n",
+                    );
+                }
+                if bundle.quarantine_filter.trim().is_empty() {
+                    bundle.quarantine_filter =
+                        crate::dx::test_generator::TestGenerator::ci_quarantine_filter(&[]);
+                }
+                ok(bundle)
+            }
+            TimeTravelTrace => match op(p) {
+                "record" => {
+                    let test = str_req(p, "test")?;
+                    let step = opt_str(p, "step").unwrap_or_default();
+                    let action = opt_str(p, "action").unwrap_or_default();
+                    let dom = if opt::<bool>(p, "from_active_tab").unwrap_or(false)
+                        || opt_str(p, "dom").unwrap_or_default().is_empty()
+                    {
+                        f.evaluate_on_active(
+                            "(function(){ return document.documentElement ? document.documentElement.outerHTML : ''; })()",
+                        )
+                        .unwrap_or_default()
+                    } else {
+                        opt_str(p, "dom").unwrap_or_default()
+                    };
+                    ok(json!({
+                        "index": f.qa().record_trace_frame(
+                            test,
+                            step.as_str(),
+                            action.as_str(),
+                            &dom,
+                        )
+                    }))
+                }
+                "export" => ok(f.qa().export_playwright_trace(str_req(p, "test")?)?),
                 "at" => ok(json!({
                     "frame": f.qa().trace_frame_at(str_req(p, "test")?, req(p, "index")?)
                 })),
@@ -410,9 +882,150 @@ impl FeatureOrchestrator {
                     .authz_tests_to_playwright(opt_str(p, "base_url").unwrap_or_default().as_str(), &cases);
                 ok(json!({ "cases": cases, "spec": spec }))
             }
+            FlakeTriager => {
+                let test = opt_str(p, "test").unwrap_or_default();
+                let results: Vec<bool> = reqv(p, "results")?;
+                let radar = f.qa().flake_radar(&test, &results);
+                let mut vectors: qa::FlakeVector = opt(p, "vectors").unwrap_or_default();
+                let frames = match opt_str(p, "trace_test") {
+                    Some(t) => f.qa().trace_frames(&t),
+                    None => opt_vec::<qa::TraceFrame>(p, "frames").unwrap_or_default(),
+                };
+                let traces: Vec<crate::dx::test_generator::NetworkTrace> =
+                    opt_vec(p, "traces").unwrap_or_default();
+                // Derive signals from frames/traces when the caller omitted a hand-fed vector.
+                if vectors.is_empty() {
+                    vectors = qa::FlakeVector::from_trace_frames(&frames)
+                        .merge(qa::FlakeVector::from_network_traces(&traces));
+                }
+                ok(f.qa().triage_flake(&test, &radar, &vectors, &frames))
+            }
+            QuarantinePolicy => {
+                let decision = f.qa().evaluate_quarantine(&req(p, "input")?);
+                if !decision.persist_ok {
+                    return Err(decision
+                        .persist_err
+                        .clone()
+                        .unwrap_or_else(|| "quarantine.yaml persist failed".into()));
+                }
+                let mut out = serde_json::to_value(&decision)
+                    .map_err(|e| format!("serialize failed: {e}"))?;
+                if let Some(obj) = out.as_object_mut() {
+                    let filter = f.qa().ci_quarantine_filter();
+                    let filter = if filter.trim().is_empty() {
+                        crate::dx::test_generator::TestGenerator::ci_quarantine_filter(&[])
+                    } else {
+                        filter
+                    };
+                    obj.insert("ci_quarantine_filter".into(), Value::String(filter));
+                    obj.insert(
+                        "persist_ok".into(),
+                        Value::Bool(decision.persist_ok),
+                    );
+                    if let Some(err) = &decision.persist_err {
+                        obj.insert("persist_err".into(), Value::String(err.clone()));
+                    }
+                    obj.insert(
+                        "decision".into(),
+                        serde_json::to_value(&decision).unwrap_or_default(),
+                    );
+                }
+                Ok(out)
+            }
+            ContractDriftGate => ok(f
+                .qa()
+                .contract_drift_gate(&reqv(p, "baseline")?, &reqv(p, "live")?)),
+            HermeticFixturePack => {
+                let pack = f.qa().build_hermetic_fixture_pack(
+                    str_req(p, "name")?,
+                    req(p, "identity")?,
+                    opt_vec(p, "har_mocks").unwrap_or_default(),
+                    opt_vec(p, "storage").unwrap_or_default(),
+                );
+                let export = opt_str(p, "export").unwrap_or_default();
+                if export == "playwright" {
+                    ok(json!({
+                        "pack_digest": pack.pack_digest,
+                        "playwright_ts": pack.to_playwright(),
+                        "storage_state_json": pack.storage_state_json(),
+                    }))
+                } else {
+                    ok(pack)
+                }
+            }
+            A11yTestGen => {
+                let page_name = opt_str(p, "page_name").unwrap_or_else(|| "active".into());
+                let violations: Vec<qa::A11yViolation> =
+                    if opt::<bool>(p, "from_active_tab").unwrap_or(false) {
+                        let raw = f.evaluate_on_active(
+                            frontend::FrontendEngine::a11y_dom_probe_script(),
+                        )?;
+                        let nodes: Vec<frontend::DomNode> = serde_json::from_str(&raw)
+                            .map_err(|e| format!("invalid a11y DOM probe JSON: {e}"))?;
+                        let matrix = f.frontend().a11y_matrix(&nodes);
+                        matrix
+                            .cells
+                            .into_iter()
+                            .filter(|c| c.violated)
+                            .map(|c| qa::A11yViolation {
+                                rule_id: c.rule,
+                                selector: c.node,
+                                impact: "serious".into(),
+                                message: c.message,
+                            })
+                            .collect()
+                    } else {
+                        reqv(p, "violations")?
+                    };
+                ok(f.qa().generate_a11y_spec(&page_name, &violations))
+            }
+            SnapshotStrategyPack => {
+                let pixels: Vec<u8> = opt(p, "pixels").unwrap_or_default();
+                ok(f.qa().snapshot_strategy_pack(
+                    str_req(p, "name")?,
+                    &pixels,
+                    opt_str(p, "dom").unwrap_or_default().as_str(),
+                    opt_str(p, "a11y_digest").unwrap_or_default().as_str(),
+                    opt_str(p, "body").unwrap_or_default().as_str(),
+                ))
+            }
+            CoverageAdjacencyMap => ok(f
+                .qa()
+                .coverage_adjacency(&reqv(p, "observed")?, &reqv(p, "covered")?)),
+            ParallelShardPlanner => ok(f.qa().plan_parallel_shards(
+                &reqv(p, "scenarios")?,
+                opt(p, "shard_count").unwrap_or(2),
+            )),
+            TracePropertyMiner => ok(f.qa().mine_trace_properties(&reqv(p, "traces")?)),
+            RuntimeSelfHeal => ok(f
+                .qa()
+                .runtime_self_heal(&req(p, "signals")?, &reqv(p, "live")?)),
+            OracleSynthesizer => ok(f.qa().synthesize_oracles(&req(p, "observation")?)),
+            MutationHookBridge => ok(f.qa().mutation_hook_bridge(&reqv(p, "steps")?)),
 
             // ---------------- AI ----------------
-            LlmInspector => ok(f.ai().inspect_request(&opt_val(p, "body"))),
+            LlmInspector => {
+                let body = opt_val(p, "body");
+                let summary = f.ai().inspect_request(&body);
+                let mut out = serde_json::to_value(&summary)
+                    .map_err(|e| format!("serialize failed: {e}"))?;
+                if let Some(usage) = body
+                    .get("usage")
+                    .or_else(|| p.get("usage"))
+                    .cloned()
+                {
+                    let model = summary.model.clone();
+                    let ev = ai::AiEngine::cache_hit_event_from_usage(&usage, &model, "inspect");
+                    let ledger = f.ai().cache_hit_ledger(&[ev]);
+                    if let Some(obj) = out.as_object_mut() {
+                        obj.insert(
+                            "cache_hit_ledger".into(),
+                            serde_json::to_value(ledger).unwrap_or_default(),
+                        );
+                    }
+                }
+                Ok(out)
+            }
             StreamingWaterfall => ok(f.ai().streaming_waterfall(&reqv(p, "chunks")?)),
             PromptDiff => match op(p) {
                 "record" => ok(f
@@ -452,7 +1065,14 @@ impl FeatureOrchestrator {
                 Some(eps) => ok(f.ai().compare_models_fanout(&eps)),
                 None => ok(f.ai().compare_models(&reqv(p, "runs")?)),
             },
-            AgentTrace => ok(f.ai().analyze_agent_trace(&reqv(p, "steps")?)),
+            AgentTrace => {
+                if let Some(sse) = opt_str(p, "sse") {
+                    let steps = ai::AiEngine::agent_steps_from_sse(&sse);
+                    ok(f.ai().analyze_agent_trace(&steps))
+                } else {
+                    ok(f.ai().analyze_agent_trace(&reqv(p, "steps")?))
+                }
+            }
             ContextHeatmap => ok(f
                 .ai()
                 .context_heatmap(req(p, "window_tokens")?, &reqv(p, "segments")?)),
@@ -464,6 +1084,112 @@ impl FeatureOrchestrator {
             DeterministicReplay => ok(f
                 .ai()
                 .deterministic_replay(&reqv(p, "outputs")?, opt(p, "temperature").unwrap_or(0.0))),
+
+            ToolCallForensics => {
+                if let Some(sse) = opt_str(p, "sse") {
+                    let events = ai::AiEngine::tool_call_events_from_sse(&sse);
+                    ok(f.ai().tool_call_forensics(&events))
+                } else if opt::<bool>(p, "from_tamper").unwrap_or(false)
+                    || opt::<bool>(p, "from_active_tab").unwrap_or(false)
+                {
+                    let history = AppState::global().tamper().get_history();
+                    let mut events = Vec::new();
+                    for (req, resp) in history {
+                        if let Some(body) = req.body.as_deref().or(resp.as_ref().and_then(|r| r.body.as_deref()))
+                        {
+                            if body.contains("tool_calls") || body.contains("function_call") {
+                                events.extend(ai::AiEngine::tool_call_events_from_sse(body));
+                            }
+                        }
+                    }
+                    ok(f.ai().tool_call_forensics(&events))
+                } else {
+                    ok(f.ai().tool_call_forensics(&reqv(p, "events")?))
+                }
+            }
+            JsonSchemaGuard => ok(f.ai().json_schema_guard(
+                &req::<serde_json::Value>(p, "value")?,
+                &req::<serde_json::Value>(p, "schema")?,
+            )),
+            CacheHitLedger => {
+                if let Some(usage) = p.get("usage").cloned() {
+                    let model = opt_str(p, "model").unwrap_or_else(|| "gpt-4o".into());
+                    let key = opt_str(p, "key").unwrap_or_else(|| "usage".into());
+                    let ev = ai::AiEngine::cache_hit_event_from_usage(&usage, &model, &key);
+                    ok(f.ai().cache_hit_ledger(&[ev]))
+                } else {
+                    ok(f.ai().cache_hit_ledger(&reqv(p, "events")?))
+                }
+            }
+            TokenWasteAuditor => ok(f.ai().token_waste_auditor(&reqv(p, "segments")?)),
+            StreamingSloGates => {
+                if let Some(wf) = opt::<ai::StreamWaterfall>(p, "waterfall") {
+                    ok(f.ai().streaming_slo_gates_from_waterfall(
+                        &wf,
+                        opt(p, "ttft_budget_ms").unwrap_or(500),
+                        opt(p, "min_tokens_per_sec").unwrap_or(20.0),
+                        opt(p, "max_gap_budget_ms").unwrap_or(200),
+                    ))
+                } else if opt::<bool>(p, "from_tamper").unwrap_or(false)
+                    || opt::<bool>(p, "from_active_tab").unwrap_or(false)
+                {
+                    let history = AppState::global().tamper().get_history();
+                    let mut chunks = Vec::new();
+                    let mut t = 0u64;
+                    for (_req, resp) in history {
+                        if let Some(body) = resp.and_then(|r| r.body) {
+                            if body.contains("data:") {
+                                for line in body.lines() {
+                                    if line.starts_with("data:") {
+                                        chunks.push(ai::StreamChunk {
+                                            raw: line.to_string(),
+                                            arrival_ms: t,
+                                        });
+                                        t += 25;
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    let wf = f.ai().streaming_waterfall(&chunks);
+                    ok(f.ai().streaming_slo_gates_from_waterfall(
+                        &wf,
+                        opt(p, "ttft_budget_ms").unwrap_or(500),
+                        opt(p, "min_tokens_per_sec").unwrap_or(20.0),
+                        opt(p, "max_gap_budget_ms").unwrap_or(200),
+                    ))
+                } else if let Some(input) = opt::<ai::StreamingSloInput>(p, "input") {
+                    ok(f.ai().streaming_slo_gates(&input))
+                } else {
+                    // Flat demo payload: ttft_ms / tokens_per_sec
+                    let input = ai::StreamingSloInput {
+                        ttft_ms: opt(p, "ttft_ms").unwrap_or(120),
+                        tokens_per_sec: opt(p, "tokens_per_sec").unwrap_or(40.0),
+                        max_gap_ms: opt(p, "max_gap_ms").unwrap_or(50),
+                        ttft_budget_ms: opt(p, "ttft_budget_ms").unwrap_or(500),
+                        min_tokens_per_sec: opt(p, "min_tokens_per_sec").unwrap_or(20.0),
+                        max_gap_budget_ms: opt(p, "max_gap_budget_ms").unwrap_or(200),
+                    };
+                    ok(f.ai().streaming_slo_gates(&input))
+                }
+            }
+            RouterDecisionTrace => ok(f.ai().router_decision_trace(&reqv(p, "decisions")?)),
+            McpTrafficLens => {
+                if let Some(frames) = opt_vec::<serde_json::Value>(p, "jsonrpc") {
+                    let msgs = ai::AiEngine::mcp_messages_from_jsonrpc(&frames);
+                    ok(f.ai().mcp_traffic_lens(&msgs))
+                } else {
+                    ok(f.ai().mcp_traffic_lens(&reqv(p, "messages")?))
+                }
+            }
+            EvalDatasetMiner => ok(f.ai().eval_dataset_miner(&reqv(p, "cases")?)),
+            HallucinationOracle => ok(f.ai().hallucination_oracle(&reqv(p, "checks")?)),
+            EmbeddingRagBench => ok(f.ai().embedding_rag_bench(
+                &reqv(p, "pairs")?,
+                opt(p, "k").unwrap_or(5),
+            )),
+            ProtocolQuirkDiff => ok(f.ai().protocol_quirk_diff(&reqv(p, "samples")?)),
+            LocalCloudParity => ok(f.ai().local_cloud_parity(&reqv(p, "runs")?)),
         }
     }
 }
@@ -565,6 +1291,6 @@ mod tests {
     fn lens_payload_lists_frontend() {
         let out = FeatureOrchestrator::lens_payload("frontend").expect("lens");
         assert_eq!(out["category"], "Frontend");
-        assert_eq!(out["features"].as_array().unwrap().len(), 11);
+        assert_eq!(out["features"].as_array().unwrap().len(), 23);
     }
 }

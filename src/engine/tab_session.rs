@@ -103,6 +103,38 @@ impl IdentityContext {
     }
 }
 
+/// Cloneable CDP evaluate handle for the active tab (used by [`crate::features::cdp_bridge`]).
+#[derive(Clone)]
+pub struct TabEvalHandle {
+    page: Arc<Mutex<Option<Page>>>,
+    runtime: Arc<ChromiumRuntime>,
+}
+
+impl TabEvalHandle {
+    /// Evaluate JS and return a string (unwraps JSON string values).
+    pub fn evaluate_blocking(&self, expression: &str) -> Result<String, String> {
+        let page = self
+            .page
+            .lock()
+            .clone()
+            .ok_or_else(|| "no active CDP page target for tab".to_string())?;
+        let expression = expression.to_owned();
+        block_on_handle(self.runtime.handle(), async move {
+            let result = page
+                .evaluate(expression)
+                .await
+                .map_err(|e| format!("evaluate failed: {e}"))?;
+            let value = result
+                .into_value::<Value>()
+                .map_err(|e| format!("evaluate value: {e}"))?;
+            Ok(match value {
+                Value::String(s) => s,
+                other => other.to_string(),
+            })
+        })
+    }
+}
+
 /// CDP-backed tab session: navigate, history, JS eval, freeze/discard lifecycle.
 pub struct TabSession {
     id: TabId,
@@ -207,7 +239,7 @@ impl TabSession {
         }
     }
 
-    pub fn append_history(&self, mut other: Vec<HistoryEntry>) {
+    pub fn append_history(&self, other: Vec<HistoryEntry>) {
         let mut hist = self.nav_history.lock();
         for mut entry in other {
             if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str()) {
@@ -257,6 +289,8 @@ impl TabSession {
             return Ok(());
         }
 
+        let tab_key = format!("tab-{}", self.id.0);
+        let t0 = Instant::now();
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
             let handle = self.runtime.handle().clone();
@@ -265,11 +299,16 @@ impl TabSession {
                 Ok::<(), ChromiumError>(())
             });
         }
+        let discard_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        crate::app_state::AppState::global()
+            .features()
+            .perf()
+            .note_discard(&tab_key, discard_ms);
 
         *self.lifecycle.write() = TabLifecycle::Discarded;
         self.frozen.store(true, Ordering::Relaxed);
         self.push_trace("Tab discarded (CDP target detached & memory released)");
-        println!("⚡ [Thor TabSession] Tab {} discarded (memory released)", self.id.0);
+        crate::thor_info!("thor::tab_session", "⚡ [Thor TabSession] Tab {} discarded (memory released)", self.id.0);
         Ok(())
     }
 
@@ -279,6 +318,8 @@ impl TabSession {
             return Ok(());
         }
 
+        let tab_key = format!("tab-{}", self.id.0);
+        let t0 = Instant::now();
         let last_url = self
             .nav_history
             .lock()
@@ -290,11 +331,17 @@ impl TabSession {
         if let Some(new_page) = restored_session.page() {
             *self.page.lock() = Some(new_page);
         }
+        let restore_ms = t0.elapsed().as_secs_f64() * 1000.0;
+        crate::app_state::AppState::global()
+            .features()
+            .perf()
+            .note_restore(&tab_key, restore_ms);
+
         *self.lifecycle.write() = TabLifecycle::Active;
         self.frozen.store(false, Ordering::Relaxed);
         self.touch();
         self.push_trace("Tab restored from discarded state");
-        println!("⚡ [Thor TabSession] Tab {} restored to Active at {last_url}", self.id.0);
+        crate::thor_info!("thor::tab_session", "⚡ [Thor TabSession] Tab {} restored to Active at {last_url}", self.id.0);
         Ok(())
     }
 
@@ -423,6 +470,41 @@ impl TabSession {
         })
     }
 
+    /// Capture a PNG screenshot via CDP `Page.captureScreenshot`.
+    pub async fn capture_screenshot(&self) -> ChromiumResult<Vec<u8>> {
+        let page = self.ensure_active_page()?;
+        let params = chromiumoxide::page::ScreenshotParams::builder()
+            .format(
+                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+            )
+            .build();
+        page.screenshot(params)
+            .await
+            .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))
+    }
+
+    pub fn capture_screenshot_blocking(&self) -> ChromiumResult<Vec<u8>> {
+        let page = self.ensure_active_page()?;
+        block_on_handle(self.runtime.handle(), async move {
+            let params = chromiumoxide::page::ScreenshotParams::builder()
+                .format(
+                    chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
+                )
+                .build();
+            page.screenshot(params)
+                .await
+                .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))
+        })
+    }
+
+    /// Cloneable handle for process-wide active-tab evaluate (CDP bridge hook).
+    pub fn eval_handle(&self) -> TabEvalHandle {
+        TabEvalHandle {
+            page: Arc::clone(&self.page),
+            runtime: Arc::clone(&self.runtime),
+        }
+    }
+
     pub async fn title(&self) -> ChromiumResult<String> {
         let page = self.ensure_active_page()?;
         let result = page.evaluate("document.title").await?;
@@ -506,9 +588,18 @@ impl TabSession {
 
     /// Freeze the tab via CDP page lifecycle when available; optionally SIGSTOP the browser pid.
     pub async fn freeze(&self, also_os_suspend: bool) -> ChromiumResult<()> {
+        let tab_key = format!("tab-{}", self.id.0);
         let page_opt = self.page.lock().clone();
         if let Some(page) = page_opt {
-            let _ = CdpPageFreezer::freeze_page(&page).await;
+            match CdpPageFreezer::freeze_page(&page).await {
+                Ok(ms) => {
+                    crate::app_state::AppState::global()
+                        .features()
+                        .perf()
+                        .note_soft_freeze(&tab_key, ms);
+                }
+                Err(_) => {}
+            }
         }
         if also_os_suspend {
             if let Some(pid) = self.runtime.child_pid() {
@@ -524,26 +615,41 @@ impl TabSession {
     pub fn freeze_blocking(&self, also_os_suspend: bool) -> ChromiumResult<()> {
         let page_opt = self.page.lock().clone();
         let pid = self.runtime.child_pid();
-        let result: ChromiumResult<()> = block_on_handle(self.runtime.handle(), async move {
-            if let Some(page) = page_opt {
-                let _ = CdpPageFreezer::freeze_page(&page).await;
-            }
-            if also_os_suspend {
-                if let Some(pid) = pid {
-                    ProcessFreezer::freeze_process(pid)
-                        .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))?;
+        let tab_key = format!("tab-{}", self.id.0);
+        let result: ChromiumResult<Option<f64>> =
+            block_on_handle(self.runtime.handle(), async move {
+                let mut freeze_ms = None;
+                if let Some(page) = page_opt {
+                    if let Ok(ms) = CdpPageFreezer::freeze_page(&page).await {
+                        freeze_ms = Some(ms);
+                    }
                 }
+                if also_os_suspend {
+                    if let Some(pid) = pid {
+                        ProcessFreezer::freeze_process(pid)
+                            .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))?;
+                    }
+                }
+                Ok(freeze_ms)
+            });
+        match result {
+            Ok(freeze_ms) => {
+                if let Some(ms) = freeze_ms {
+                    crate::app_state::AppState::global()
+                        .features()
+                        .perf()
+                        .note_soft_freeze(&tab_key, ms);
+                }
+                self.frozen.store(true, Ordering::Relaxed);
+                *self.lifecycle.write() = TabLifecycle::Frozen;
+                Ok(())
             }
-            Ok(())
-        });
-        if result.is_ok() {
-            self.frozen.store(true, Ordering::Relaxed);
-            *self.lifecycle.write() = TabLifecycle::Frozen;
+            Err(e) => Err(e),
         }
-        result
     }
 
     pub async fn unfreeze(&self, also_os_resume: bool) -> ChromiumResult<()> {
+        let tab_key = format!("tab-{}", self.id.0);
         if also_os_resume {
             if let Some(pid) = self.runtime.child_pid() {
                 ProcessFreezer::unfreeze_process(pid)
@@ -552,7 +658,12 @@ impl TabSession {
         }
         let page_opt = self.page.lock().clone();
         if let Some(page) = page_opt {
-            let _ = CdpPageFreezer::unfreeze_page(&page).await;
+            if let Ok(ms) = CdpPageFreezer::unfreeze_page(&page).await {
+                crate::app_state::AppState::global()
+                    .features()
+                    .perf()
+                    .note_soft_unfreeze(&tab_key, ms);
+            }
         }
         self.frozen.store(false, Ordering::Relaxed);
         *self.lifecycle.write() = TabLifecycle::Active;
@@ -562,23 +673,37 @@ impl TabSession {
     pub fn unfreeze_blocking(&self, also_os_resume: bool) -> ChromiumResult<()> {
         let page_opt = self.page.lock().clone();
         let pid = self.runtime.child_pid();
-        let result: ChromiumResult<()> = block_on_handle(self.runtime.handle(), async move {
-            if also_os_resume {
-                if let Some(pid) = pid {
-                    ProcessFreezer::unfreeze_process(pid)
-                        .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))?;
+        let tab_key = format!("tab-{}", self.id.0);
+        let result: ChromiumResult<Option<f64>> =
+            block_on_handle(self.runtime.handle(), async move {
+                if also_os_resume {
+                    if let Some(pid) = pid {
+                        ProcessFreezer::unfreeze_process(pid)
+                            .map_err(|e| ChromiumError::Other(anyhow::anyhow!(e)))?;
+                    }
                 }
+                let mut unfreeze_ms = None;
+                if let Some(page) = page_opt {
+                    if let Ok(ms) = CdpPageFreezer::unfreeze_page(&page).await {
+                        unfreeze_ms = Some(ms);
+                    }
+                }
+                Ok(unfreeze_ms)
+            });
+        match result {
+            Ok(unfreeze_ms) => {
+                if let Some(ms) = unfreeze_ms {
+                    crate::app_state::AppState::global()
+                        .features()
+                        .perf()
+                        .note_soft_unfreeze(&tab_key, ms);
+                }
+                self.frozen.store(false, Ordering::Relaxed);
+                *self.lifecycle.write() = TabLifecycle::Active;
+                Ok(())
             }
-            if let Some(page) = page_opt {
-                let _ = CdpPageFreezer::unfreeze_page(&page).await;
-            }
-            Ok(())
-        });
-        if result.is_ok() {
-            self.frozen.store(false, Ordering::Relaxed);
-            *self.lifecycle.write() = TabLifecycle::Active;
+            Err(e) => Err(e),
         }
-        result
     }
 
     /// Close the CDP target and expire session.

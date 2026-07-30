@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "Thor Lab DevTools",
+  "version": "0.1.0",
+  "description": "Thor developer-browser lab helpers: React/Vue detection + stack badge for the active tab.",
+  "permissions": ["activeTab", "scripting", "storage"],
+  "host_permissions": ["http://*/*", "https://*/*"],
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "action": {
+    "default_title": "Thor Lab"
+  },
+  "content_scripts": [
+    {
+      "matches": ["http://*/*", "https://*/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}

@@ -14,7 +14,8 @@ pub mod network;
 pub mod paths;
 pub mod shell;
 pub mod mcp;
+pub mod logging;
 
 pub use app_state::{AppState, SecurityShieldToggles};
 pub use features::{FeatureEngine, FeatureId, FeatureRegistry, FeatureStatus};
-pub use paths::{thor_chromium_profile_dir, thor_data_dir};
+pub use paths::{thor_chromium_profile_dir, thor_data_dir, thor_downloads_dir, thor_quarantine_path};

@@ -9,7 +9,6 @@ use axum::{
     http::{StatusCode, HeaderMap},
     Json,
     middleware::{self, Next},
-    response::IntoResponse,
 };
 use tokio::sync::{broadcast, Mutex};
 use tokio_stream::wrappers::BroadcastStream;
@@ -76,7 +75,7 @@ pub async fn start_mcp_server(engine: EngineHandle) {
 
     tokio::spawn(async move {
         let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
-        println!("⚡ [Thor MCP] Server listening on http://{}", addr);
+        crate::thor_info!("thor::mcp", "⚡ [Thor MCP] Server listening on http://{}", addr);
         if let Ok(listener) = tokio::net::TcpListener::bind(addr).await {
             let _ = axum::serve(listener, app).await;
         }

@@ -19,18 +19,20 @@ pub mod network;
 pub mod paths;
 pub mod shell;
 pub mod mcp;
+pub mod logging;
 
 fn main() -> anyhow::Result<()> {
-    println!("============================================================");
-    println!("⚡ [Thor Main Log] Starting Thor Developer Browser...");
-    println!("⚡ [Thor Main Log] Initializing Tokio background runtime...");
+    let _logger = thor::logging::init_logging();
+    thor::thor_info!("thor::main", "============================================================");
+    thor::thor_info!("thor::main", "⚡ [Thor Main Log] Starting Thor Developer Browser...");
+    thor::thor_info!("thor::main", "⚡ [Thor Main Log] Initializing Tokio background runtime...");
     let _rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
     let _guard = _rt.enter();
-    println!("⚡ [Thor Main Log] Tokio runtime active.");
-    println!("⚡ [Thor Main Log] Delegating execution to native shell on main OS thread...");
-    println!("============================================================");
+    thor::thor_info!("thor::main", "⚡ [Thor Main Log] Tokio runtime active.");
+    thor::thor_info!("thor::main", "⚡ [Thor Main Log] Delegating execution to native shell on main OS thread...");
+    thor::thor_info!("thor::main", "============================================================");
 
     shell::run()?;
     Ok(())

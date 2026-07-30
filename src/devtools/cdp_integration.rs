@@ -214,6 +214,12 @@ impl CdpIntegration {
 /// This is on the hot instrumentation path (called per navigation), so it stays
 /// allocation-light — see `sla::SLA_CDP_PARSE_WEB_VITALS`.
 pub fn parse_web_vitals(json: &str) -> Option<BrowserMetrics> {
+    parse_web_vitals_ex(json).map(|(m, _)| m)
+}
+
+/// Same as [`parse_web_vitals`], plus optional LCP media byte size from
+/// `lcpSize` or `lcpElement.size` when present and > 0.
+pub fn parse_web_vitals_ex(json: &str) -> Option<(BrowserMetrics, Option<u64>)> {
     let value: serde_json::Value = serde_json::from_str(json).ok()?;
     let obj = value.as_object()?;
 
@@ -226,17 +232,31 @@ pub fn parse_web_vitals(json: &str) -> Option<BrowserMetrics> {
         0.0
     };
 
-    Some(BrowserMetrics {
-        lcp_ms: num(&["lcp", "lcp_ms", "largestContentfulPaint"]),
-        fid_ms: num(&["fid", "fid_ms", "firstInputDelay"]),
-        inp_ms: num(&["inp", "inp_ms", "interactionToNextPaint"]),
-        tbt_ms: num(&["tbt", "tbt_ms", "totalBlockingTime"]),
-        cls: num(&["cls", "cumulativeLayoutShift"]),
-        fcp_ms: num(&["fcp", "fcp_ms", "firstContentfulPaint"]),
-        ttfb_ms: num(&["ttfb", "ttfb_ms", "timeToFirstByte"]),
-        dom_content_loaded_ms: num(&["domContentLoaded", "dom_content_loaded_ms", "dcl"]),
-        dom_interactive_ms: num(&["domInteractive", "dom_interactive_ms"]),
-    })
+    let lcp_media_bytes = obj
+        .get("lcpSize")
+        .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+        .or_else(|| {
+            obj.get("lcpElement")
+                .and_then(|el| el.get("size"))
+                .and_then(|v| v.as_u64().or_else(|| v.as_f64().map(|f| f as u64)))
+        })
+        .filter(|&n| n > 0);
+
+    Some((
+        BrowserMetrics {
+            lcp_ms: num(&["lcp", "lcp_ms", "largestContentfulPaint"]),
+            fid_ms: num(&["fid", "fid_ms", "firstInputDelay"]),
+            inp_ms: num(&["inp", "inp_ms", "interactionToNextPaint"]),
+            tbt_ms: num(&["tbt", "tbt_ms", "totalBlockingTime"]),
+            cls: num(&["cls", "cumulativeLayoutShift"]),
+            fcp_ms: num(&["fcp", "fcp_ms", "firstContentfulPaint"]),
+            ttfb_ms: num(&["ttfb", "ttfb_ms", "timeToFirstByte"]),
+            dom_content_loaded_ms: num(&["domContentLoaded", "dom_content_loaded_ms", "dcl"]),
+            dom_interactive_ms: num(&["domInteractive", "dom_interactive_ms"]),
+            synthetic: false,
+        },
+        lcp_media_bytes,
+    ))
 }
 
 impl Default for CdpIntegration {
@@ -301,6 +321,23 @@ mod tests {
         // Non-object payloads are rejected.
         assert!(parse_web_vitals("42").is_none());
         assert!(parse_web_vitals("not json").is_none());
+    }
+
+    #[test]
+    fn parse_web_vitals_ex_lcp_media_bytes() {
+        let (v, media) = parse_web_vitals_ex(
+            r#"{"lcp": 1200.0, "lcpSize": 81920, "lcpElement": {"size": 81920, "url": "https://x/hero.jpg"}}"#,
+        )
+        .expect("parse");
+        assert!((v.lcp_ms - 1200.0).abs() < 1e-6);
+        assert_eq!(media, Some(81_920));
+
+        let (_, from_el) =
+            parse_web_vitals_ex(r#"{"lcp": 1.0, "lcpElement": {"size": 4096}}"#).unwrap();
+        assert_eq!(from_el, Some(4096));
+
+        let (_, zero) = parse_web_vitals_ex(r#"{"lcp": 1.0, "lcpSize": 0}"#).unwrap();
+        assert_eq!(zero, None);
     }
 
     #[test]

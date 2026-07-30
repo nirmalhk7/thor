@@ -104,31 +104,44 @@ pub fn default_thor_profile_dir() -> PathBuf {
 }
 
 /// Resolve the Chromium/Chrome binary path.
+///
+/// Product order:
+/// 1. `THOR_CHROMIUM_PATH`
+/// 2. Thor-owned candidates (Frameworks, ChromiumCache, out/Thor)
+/// 3. System Chrome/Chromium **only** if `THOR_ALLOW_SYSTEM_CHROME=1` (labs/CI — not product)
 pub fn discover_chromium_path() -> Option<ChromiumSource> {
+    if let Ok(path) = std::env::var(THOR_CHROMIUM_PATH_ENV) {
+        let p = PathBuf::from(path);
+        if p.is_file() || p.exists() {
+            return Some(ChromiumSource::DevelopmentOverride(p));
+        }
+    }
+
+    if let Some(owned) = super::product::discover_owned_chromium_path() {
+        #[cfg(not(debug_assertions))]
+        {
+            return Some(ChromiumSource::Bundled(owned));
+        }
+        #[cfg(debug_assertions)]
+        {
+            return Some(ChromiumSource::DevelopmentOverride(owned));
+        }
+    }
+
     #[cfg(not(debug_assertions))]
     {
-        Some(ChromiumSource::Bundled(crate::paths::thor_bundled_chromium_path()))
+        let bundled = crate::paths::thor_bundled_chromium_path();
+        if bundled.is_file() || bundled.exists() {
+            return Some(ChromiumSource::Bundled(bundled));
+        }
+    }
+
+    if !super::product::allow_system_chrome() {
+        return None;
     }
 
     #[cfg(debug_assertions)]
     {
-        if let Ok(path) = std::env::var(THOR_CHROMIUM_PATH_ENV) {
-            let p = PathBuf::from(path);
-            if p.is_file() || p.exists() {
-                return Some(ChromiumSource::DevelopmentOverride(p));
-            }
-        }
-
-        let local_cache = crate::paths::thor_data_dir()
-            .join("ChromiumCache")
-            .join("Chromium.app")
-            .join("Contents")
-            .join("MacOS")
-            .join("Chromium");
-        if local_cache.is_file() || local_cache.exists() {
-            return Some(ChromiumSource::DevelopmentOverride(local_cache));
-        }
-
         for candidate in common_chromium_candidates() {
             if candidate.is_file() || candidate.exists() {
                 return Some(ChromiumSource::DevelopmentOverride(candidate));
@@ -148,9 +161,18 @@ pub fn discover_chromium_path() -> Option<ChromiumSource> {
                 return Some(ChromiumSource::DevelopmentOverride(p));
             }
         }
-
-        None
     }
+
+    #[cfg(not(debug_assertions))]
+    {
+        for candidate in common_chromium_candidates() {
+            if candidate.is_file() || candidate.exists() {
+                return Some(ChromiumSource::DevelopmentOverride(candidate));
+            }
+        }
+    }
+
+    None
 }
 
 /// Candidate install locations (platform-specific). Documented fallback list.

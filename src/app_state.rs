@@ -1,3 +1,5 @@
+use crate::dx::bitwarden::BitwardenVault;
+use crate::engine::browser_features::DownloadManager;
 use crate::engine::engine_coordinator::EngineHandle;
 use crate::engine::profiles::{ProfileConfig, ProfileManager, ProfileMode};
 use crate::features::FeatureEngine;
@@ -105,6 +107,13 @@ pub struct AppState {
     locust: Mutex<Option<LocustHandle>>,
     features: FeatureEngine,
     engine_handle: Mutex<Option<EngineHandle>>,
+    vault: BitwardenVault,
+    downloads: DownloadManager,
+    /// Auto Picture-in-Picture when tab hides while video plays.
+    auto_pip: AtomicBool,
+    /// Run passive Visit Recon after each navigation.
+    visit_recon_enabled: AtomicBool,
+    last_visit_recon: Mutex<Option<crate::dx::visit_recon::VisitReconReport>>,
 }
 
 static APP_STATE: OnceLock<AppState> = OnceLock::new();
@@ -131,6 +140,11 @@ impl AppState {
             locust: Mutex::new(None),
             features: FeatureEngine::new(),
             engine_handle: Mutex::new(None),
+            vault: BitwardenVault::new(),
+            downloads: DownloadManager::new(),
+            auto_pip: AtomicBool::new(true),
+            visit_recon_enabled: AtomicBool::new(true),
+            last_visit_recon: Mutex::new(None),
         }
     }
 
@@ -159,9 +173,48 @@ impl AppState {
         self.tab_history.lock()
     }
 
-    /// Process-wide Engineer Feature Suite (72 features across six domains).
+    /// Process-wide Engineer Feature Suite (144 features across six domains).
     pub fn features(&self) -> &FeatureEngine {
         &self.features
+    }
+
+    /// Access the in-memory ring buffer for live log queries.
+    pub fn logs(&self) -> std::sync::Arc<crate::logging::LogBuffer> {
+        crate::logging::Logger::global().buffer()
+    }
+
+    /// First-class Bitwarden vault (`bw` CLI; session in memory only).
+    pub fn vault(&self) -> &BitwardenVault {
+        &self.vault
+    }
+
+    /// Browser-owned download ledger (Cmd+⇧K → Downloads).
+    pub fn downloads(&self) -> &DownloadManager {
+        &self.downloads
+    }
+
+    pub fn auto_pip_enabled(&self) -> bool {
+        self.auto_pip.load(Ordering::SeqCst)
+    }
+
+    pub fn set_auto_pip(&self, enabled: bool) {
+        self.auto_pip.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn visit_recon_enabled(&self) -> bool {
+        self.visit_recon_enabled.load(Ordering::SeqCst)
+    }
+
+    pub fn set_visit_recon_enabled(&self, enabled: bool) {
+        self.visit_recon_enabled.store(enabled, Ordering::SeqCst);
+    }
+
+    pub fn store_visit_recon(&self, report: crate::dx::visit_recon::VisitReconReport) {
+        *self.last_visit_recon.lock() = Some(report);
+    }
+
+    pub fn last_visit_recon(&self) -> Option<crate::dx::visit_recon::VisitReconReport> {
+        self.last_visit_recon.lock().clone()
     }
 
     pub fn set_engine_handle(&self, handle: EngineHandle) {
