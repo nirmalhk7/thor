@@ -1,0 +1,305 @@
+{
+  "schema_version": 1,
+  "chromium_ref": "151.0.7922.47",
+  "required_patches": [
+    "0001-thor-product-name.patch",
+    "0002-thor-privacy-defaults.patch",
+    "0003-thor-native-gpc.patch",
+    "0004-thor-new-identity.patch",
+    "0005-thor-navigation-url-cleanup.patch",
+    "0006-thor-native-profile-policy.patch",
+    "0007-Reduce-WebGL-debug-renderer-exposure.patch",
+    "0008-thor-destroy-identity.patch"
+  ],
+  "required_gn_args": {
+    "is_debug": false,
+    "is_component_build": false,
+    "is_official_build": true,
+    "use_thin_lto": true,
+    "init_stack_vars": true,
+    "init_stack_vars_zero": true,
+    "use_partition_alloc_as_malloc": true,
+    "enable_backup_ref_ptr_support": true,
+    "enable_backup_ref_ptr_feature_flag": true
+  },
+  "gn_declaration_files": {
+    "is_debug": "build/config/BUILDCONFIG.gn",
+    "is_component_build": "build/config/BUILDCONFIG.gn",
+    "is_official_build": "build/config/BUILDCONFIG.gn",
+    "use_thin_lto": "build/config/compiler/compiler.gni",
+    "init_stack_vars": "build/config/compiler/BUILD.gn",
+    "init_stack_vars_zero": "build/config/compiler/BUILD.gn",
+    "use_partition_alloc_as_malloc": "base/allocator/partition_allocator/partition_alloc.gni",
+    "enable_backup_ref_ptr_support": "base/allocator/partition_allocator/partition_alloc.gni",
+    "enable_backup_ref_ptr_feature_flag": "base/allocator/partition_allocator/partition_alloc.gni"
+  },
+  "privacy_patch_replacements": [
+    {
+      "path": "chrome/browser/chrome_content_browser_client.cc",
+      "removed": "  registry->RegisterBooleanPref(prefs::kEnableHyperlinkAuditing, true);",
+      "added": "  registry->RegisterBooleanPref(prefs::kEnableHyperlinkAuditing, false);"
+    },
+    {
+      "path": "chrome/browser/net/profile_network_context_service.cc",
+      "removed": "                                true);",
+      "added": "                                false);"
+    },
+    {
+      "path": "chrome/browser/preloading/preloading_prefs.cc",
+      "removed": "      static_cast<int>(NetworkPredictionOptions::kDefault),",
+      "added": "      static_cast<int>(NetworkPredictionOptions::kDisabled),"
+    },
+    {
+      "path": "chrome/browser/profiles/profile.cc",
+      "removed": "      true,",
+      "added": "      false,"
+    },
+    {
+      "path": "chrome/browser/profiles/profile_impl.cc",
+      "removed": "  registry->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled, false);",
+      "added": "  registry->RegisterBooleanPref(prefs::kSavingBrowserHistoryDisabled, true);"
+    },
+    {
+      "path": "chrome/browser/ui/browser_ui_prefs.cc",
+      "removed": "      translate::prefs::kOfferTranslateEnabled, true,",
+      "added": "      translate::prefs::kOfferTranslateEnabled, false,"
+    },
+    {
+      "path": "chrome/browser/ui/browser_ui_prefs.cc",
+      "removed": "      prefs::kEnableDoNotTrack, false,",
+      "added": "      prefs::kEnableDoNotTrack, true,"
+    },
+    {
+      "path": "chrome/browser/ui/browser_ui_prefs.cc",
+      "removed": "      prefs::kHttpsOnlyModeEnabled, false,",
+      "added": "      prefs::kHttpsOnlyModeEnabled, true,"
+    },
+    {
+      "path": "components/content_settings/core/browser/cookie_settings.cc",
+      "removed": "      static_cast<int>(CookieControlsMode::kIncognitoOnly),",
+      "added": "      static_cast<int>(CookieControlsMode::kBlockThirdParty),"
+    },
+    {
+      "path": "components/privacy_sandbox/privacy_sandbox_prefs.cc",
+      "removed": "      prefs::kPrivacySandboxRelatedWebsiteSetsEnabled, true,",
+      "added": "      prefs::kPrivacySandboxRelatedWebsiteSetsEnabled, false,"
+    },
+    {
+      "path": "content/public/common/content_features.cc",
+      "removed": "BASE_FEATURE(kStrictOriginIsolation, base::FEATURE_DISABLED_BY_DEFAULT);",
+      "added": "BASE_FEATURE(kStrictOriginIsolation, base::FEATURE_ENABLED_BY_DEFAULT);"
+    }
+  ],
+  "native_gpc_patch_additions": [
+    {
+      "path": "chrome/browser/ui/browser_ui_prefs.cc",
+      "added": "      prefs::kEnableGlobalPrivacyControl, true,"
+    },
+    {
+      "path": "content/browser/loader/browser_initiated_resource_request.cc",
+      "added": "    headers->SetHeaderIfMissing(blink::kGlobalPrivacyControlHeader, \"1\");"
+    },
+    {
+      "path": "content/renderer/render_frame_impl.cc",
+      "added": "        blink::WebString::FromUtf8(blink::kGlobalPrivacyControlHeader), \"1\");"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/global_privacy_control/navigator_global_privacy_control.idl",
+      "added": "Navigator includes NavigatorGlobalPrivacyControl;"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/global_privacy_control/navigator_global_privacy_control.idl",
+      "added": "WorkerNavigator includes NavigatorGlobalPrivacyControl;"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/service_worker/web_service_worker_fetch_context_impl.h",
+      "added": "    return renderer_preferences_.enable_global_privacy_control;"
+    },
+    {
+      "path": "third_party/blink/renderer/platform/loader/fetch/url_loader/dedicated_or_shared_worker_global_scope_context_impl.h",
+      "added": "    return renderer_preferences_.enable_global_privacy_control;"
+    },
+    {
+      "path": "components/policy/resources/templates/policy_definitions/Miscellaneous/GlobalPrivacyControlEnabled.yaml",
+      "added": "default: true"
+    }
+  ],
+  "native_identity_patch_additions": [
+    {
+      "path": "chrome/app/chrome_command_ids.h",
+      "added": "#define IDC_NEW_THOR_IDENTITY           34002"
+    },
+    {
+      "path": "chrome/browser/profiles/profile.cc",
+      "added": "  if (*this == PrimaryID() || IsDevTools() || IsThorIdentity() ||"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands.cc",
+      "added": "      Profile::OTRProfileID::CreateUniqueForThorIdentity(),"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands.cc",
+      "added": "    ProfileDestroyer::DestroyOTRProfileWhenAppropriate(identity_profile);"
+    },
+    {
+      "path": "chrome/browser/ui/browser_command_controller.cc",
+      "added": "    case IDC_NEW_THOR_IDENTITY:"
+    },
+    {
+      "path": "chrome/browser/ui/toolbar/app_menu_model.cc",
+      "added": "    AddItemWithStringIdAndVectorIcon(this, IDC_NEW_THOR_IDENTITY,"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands_browsertest.cc",
+      "added": "  EXPECT_TRUE(ExecuteCommand(browser(), IDC_NEW_THOR_IDENTITY));"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands_browsertest.cc",
+      "added": "  first_browser->GetTabStripModel()->CloseAllTabs();"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands_browsertest.cc",
+      "added": "  EXPECT_FALSE(IsCommandEnabled(browser(), IDC_NEW_THOR_IDENTITY));"
+    },
+    {
+      "path": "chrome/browser/net/profile_network_context_service.cc",
+      "added": "      profile->GetOTRProfileID().IsThorIdentity()) {"
+    },
+    {
+      "path": "chrome/browser/ui/browser_manager_service.cc",
+      "added": "  const bool is_disposable_otr_profile ="
+    },
+    {
+      "path": "chrome/browser/ui/browser_command_controller.cc",
+      "added": "      incognito_availability == policy::IncognitoModeAvailability::kEnabled &&"
+    }
+  ],
+  "navigation_cleanup_patch_additions": [
+    {
+      "path": "chrome/browser/chrome_content_browser_client.cc",
+      "added": "#include \"chrome/browser/thor/privacy/thor_url_cleanup_throttle.h\""
+    },
+    {
+      "path": "chrome/browser/chrome_content_browser_client.cc",
+      "added": "          thor::privacy::ThorURLCleanupThrottle::MaybeCreate(request)) {"
+    },
+    {
+      "path": "chrome/browser/thor/privacy/thor_url_cleanup_throttle.cc",
+      "added": "GURL CleanTrackingParameters(const GURL& url) {"
+    },
+    {
+      "path": "chrome/browser/thor/privacy/thor_url_cleanup_throttle.cc",
+      "added": "  if (!request.is_outermost_main_frame || request.method != \"GET\") {"
+    }
+  ],
+  "native_profile_policy_patch_additions": [
+    {
+      "path": "chrome/browser/content_settings/host_content_settings_map_factory.cc",
+      "added": "  thor::privacy::ApplyThorPrivacyProfilePolicy(settings_map.get());"
+    },
+    {
+      "path": "chrome/browser/content_settings/thor_privacy_profile_policy.cc",
+      "added": "constexpr char kThorPrivacyProfileSwitch[] = \"thor-privacy-profile\";"
+    },
+    {
+      "path": "chrome/browser/content_settings/thor_privacy_profile_policy.cc",
+      "added": "    ContentSettingsType::USB_GUARD,"
+    },
+    {
+      "path": "chrome/browser/content_settings/thor_privacy_profile_policy.cc",
+      "added": "    ContentSettingsType::LOCAL_FONTS,"
+    },
+    {
+      "path": "chrome/browser/content_settings/thor_privacy_profile_policy.cc",
+      "added": "      ContentSettingsType::JAVASCRIPT_JIT,"
+    },
+    {
+      "path": "chrome/browser/content_settings/thor_privacy_profile_policy_unittest.cc",
+      "added": "TEST(ThorPrivacyProfilePolicyTest, UnknownModeFailsClosed) {"
+    }
+  ],
+  "native_webgl_privacy_patch_additions": [
+    {
+      "path": "chrome/browser/chrome_content_browser_client.cc",
+      "added": "          blink::switches::kThorReduceWebGLIdentifyingData);"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc",
+      "added": "  if (tracker->MatchesName(WebGLDebugRendererInfo::ExtensionName()) &&"
+    },
+    {
+      "path": "third_party/blink/renderer/modules/webgl/thor_webgl_privacy_test.cc",
+      "added": "TEST(ThorWebGLPrivacyTest, HidesDebugRendererWithReductionSwitch) {"
+    }
+  ],
+  "native_identity_destroy_patch_additions": [
+    {
+      "path": "chrome/app/chrome_command_ids.h",
+      "added": "#define IDC_DESTROY_THOR_IDENTITY       34003"
+    },
+    {
+      "path": "chrome/browser/ui/browser_command_controller.cc",
+      "added": "    case IDC_DESTROY_THOR_IDENTITY:"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands.cc",
+      "added": "bool DestroyThorIdentity(BrowserWindowInterface* browser) {"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands.cc",
+      "added": "        if (candidate->GetProfile() == identity_profile)"
+    },
+    {
+      "path": "chrome/browser/ui/browser_command_controller.cc",
+      "added": "      profile->IsOffTheRecord() && profile->GetOTRProfileID().IsThorIdentity());"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands_browsertest.cc",
+      "added": "  EXPECT_TRUE(ExecuteCommand(second_browser, IDC_DESTROY_THOR_IDENTITY));"
+    },
+    {
+      "path": "chrome/browser/ui/browser_commands_browsertest.cc",
+      "added": "  EXPECT_FALSE(DestroyThorIdentity(browser()));"
+    },
+    {
+      "path": "chrome/browser/ui/toolbar/app_menu_model.cc",
+      "added": "    AddItemWithStringIdAndVectorIcon(this, IDC_DESTROY_THOR_IDENTITY,"
+    }
+  ],
+  "required_launcher_tokens": [
+    "URL=\"${1:-about:blank}\"",
+    "PORT=\"${THOR_REMOTE_DEBUGGING_PORT:-0}\"",
+    "WEBRTC_POLICY=\"${THOR_WEBRTC_IP_POLICY:-disable_non_proxied_udp}\"",
+    "--no-pings",
+    "--thor-privacy-profile=\"$PRIVACY_PROFILE\"",
+    "--dns-over-https-mode=\"$DOH_MODE\"",
+    "--load-extension=\"$SHIELD_DIR\""
+  ],
+  "required_mcp_tools": [
+    "thor_identity_new",
+    "thor_identity_destroy",
+    "thor_identities_list",
+    "thor_tabs_create_isolated",
+    "thor_privacy_status"
+  ],
+  "required_acceptance_tokens": [
+    "async fn check_native_query_cleanup",
+    "utm_source=acceptance&gclid=discard&keep=1",
+    "live navigation did not remove known tracking parameters",
+    "UNVERIFIED_RELEASE_BOUNDARIES",
+    "Safe Browsing and component readiness",
+    "native identity browser-chrome commands",
+    "profile API/JIT and WebGL policy"
+  ],
+  "forbidden_release_tokens": [
+    "--no-sandbox",
+    "--disable-web-security",
+    "--ignore-certificate-errors",
+    "--disable-site-isolation-trials",
+    "--disable-safe-browsing",
+    "is_official_build = false",
+    "use_thin_lto = false",
+    "enable_backup_ref_ptr_support = false",
+    "use_partition_alloc_as_malloc = false"
+  ]
+}

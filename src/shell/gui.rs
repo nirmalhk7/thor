@@ -936,7 +936,7 @@ pub fn get_chrome_html() -> String {
       </button>
 
       <div class="omnibox" id="omnibox" onpointerdown="focusOmnibox(event)">
-        <div class="ssl-icon secure" id="sslIcon" onclick="showSslDetails()" title="SSL Connection Details">🔒</div>
+        <div class="ssl-icon secure" id="sslIcon" onclick="showSslDetails()" title="Connection scheme information">🔒</div>
         <input type="text" class="url-input" id="urlInput"
                placeholder="Search Google or enter URL..." spellcheck="false" autocomplete="off" autocapitalize="off"
                tabindex="0">
@@ -953,8 +953,8 @@ pub fn get_chrome_html() -> String {
 
     <!-- Actions -->
     <div class="actions">
-      <button class="action-btn" id="profileToggleBtn" onclick="toggleProfileMode()" title="Toggle Profile Mode (DevHost vs StealthTarget)">
-        <span id="profileModeLabel">⚡ DevHost</span>
+      <button class="action-btn" id="profileToggleBtn" onclick="toggleProfileMode()" title="Cycle profile mode (Stealth, Hardened, DevHost)" style="border-color:#4ade80;color:#4ade80;">
+        <span id="profileModeLabel">🛡️ Stealth</span>
       </button>
       <button class="action-btn" onclick="toggleInterceptorBar()" title="Traffic Interceptor & Repeater">
         <span>🎯 Tamper</span>
@@ -993,7 +993,7 @@ pub fn get_chrome_html() -> String {
   <div class="stack-detector-bar" id="stackDetectorBar">
     <div class="stack-detector-title">⚡ Tech Stack</div>
     <div class="stack-pills" id="stackPills"></div>
-    <div class="tracker-stripped-notice" id="trackerNotice">🛡️ Trackers Stripped</div>
+    <div class="tracker-stripped-notice" id="trackerNotice">No scan results</div>
     <div class="stack-actions">
       <button class="stack-btn" onclick="rescanTechStack()" title="Rescan Tech Stack">🔄 Rescan</button>
       <button class="stack-btn" onclick="toggleTechStackBar()" title="Hide Tech Stack Bar">✕</button>
@@ -1208,28 +1208,22 @@ let bookmarks = [
   { icon: '📄', title: 'Rust Documentation', url: 'https://docs.rs', category: 'bookmarks', badge: 'Dev' },
 ];
 
-// Extensions: metadata / info-only in Cmd+Shift+K (no load / toggle theater)
+// Product extension inventory. Do not advertise unbundled third-party extensions.
 let extensionsList = [
-  { id: 'ext_react', icon: '🧩', title: 'React Developer Tools v5.2.0', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_redux', icon: '🧩', title: 'Redux DevTools v3.1.3', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_vue', icon: '🧩', title: 'Vue.js devtools v6.5.1', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_ublock', icon: '🧩', title: 'uBlock Origin — Privacy Guard', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_tailwind', icon: '🧩', title: 'Tailwind CSS Inspector', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_postman', icon: '🧩', title: 'Postman API Harness', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
-  { id: 'ext_wappalyzer', icon: '🧩', title: 'Wappalyzer Profiler', desc: 'Metadata only — extension loading not wired', category: 'extensions', badge: 'Info', infoOnly: true },
+  { id: 'ext_thor_shield', icon: '🛡️', title: 'Thor Shield', desc: 'Thor-owned tracker rules and Chromium privacy defaults; loaded by product Chromium', category: 'extensions', badge: 'Product', infoOnly: true },
 ];
 
 let securityControls = [
-  { id: 'sec_global', icon: '🛡️', title: 'Global Security & Anti-Tracking Shield', desc: 'Enforce strict privacy protections, DNT, and GPC headers', enabled: true, category: 'security', badge: 'Active' },
+  { id: 'sec_global', icon: '🛡️', title: 'Privacy Policy Status', desc: 'Mandatory Shield and native policy baseline; effective native readback is required before enforcement is claimed', category: 'security', badge: 'Verify', infoOnly: true },
   { id: 'sec_sanitizer', icon: '🚫', title: 'URL Tracker Sanitizer (strip utm_*, gclid, fbclid)', desc: 'Strip tracking parameters from URLs automatically before navigation', enabled: true, category: 'security', badge: 'Stripping' },
-  { id: 'sec_https', icon: '🔒', title: 'Strict HTTPS Upgrade & Mixed Content Blocker', desc: 'Upgrade plain HTTP requests to HTTPS and block unencrypted subresources', enabled: true, category: 'security', badge: 'Enforced' },
-  { id: 'sec_cookies', icon: '🍪', title: 'Third-Party Cookie & Canvas Fingerprint Blocker', desc: 'Isolate cookies per site and randomize WebGL/Canvas fingerprinting', enabled: true, category: 'security', badge: 'Blocked' },
-  { id: 'sec_adblock', icon: '🛑', title: 'Ad & Telemetry Blocker (uBlock Core Engine)', desc: 'Block known advertising, analytics, and telemetry domains', enabled: true, category: 'security', badge: 'Blocking' },
-  { id: 'sec_local_ca', icon: '⚡', title: 'Local ECDSA P-256 SSL CA Certificate', desc: 'Trusted root CA for local HTTPS dev servers (*.localhost)', enabled: true, category: 'security', badge: 'Trusted' },
+  { id: 'sec_https', icon: '🔒', title: 'HTTPS-Only and Mixed-Content Policy', desc: 'Native HTTPS-Only is a downstream target; Shield upgrades are defense-in-depth until packaged-browser verification passes', category: 'security', badge: 'Verify', infoOnly: true },
+  { id: 'sec_cookies', icon: '🍪', title: 'Cookie Isolation and Anti-Fingerprinting', desc: 'Third-party-cookie defaults and MAIN-world defenses are transitional until native identity and fingerprint tests pass', category: 'security', badge: 'Transition', infoOnly: true },
+  { id: 'sec_adblock', icon: '🛑', title: 'Request Filtering', desc: 'Signed native filter enforcement is not claimed until its component and live corpus tests pass', category: 'security', badge: 'Pending', infoOnly: true },
+  { id: 'sec_local_ca', icon: '⚡', title: 'Local Development CA', desc: 'Requires explicit consent, profile-scoped installation, command-status checks, and trust readback; trust is never assumed', category: 'security', badge: 'Consent', infoOnly: true },
 ];
 
 const settingsFeatures = [
-  { icon: '⚙️', title: 'Toggle DevHost / Stealth Profile', action: () => toggleProfileMode(), category: 'settings', badge: 'Profile' },
+  { icon: '⚙️', title: 'Cycle DevHost / Stealth / Hardened Profile', action: () => toggleProfileMode(), category: 'settings', badge: 'Profile' },
   { icon: '🎯', title: 'Traffic Interceptor & Repeater', action: () => toggleInterceptorBar(), category: 'settings', badge: 'Tamper' },
   { icon: '🛠️', title: 'JWT & Protocol Decoder Studio', action: () => toggleDecoderBar(), category: 'settings', badge: 'Decoder' },
   { icon: '⚡', title: 'Tech Stack Detector Bar', action: () => toggleTechStackBar(), category: 'settings', badge: 'Tech' },
@@ -1545,9 +1539,9 @@ function rescanTechStack() {
   const notice = document.getElementById('trackerNotice');
   if (notice) {
     notice.style.display = 'inline-flex';
-    notice.textContent = '🔄 Stack rescanned (estimate until engine)';
+    notice.textContent = '🔄 Native stack scan requested';
     setTimeout(() => {
-      notice.textContent = '🛡️ Trackers Stripped';
+      notice.textContent = 'Awaiting engine results';
     }, 1800);
   }
 }
@@ -1558,55 +1552,16 @@ function detectTechStackForUrl(url, isEstimate) {
   container.innerHTML = '';
 
   const pills = [];
-  const uLower = url ? url.toLowerCase() : '';
   const estimate = isEstimate !== false;
 
-  if (uLower.includes('github')) {
-    pills.push({ icon: '⚛️', name: 'React', ver: '18.3.1' });
-    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
-    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
-    pills.push({ icon: '⬢', name: 'GraphQL', ver: 'v16.8' });
-    pills.push({ icon: '💎', name: 'Ruby on Rails', ver: '7.1' });
-  } else if (uLower.includes('google')) {
-    pills.push({ icon: '🔍', name: 'Closure Compiler', ver: 'v2024' });
-    pills.push({ icon: '⚡', name: 'WebAssembly', ver: 'WASM 2.0' });
-    pills.push({ icon: '🌐', name: 'HTTP/3 (QUIC)', ver: 'TLS 1.3' });
-    pills.push({ icon: '🛡️', name: 'Security Shield', ver: 'Enforced' });
-  } else if (uLower.includes('localhost:3000') || uLower.includes('nextjs')) {
-    pills.push({ icon: '▲', name: 'Next.js', ver: '14.2.3' });
-    pills.push({ icon: '⚛️', name: 'React', ver: '18.3.1' });
-    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
-    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
-    pills.push({ icon: '🟢', name: 'Node.js', ver: 'v20.12' });
-  } else if (uLower.includes('localhost:5173') || uLower.includes('vite')) {
-    pills.push({ icon: '⚡', name: 'Vite', ver: '5.2.11' });
-    pills.push({ icon: '🟢', name: 'Vue 3 / Pinia', ver: '3.4.27' });
-    pills.push({ icon: '🔷', name: 'TypeScript', ver: '5.4.5' });
-    pills.push({ icon: '🎨', name: 'Tailwind CSS', ver: '3.4.1' });
-  } else if (uLower.includes('docs.rs') || uLower.includes('crates.io')) {
-    pills.push({ icon: '🦀', name: 'Rust', ver: '1.80.0' });
-    pills.push({ icon: '⚡', name: 'WebAssembly', ver: 'wasm32-unknown' });
-    pills.push({ icon: '📚', name: 'mdBook', ver: 'v0.4' });
-    pills.push({ icon: '📦', name: 'Serde', ver: '1.0.203' });
-  } else if (uLower.includes('stackoverflow')) {
-    pills.push({ icon: '💬', name: 'ASP.NET Core', ver: '8.0' });
-    pills.push({ icon: '⚛️', name: 'React', ver: '18.2' });
-    pills.push({ icon: '⚡', name: 'Redis Cache', ver: 'v7.2' });
-  } else {
-    pills.push({ icon: '⚡', name: 'Web Components', ver: 'ES2024' });
-    pills.push({ icon: '🌐', name: 'HTTP/3 (QUIC)', ver: 'TLS 1.3' });
-    pills.push({ icon: '🛡️', name: 'Security Shield', ver: 'Active' });
-    pills.push({ icon: '📦', name: 'Wasm Core', ver: 'Thor' });
-  }
-
   if (estimate) {
-    pills.unshift({ icon: '≈', name: 'URL estimate', ver: 'pending engine' });
+    pills.push({ icon: '…', name: 'Awaiting native scan', ver: 'no inferred results' });
   }
 
   pills.forEach(p => {
     const pill = document.createElement('div');
     pill.className = 'tech-pill';
-    pill.title = `${p.name} (${p.ver})` + (estimate ? ' — URL heuristic estimate' : '');
+    pill.title = `${p.name} (${p.ver})` + (estimate ? ' — native scan pending' : '');
     pill.onclick = () => showTechPillDetails(p, estimate);
 
     const iconSpan = document.createElement('span');
@@ -1625,8 +1580,11 @@ function detectTechStackForUrl(url, isEstimate) {
 }
 
 function showTechPillDetails(p, isEstimate) {
-  const kind = isEstimate ? 'URL heuristic estimate (engine rescan pending)' : 'Engine detection';
-  alert(`⚡ Detected Technology:\n\nFramework/Lib: ${p.name}\nVersion: ${p.ver}\nSource: ${kind}`);
+  if (isEstimate) {
+    alert('Native technology scan pending. Thor does not infer a stack from the URL.');
+    return;
+  }
+  alert(`⚡ Detected Technology:\n\nFramework/Lib: ${p.name}\nVersion: ${p.ver}\nSource: Engine detection`);
 }
 
 window.__thorUpdateTechStack = function(pills) {
@@ -1791,24 +1749,31 @@ window.__thorVisitRecon = function(report) {
 let locustRunning = false;
 let locustStats = { rps: 0, failures: 0, p50: 0, p95: 0, total: 0 };
 
-// ==================== DUAL PROFILE & SECURITY TOOLBAR HANDLERS ====================
-let currentProfileMode = 'DevHost';
+// ==================== PRIVACY PROFILE & SECURITY TOOLBAR HANDLERS ====================
+let currentProfileMode = 'StealthTarget';
 let isInterceptionActive = false;
 
 function toggleProfileMode() {
-  currentProfileMode = currentProfileMode === 'DevHost' ? 'StealthTarget' : 'DevHost';
+  currentProfileMode = currentProfileMode === 'StealthTarget'
+    ? 'HardenedTarget'
+    : (currentProfileMode === 'HardenedTarget' ? 'DevHost' : 'StealthTarget');
   const label = document.getElementById('profileModeLabel');
   const btn = document.getElementById('profileToggleBtn');
   if (currentProfileMode === 'StealthTarget') {
     label.textContent = '🛡️ Stealth';
     btn.style.borderColor = '#4ade80';
     btn.style.color = '#4ade80';
-    alert('🛡️ StealthTarget Profile Activated:\n• URL Tracking Stripper: ACTIVE\n• GPC & DNT Headers: ENFORCED\n• Canvas/WebGL Fingerprint Noise: RANDOMIZED\n• IDE Bridge: PAUSED');
+    alert('🛡️ StealthTarget selected. Effective protections depend on native policy readback; unavailable controls must report a degraded state.');
+  } else if (currentProfileMode === 'HardenedTarget') {
+    label.textContent = '🔐 Hardened';
+    btn.style.borderColor = '#f59e0b';
+    btn.style.color = '#f59e0b';
+    alert('🔐 HardenedTarget selected. Per-site JIT and dangerous-API enforcement must be confirmed by effective native policy readback.');
   } else {
     label.textContent = '⚡ DevHost';
     btn.style.borderColor = 'var(--border)';
     btn.style.color = 'var(--text-secondary)';
-    alert('⚡ DevHost Profile Activated:\n• Unrestricted WebGL & DOM APIs\n• IDE Source-Bridge Enabled\n• Custom Headers & Local SSL Active');
+    alert('⚡ DevHost selected. Development permissions and local CA trust remain explicit, permission-gated settings.');
   }
   ipc('toggle_profile', { mode: currentProfileMode });
 }
@@ -2637,7 +2602,7 @@ function selectModalItem(item) {
     } else if (key === 'toggle_devtools') {
       ipc('toggle_devtools');
     } else if (key === 'toggle_profile') {
-      ipc('toggle_profile');
+      toggleProfileMode();
     } else if (key === 'run_idor_matrix') {
       ipc('run_idor_matrix');
     } else if (key.startsWith('open_ide_')) {
@@ -2792,7 +2757,7 @@ function updateSslStatus(url) {
   } else if (url.startsWith('https://')) {
     lockEl.textContent = '🔒';
     lockEl.className = 'ssl-icon secure';
-    lockEl.title = 'Connection is Secure (TLS 1.3 / SSL Encrypted)\nClick for certificate details';
+    lockEl.title = 'HTTPS URL. Use Chromium page info for negotiated TLS and certificate status.';
   } else if (url.startsWith('http://')) {
     lockEl.textContent = '⚠️';
     lockEl.className = 'ssl-icon unsecure';
@@ -2811,9 +2776,9 @@ function showSslDetails() {
   if (url.startsWith('https://')) {
     try {
       const host = new URL(url).hostname;
-      statusMsg = '🔒 Connection is Secure\n\nDomain: ' + host + '\nProtocol: TLS 1.3 / HTTPS\nCertificate: Valid (256-bit ECC / RSA Encryption)\nThor Local SSL CA: Trusted Root active.';
+      statusMsg = '🔒 HTTPS URL\n\nDomain: ' + host + '\nScheme: HTTPS\n\nThis shell does not inspect the negotiated TLS version, certificate validity, or local CA trust. Use Chromium page info for authoritative connection details.';
     } catch {
-      statusMsg = '🔒 Secure HTTPS Connection';
+      statusMsg = '🔒 HTTPS URL\n\nUse Chromium page info for authoritative connection details.';
     }
   } else if (url.startsWith('http://')) {
     try {
@@ -2992,7 +2957,6 @@ renderTabs();
 </html>"##;
     html.replace("__THOR_FEATURE_COUNT__", &feature_count.to_string())
 }
-
 
 pub fn wire_cmd_k_palette() {}
 pub fn wire_cmd_shift_k_palette() {}

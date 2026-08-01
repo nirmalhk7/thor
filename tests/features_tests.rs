@@ -500,7 +500,13 @@ fn test_performance_group_registered_and_executes() {
         .collect();
     assert!(pe.detect_leak(&samples).leaking);
     // 5. Synthetic Monitor
-    pe.record_synthetic(perf_features::SyntheticCheck { target: "api".into(), success: true, latency_ms: 100.0, timestamp_ms: 1 });
+    pe.record_synthetic(perf_features::SyntheticCheck {
+        target: "api".into(),
+        success: true,
+        latency_ms: 100.0,
+        timestamp_ms: 1,
+        synthetic: false,
+    });
     assert_eq!(pe.synthetic_summary("api").checks, 1);
     // 6. RUM vs Lab
     let _ = pe.rum_vs_lab(&sample_vitals(), &sample_vitals());

@@ -12,8 +12,8 @@ static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> anyhow::Result<()> {
     let _logger = thor::logging::init_logging();
-    let url = std::env::var("THOR_SELF_CDP_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:9222".to_string());
+    let url =
+        std::env::var("THOR_SELF_CDP_URL").unwrap_or_else(|_| "http://127.0.0.1:9222".to_string());
 
     thor::thor_info!("thor::labs", "Thor Labs sidecar attaching to {url}");
 
@@ -23,11 +23,7 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async move {
         let runtime = thor::engine::self_cdp::connect_runtime(url).await?;
-        thor::thor_info!(
-            "thor::labs",
-            "Connected — ws {}",
-            runtime.websocket_url()
-        );
+        thor::thor_info!("thor::labs", "Connected — ws {}", runtime.websocket_url());
 
         let _ = thor::AppState::global();
         let features = thor::AppState::global().features();
@@ -39,7 +35,10 @@ fn main() -> anyhow::Result<()> {
         let _ = features;
 
         let (engine, handle) =
-            thor::engine::engine_coordinator::BrowserEngine::new(runtime);
+            thor::engine::engine_coordinator::BrowserEngine::attach_existing(runtime)
+                .await
+                .map_err(|e| anyhow::anyhow!(e))?;
+        thor::AppState::global().set_engine_handle(handle.clone());
         tokio::spawn(engine.run());
         thor::mcp::server::start_mcp_server(handle).await;
         Ok::<(), anyhow::Error>(())

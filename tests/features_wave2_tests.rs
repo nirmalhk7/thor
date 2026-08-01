@@ -958,4 +958,3 @@ fn test_wave2_registry_still_144() {
     assert_eq!(FeatureId::ALL.len(), 144);
     assert_eq!(FeatureEngine::new().registry().len(), 144);
 }
-

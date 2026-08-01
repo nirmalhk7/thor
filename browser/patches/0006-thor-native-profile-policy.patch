@@ -1,0 +1,243 @@
+From c583827a354674180dc8856eb65aeb3f0afa5ee9 Mon Sep 17 00:00:00 2001
+From: Thor Browser <engineering@thor.local>
+Date: Fri, 31 Jul 2026 00:00:00 +0000
+Subject: [PATCH 6/6] Bind Thor privacy profiles to native content settings
+
+Apply Stealth by default, expose explicit DevHost and Hardened modes through
+Thor's owned-browser launch switch, deny high-entropy device APIs in target
+profiles, and disable V8 JIT by default in Hardened. Unknown profile values
+fail closed. Managed Chromium content-setting policy remains higher priority;
+per-site exceptions remain available through Chromium's existing controls.
+---
+ chrome/browser/content_settings/BUILD.gn       |  3 +
+ .../host_content_settings_map_factory.cc       |  2 +
+ .../thor_privacy_profile_policy.cc             | 78 ++++++++++++++++++
+ .../thor_privacy_profile_policy.h              | 40 +++++++++
+ .../thor_privacy_profile_policy_unittest.cc    | 44 ++++++++++
+ 5 files changed, 167 insertions(+)
+ create mode 100644 chrome/browser/content_settings/thor_privacy_profile_policy.cc
+ create mode 100644 chrome/browser/content_settings/thor_privacy_profile_policy.h
+ create mode 100644 chrome/browser/content_settings/thor_privacy_profile_policy_unittest.cc
+
+diff --git a/chrome/browser/content_settings/BUILD.gn b/chrome/browser/content_settings/BUILD.gn
+index cf323d1..7444ec3 100644
+--- a/chrome/browser/content_settings/BUILD.gn
++++ b/chrome/browser/content_settings/BUILD.gn
+@@ -156,6 +156,8 @@ source_set("content_settings_factory_impl") {
+   sources = [
+     "cookie_settings_factory.cc",
+     "host_content_settings_map_factory.cc",
++    "thor_privacy_profile_policy.cc",
++    "thor_privacy_profile_policy.h",
+   ]
+ 
+   deps = [
+@@ -294,6 +296,7 @@ source_set("unit_tests") {
+     "one_time_permission_provider_unittest.cc",
+     "page_specific_content_settings_unittest.cc",
+     "sound_content_setting_observer_unittest.cc",
++    "thor_privacy_profile_policy_unittest.cc",
+   ]
+ 
+   public_deps = [
+diff --git a/chrome/browser/content_settings/host_content_settings_map_factory.cc b/chrome/browser/content_settings/host_content_settings_map_factory.cc
+index fd3e487..7804058 100644
+--- a/chrome/browser/content_settings/host_content_settings_map_factory.cc
++++ b/chrome/browser/content_settings/host_content_settings_map_factory.cc
+@@ -10,6 +10,7 @@
+ #include "build/build_config.h"
+ #include "build/buildflag.h"
+ #include "chrome/browser/content_settings/one_time_permission_provider.h"
++#include "chrome/browser/content_settings/thor_privacy_profile_policy.h"
+ #include "chrome/browser/permissions/one_time_permissions_tracker_factory.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/profiles/profile_key.h"
+@@ -205,5 +206,6 @@ scoped_refptr<RefcountedKeyedService>
+   settings_map->RegisterUserModifiableProvider(
+       ProviderType::kOneTimePermissionProvider,
+       std::move(one_time_permission_provider));
++  thor::privacy::ApplyThorPrivacyProfilePolicy(settings_map.get());
+   return settings_map;
+ }
+diff --git a/chrome/browser/content_settings/thor_privacy_profile_policy.cc b/chrome/browser/content_settings/thor_privacy_profile_policy.cc
+new file mode 100644
+index 0000000..ac05ebc
+--- /dev/null
++++ b/chrome/browser/content_settings/thor_privacy_profile_policy.cc
+@@ -0,0 +1,78 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/content_settings/thor_privacy_profile_policy.h"
++
++#include <array>
++#include <string>
++
++#include "base/check.h"
++#include "base/command_line.h"
++#include "components/content_settings/core/browser/host_content_settings_map.h"
++#include "components/content_settings/core/common/content_settings_types.h"
++
++namespace thor::privacy {
++namespace {
++
++constexpr char kThorPrivacyProfileSwitch[] = "thor-privacy-profile";
++
++constexpr std::array<ContentSettingsType, 8> kDangerousApiSettings = {
++    ContentSettingsType::MIDI_SYSEX,
++    ContentSettingsType::BLUETOOTH_GUARD,
++    ContentSettingsType::SENSORS,
++    ContentSettingsType::USB_GUARD,
++    ContentSettingsType::SERIAL_GUARD,
++    ContentSettingsType::HID_GUARD,
++    ContentSettingsType::LOCAL_FONTS,
++    ContentSettingsType::IDLE_DETECTION,
++};
++
++}  // namespace
++
++ThorPrivacyProfileMode ParseThorPrivacyProfileMode(std::string_view value) {
++  if (value.empty() || value == "stealth") {
++    return ThorPrivacyProfileMode::kStealth;
++  }
++  if (value == "devhost") {
++    return ThorPrivacyProfileMode::kDevHost;
++  }
++  if (value == "hardened") {
++    return ThorPrivacyProfileMode::kHardened;
++  }
++  return ThorPrivacyProfileMode::kHardened;
++}
++
++ThorPrivacyProfileDefaults GetThorPrivacyProfileDefaults(
++    ThorPrivacyProfileMode mode) {
++  if (mode == ThorPrivacyProfileMode::kDevHost) {
++    return {CONTENT_SETTING_ASK, CONTENT_SETTING_ALLOW};
++  }
++  if (mode == ThorPrivacyProfileMode::kStealth) {
++    return {CONTENT_SETTING_BLOCK, CONTENT_SETTING_ALLOW};
++  }
++  return {CONTENT_SETTING_BLOCK, CONTENT_SETTING_BLOCK};
++}
++
++void ApplyThorPrivacyProfilePolicy(HostContentSettingsMap* settings_map) {
++  CHECK(settings_map);
++  const std::string value =
++      base::CommandLine::ForCurrentProcess()->GetSwitchValueASCII(
++          kThorPrivacyProfileSwitch);
++  const ThorPrivacyProfileDefaults defaults =
++      GetThorPrivacyProfileDefaults(ParseThorPrivacyProfileMode(value));
++
++  for (ContentSettingsType type : kDangerousApiSettings) {
++    settings_map->SetDefaultContentSetting(type,
++                                           defaults.dangerous_api_default);
++  }
++  // Direct Sockets has no prompt state. Keep it denied by default in every
++  // profile; DevHost can grant an explicit per-site exception.
++  settings_map->SetDefaultContentSetting(ContentSettingsType::DIRECT_SOCKETS,
++                                         CONTENT_SETTING_BLOCK);
++  settings_map->SetDefaultContentSetting(
++      ContentSettingsType::JAVASCRIPT_JIT,
++      defaults.javascript_jit_default);
++}
++
++}  // namespace thor::privacy
+diff --git a/chrome/browser/content_settings/thor_privacy_profile_policy.h b/chrome/browser/content_settings/thor_privacy_profile_policy.h
+new file mode 100644
+index 0000000..24996a4
+--- /dev/null
++++ b/chrome/browser/content_settings/thor_privacy_profile_policy.h
+@@ -0,0 +1,40 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_CONTENT_SETTINGS_THOR_PRIVACY_PROFILE_POLICY_H_
++#define CHROME_BROWSER_CONTENT_SETTINGS_THOR_PRIVACY_PROFILE_POLICY_H_
++
++#include <string_view>
++
++#include "components/content_settings/core/common/content_settings.h"
++
++class HostContentSettingsMap;
++
++namespace thor::privacy {
++
++enum class ThorPrivacyProfileMode {
++  kDevHost,
++  kStealth,
++  kHardened,
++};
++
++struct ThorPrivacyProfileDefaults {
++  ContentSetting dangerous_api_default;
++  ContentSetting javascript_jit_default;
++};
++
++// Empty means Thor's default Stealth profile. Unknown values fail closed to
++// Hardened instead of silently weakening policy.
++ThorPrivacyProfileMode ParseThorPrivacyProfileMode(std::string_view value);
++
++ThorPrivacyProfileDefaults GetThorPrivacyProfileDefaults(
++    ThorPrivacyProfileMode mode);
++
++// Applies inherited user-level defaults. Chromium's managed-policy provider
++// remains higher priority, and explicit per-site settings remain available.
++void ApplyThorPrivacyProfilePolicy(HostContentSettingsMap* settings_map);
++
++}  // namespace thor::privacy
++
++#endif  // CHROME_BROWSER_CONTENT_SETTINGS_THOR_PRIVACY_PROFILE_POLICY_H_
+diff --git a/chrome/browser/content_settings/thor_privacy_profile_policy_unittest.cc b/chrome/browser/content_settings/thor_privacy_profile_policy_unittest.cc
+new file mode 100644
+index 0000000..0b12ce4
+--- /dev/null
++++ b/chrome/browser/content_settings/thor_privacy_profile_policy_unittest.cc
+@@ -0,0 +1,44 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/content_settings/thor_privacy_profile_policy.h"
++
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace thor::privacy {
++
++TEST(ThorPrivacyProfilePolicyTest, ParsesSupportedModesAndDefaultsToStealth) {
++  EXPECT_EQ(ThorPrivacyProfileMode::kDevHost,
++            ParseThorPrivacyProfileMode("devhost"));
++  EXPECT_EQ(ThorPrivacyProfileMode::kStealth,
++            ParseThorPrivacyProfileMode("stealth"));
++  EXPECT_EQ(ThorPrivacyProfileMode::kStealth,
++            ParseThorPrivacyProfileMode(""));
++  EXPECT_EQ(ThorPrivacyProfileMode::kHardened,
++            ParseThorPrivacyProfileMode("hardened"));
++}
++
++TEST(ThorPrivacyProfilePolicyTest, UnknownModeFailsClosed) {
++  EXPECT_EQ(ThorPrivacyProfileMode::kHardened,
++            ParseThorPrivacyProfileMode("unsupported"));
++}
++
++TEST(ThorPrivacyProfilePolicyTest, ProfilesHaveDistinctNativeDefaults) {
++  const auto devhost =
++      GetThorPrivacyProfileDefaults(ThorPrivacyProfileMode::kDevHost);
++  EXPECT_EQ(CONTENT_SETTING_ASK, devhost.dangerous_api_default);
++  EXPECT_EQ(CONTENT_SETTING_ALLOW, devhost.javascript_jit_default);
++
++  const auto stealth =
++      GetThorPrivacyProfileDefaults(ThorPrivacyProfileMode::kStealth);
++  EXPECT_EQ(CONTENT_SETTING_BLOCK, stealth.dangerous_api_default);
++  EXPECT_EQ(CONTENT_SETTING_ALLOW, stealth.javascript_jit_default);
++
++  const auto hardened =
++      GetThorPrivacyProfileDefaults(ThorPrivacyProfileMode::kHardened);
++  EXPECT_EQ(CONTENT_SETTING_BLOCK, hardened.dangerous_api_default);
++  EXPECT_EQ(CONTENT_SETTING_BLOCK, hardened.javascript_jit_default);
++}
++
++}  // namespace thor::privacy
+-- 
+2.50.1

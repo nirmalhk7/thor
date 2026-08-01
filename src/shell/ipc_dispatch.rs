@@ -40,6 +40,10 @@ pub fn dispatch_privileged(cmd: &str, payload: &Value) -> DispatchResult {
                     state.set_profile_mode(ProfileMode::DevHost);
                     ProfileMode::DevHost
                 }
+                Some("HardenedTarget") | Some("hardened") => {
+                    state.set_profile_mode(ProfileMode::HardenedTarget);
+                    ProfileMode::HardenedTarget
+                }
                 _ => state.toggle_profile(),
             };
             DispatchResult::Message(format!("profile:{next:?}"))

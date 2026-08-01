@@ -30,7 +30,7 @@ pub fn engine_status() -> Value {
             "chromium-downstream-missing",
             "M3-downstream",
             "unavailable",
-            "Owned Chromium not found — run ./scripts/bootstrap_chromium_snapshot.sh or build_chromium.sh.",
+            "Thor-owned Chromium not found — run fetch_chromium.sh, apply_thor_branding.sh, then build_chromium.sh.",
         )
     };
 
@@ -70,6 +70,8 @@ mod tests {
         assert_eq!(s["cdp"], true);
         assert_eq!(s["product"], "chromium-downstream");
         assert_eq!(s["intercept"], false);
-        assert!(s["shell"].as_str().unwrap().contains("chromium") || s["shell"] == "legacy-dual-window");
+        assert!(
+            s["shell"].as_str().unwrap().contains("chromium") || s["shell"] == "legacy-dual-window"
+        );
     }
 }

@@ -8,12 +8,21 @@ Thor embeds a high-performance **Model Context Protocol (MCP)** server implement
 
 ## Server Endpoints & Architecture
 
-The MCP server runs locally on **`http://127.0.0.1:8765`**:
+The MCP server binds an ephemeral loopback port (`127.0.0.1:0`). After the
+listener, OS-CSPRNG bearer token, and file readback checks succeed, Thor writes:
+
+- `mcp-endpoint`: the current `http://127.0.0.1:<port>` base URL.
+- `mcp-token`: the 256-bit bearer token encoded as lowercase hex.
+
+Both files are in Thor's process data directory and are atomically published
+with owner-only permissions (`0600` on Unix). Clients must read them for each
+process start, send `Authorization: Bearer <token>`, and never hardcode a port or
+a token. Thor removes unchanged discovery files when the server exits.
 
 | Endpoint | Method | Content-Type | Purpose |
 | :--- | :--- | :--- | :--- |
-| `/sse` | `GET` | `text/event-stream` | Establishes Server-Sent Events (SSE) stream connection. Emits `endpoint` initial event and JSON-RPC responses. |
-| `/message` | `POST` | `application/json` | Receives JSON-RPC 2.0 requests from client. |
+| `/mcp/sse` | `GET` | `text/event-stream` | Establishes Server-Sent Events (SSE) stream connection. Emits `endpoint` initial event and JSON-RPC responses. |
+| `/mcp/message` | `POST` | `application/json` | Receives JSON-RPC 2.0 requests from client. |
 
 ---
 
@@ -54,11 +63,26 @@ Thor's MCP server implements version `2024-11-05` of the MCP specification:
 
 ### 3. `tools/list`
 - **Request**: `{"jsonrpc": "2.0", "id": 2, "method": "tools/list"}`
-- **Response**: Returns array of 8 registered tool definitions with JSON schema inputs.
+- **Response**: Returns the registered browser, identity, privacy, and developer
+  tool definitions with JSON schema inputs.
 
 ---
 
-## 🛠️ The 8 Browser Automation Tools
+## 🛠️ Browser, identity, and privacy tools
+
+In addition to navigation and inspection tools, Thor exposes:
+
+- `thor_identities_list` — read numeric identity IDs and user-visible labels.
+- `thor_identity_new` — create a Thor-owned Chromium identity, optionally with
+  a label of up to 80 characters.
+- `thor_identity_destroy` — close bound tabs and destroy the identity's native
+  Chromium context and storage.
+- `thor_tabs_create_isolated` — create a disposable tab in a fresh
+  `BrowserContext`.
+- `thor_privacy_status` — read requested policy plus effective network/security
+  evidence; unprobed controls are reported as `unchecked` or `degraded`.
+
+The remaining tools drive browser navigation and developer inspection.
 
 ### 1. `thor_get_screenshot`
 - **Description**: Takes a PNG screenshot of the active browser tab via CDP `Page.captureScreenshot`.
@@ -120,7 +144,7 @@ Add Thor to your Claude Desktop configuration file:
 {
   "mcpServers": {
     "thor": {
-      "url": "http://127.0.0.1:8765/sse"
+      "url": "<contents-of-mcp-endpoint>/mcp/sse"
     }
   }
 }
@@ -130,11 +154,17 @@ Add Thor to your Claude Desktop configuration file:
 
 ```python
 import asyncio
+import os
+from pathlib import Path
 from mcp import ClientSession
 from mcp.client.sse import sse_client
 
 async def main():
-    async with sse_client("http://127.0.0.1:8765/sse") as streams:
+    data_dir = Path(os.environ["THOR_DATA_DIR"])
+    endpoint = (data_dir / "mcp-endpoint").read_text().strip()
+    token = (data_dir / "mcp-token").read_text().strip()
+    headers = {"Authorization": f"Bearer {token}"}
+    async with sse_client(f"{endpoint}/mcp/sse", headers=headers) as streams:
         async with ClientSession(streams[0], streams[1]) as session:
             await session.initialize()
             

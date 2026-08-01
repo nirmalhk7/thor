@@ -1,26 +1,16 @@
 {
   "product": "thor-chromium-downstream",
-  "revision": "1313161",
-  "chromium_src_tag": "1313161",
-  "version": "131.0.6778.0",
-  "notes": "Source builds use scripts/fetch_chromium.sh + build_chromium.sh. Snapshot ZIPs bootstrap owned binary only — not the long-term product end-state. Revision verified available for Mac_Arm chrome-mac.zip.",
-  "artifacts": {
-    "aarch64-apple-darwin": {
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac_Arm/1313161/chrome-mac.zip",
-      "sha256": "verify-on-bootstrap",
-      "executable": "Chromium.app/Contents/MacOS/Chromium"
-    },
-    "x86_64-apple-darwin": {
-      "url": "https://storage.googleapis.com/chromium-browser-snapshots/Mac/1313161/chrome-mac.zip",
-      "sha256": "verify-on-bootstrap",
-      "executable": "Chromium.app/Contents/MacOS/Chromium"
-    }
-  },
+  "revision": "151.0.7922.47",
+  "chromium_src_tag": "151.0.7922.47",
+  "version": "151.0.7922.47",
+  "notes": "Thor builds Chromium directly from the source tag in thor_browser_manifest.json, applies Thor-owned branding, and packages the resulting browser. Snapshot ZIPs are development-only and are never a package input.",
+  "artifacts": {},
   "licenses": ["LICENSE"],
-  "source_revision_url": "https://chromium.googlesource.com/chromium/src/+/refs/heads/main",
+  "source_revision_url": "https://chromium.googlesource.com/chromium/src/+/151.0.7922.47",
   "downstream": {
     "branding_dir": "browser/branding",
     "gn_args": "browser/gn_args.thor.gn",
+    "thor_browser_manifest": "thor_browser_manifest.json",
     "isolation_map": "browser/isolation/MAPPING.md",
     "docs": "docs/CHROMIUM_DOWNSTREAM.md"
   }

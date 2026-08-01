@@ -103,12 +103,19 @@ impl FindInPage {
 
         let eval_val = session.evaluate_js_blocking(&js_script).unwrap_or_default();
         let count = eval_val.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-        let found = eval_val.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+        let found = eval_val
+            .get("found")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let mut curr_active = *self.active_match.lock();
         if found {
             if options.find_next {
-                curr_active = if curr_active >= count || curr_active == 0 { 1 } else { curr_active + 1 };
+                curr_active = if curr_active >= count || curr_active == 0 {
+                    1
+                } else {
+                    curr_active + 1
+                };
             } else {
                 curr_active = 1;
             }
@@ -261,6 +268,8 @@ pub struct DownloadItem {
     pub received_bytes: u64,
     pub state: DownloadState,
     pub error_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub security_evidence: Option<crate::net::DownloadEvidence>,
 }
 
 impl DownloadItem {
@@ -288,7 +297,15 @@ impl DownloadItem {
                 .progress_pct()
                 .map(|p| format!("{p}%"))
                 .unwrap_or_else(|| "Downloading".into()),
-            DownloadState::Completed => "Done".into(),
+            DownloadState::Completed => match self
+                .security_evidence
+                .as_ref()
+                .map(|evidence| evidence.status)
+            {
+                Some(crate::net::DownloadSecurityStatus::Allowed) => "Verified".into(),
+                Some(crate::net::DownloadSecurityStatus::Blocked) => "Blocked".into(),
+                _ => "Unverified".into(),
+            },
             DownloadState::Cancelled => "Cancelled".into(),
             DownloadState::Failed => "Failed".into(),
         }
@@ -322,6 +339,7 @@ impl DownloadManager {
             received_bytes: 0,
             state: DownloadState::Pending,
             error_reason: None,
+            security_evidence: None,
         };
         self.downloads.lock().insert(id.clone(), item);
         id
@@ -338,10 +356,54 @@ impl DownloadManager {
     pub fn complete_download(&self, download_id: &str) {
         if let Some(item) = self.downloads.lock().get_mut(download_id) {
             item.state = DownloadState::Completed;
+            item.security_evidence = None;
             if item.total_bytes > 0 {
                 item.received_bytes = item.total_bytes;
             }
         }
+    }
+
+    /// Finish a download with fail-private evidence. Chromium's native Safe
+    /// Browsing verdict must be supplied by the browser integration; Thor never
+    /// derives an Allowed verdict from a successful hash or scanner alone.
+    pub fn complete_download_with_security(
+        &self,
+        download_id: &str,
+        native_safe_browsing_verdict: crate::net::DownloadVerdict,
+        scanner: Option<crate::net::DownloadScannerConfig>,
+    ) -> Result<crate::net::DownloadEvidence, String> {
+        let target_path = self
+            .downloads
+            .lock()
+            .get(download_id)
+            .map(|item| item.target_path.clone())
+            .ok_or_else(|| format!("download not found: {download_id}"))?;
+        let mut request = crate::net::DownloadSecurityRequest::new(&target_path);
+        request.native_safe_browsing_verdict = native_safe_browsing_verdict;
+        request.scanner = scanner;
+        let evidence = crate::net::DownloadSecurity::inspect_completed(request)?;
+
+        let mut downloads = self.downloads.lock();
+        let item = downloads
+            .get_mut(download_id)
+            .ok_or_else(|| format!("download disappeared during inspection: {download_id}"))?;
+        if item.target_path != target_path {
+            return Err(format!(
+                "download target changed during inspection: {download_id}"
+            ));
+        }
+        item.security_evidence = Some(evidence.clone());
+        if evidence.status == crate::net::DownloadSecurityStatus::Blocked {
+            item.state = DownloadState::Failed;
+            item.error_reason = Some("download blocked by security inspection".into());
+        } else {
+            item.state = DownloadState::Completed;
+            item.error_reason = None;
+            if item.total_bytes > 0 {
+                item.received_bytes = item.total_bytes;
+            }
+        }
+        Ok(evidence)
     }
 
     pub fn cancel_download(&self, download_id: &str) {
@@ -384,12 +446,10 @@ impl FaviconService {
 
     pub fn resolve_default_favicon_url(url: &str) -> String {
         let origin = HostZoomMap::extract_origin(url);
-        if let Some(pos) = origin.find("://") {
-            let host = &origin[pos + 3..];
-            format!("https://www.google.com/s2/favicons?domain={host}&sz=64")
-        } else {
-            format!("{origin}/favicon.ico")
-        }
+        // Do not leak visited hosts to a third-party favicon proxy. A missing
+        // page-declared icon falls back to the page origin; native Chromium
+        // network policy then applies the same privacy controls as navigation.
+        format!("{origin}/favicon.ico")
     }
 
     pub fn fetch_favicon(&self, session: &TabSession, page_url: &str) -> ChromiumResult<String> {
@@ -573,7 +633,8 @@ impl NetworkCostTracker {
             }
         };
 
-        self.total_overhead_us.fetch_add(overhead_us, Ordering::Relaxed);
+        self.total_overhead_us
+            .fetch_add(overhead_us, Ordering::Relaxed);
     }
 
     pub fn get_metrics(&self) -> NetworkCostMetrics {
@@ -654,14 +715,42 @@ mod tests {
     }
 
     #[test]
+    fn download_completion_records_explicit_security_evidence() {
+        let path = std::env::temp_dir().join(format!(
+            "thor-download-evidence-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        ));
+        std::fs::write(&path, b"verified download fixture").unwrap();
+        let mgr = DownloadManager::new();
+        let id = mgr.start_download(
+            "https://example.com/file.zip",
+            path.to_str().expect("temporary path is UTF-8"),
+        );
+        let evidence = mgr
+            .complete_download_with_security(&id, crate::net::DownloadVerdict::Allowed, None)
+            .unwrap();
+        assert_eq!(evidence.status, crate::net::DownloadSecurityStatus::Allowed);
+        let item = mgr.get_download(&id).unwrap();
+        assert_eq!(item.state, DownloadState::Completed);
+        assert_eq!(item.security_evidence, Some(evidence));
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn test_favicon_service_resolution() {
         let favicon_svc = FaviconService::new();
         let default_url = FaviconService::resolve_default_favicon_url("https://rust-lang.org/docs");
-        assert!(default_url.contains("google.com/s2/favicons?domain=rust-lang.org"));
+        assert_eq!(default_url, "https://rust-lang.org/favicon.ico");
 
         favicon_svc.cache_favicon("https://rust-lang.org", "https://rust-lang.org/favicon.png");
         assert_eq!(
-            favicon_svc.get_cached_favicon("https://rust-lang.org").as_deref(),
+            favicon_svc
+                .get_cached_favicon("https://rust-lang.org")
+                .as_deref(),
             Some("https://rust-lang.org/favicon.png")
         );
     }

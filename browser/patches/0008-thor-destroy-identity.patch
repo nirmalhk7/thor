@@ -1,0 +1,175 @@
+From c583827a354674180dc8856eb65aeb3f0afa5ee9 Mon Sep 17 00:00:00 2001
+From: Thor downstream maintainers
+Date: Fri, 31 Jul 2026 00:00:00 -0600
+Subject: [PATCH 8/8] Add explicit native identity destruction
+X-Downstream-Base: Chromium 151.0.7922.47
+X-Downstream-Base-Commit: c583827a354674180dc8856eb65aeb3f0afa5ee9
+X-License: Chromium BSD-style license (LICENSE)
+X-Design: Request closure of every browser window bound to the selected Thor
+ OTR profile;
+ BrowserManagerService owns final ProfileDestroyer teardown after the last
+ native window closes.
+---
+ chrome/app/chrome_command_ids.h                 |  1 +
+ chrome/app/generated_resources.grd              |  6 ++++++
+ chrome/browser/ui/browser_command_controller.cc |  6 ++++++
+ chrome/browser/ui/browser_commands.cc           | 22 ++++++++++++++++++++++
+ chrome/browser/ui/browser_commands.h            |  4 ++++
+ chrome/browser/ui/browser_commands_browsertest.cc |  5 ++++-
+ chrome/browser/ui/toolbar/app_menu_model.cc      |  5 +++++
+ 7 files changed, 48 insertions(+), 1 deletion(-)
+
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index e42b7d238fbcb7784e868ac739096a283b90dd59..d274898617d65f0289198522c0e15343f0922b2b 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -47,6 +47,7 @@
+ #define IDC_NEW_WINDOW                  34000
+ #define IDC_NEW_INCOGNITO_WINDOW        34001
+ #define IDC_NEW_THOR_IDENTITY           34002
++#define IDC_DESTROY_THOR_IDENTITY       34003
+ #define IDC_CLOSE_WINDOW                34012
+ #define IDC_ALWAYS_ON_TOP               34013
+ #define IDC_NEW_TAB                     34014
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 124dfe04d457f6ac1f44edcc98a749cf42cfdedb..7a7c7a64a6338d84ad2c6e1f89002d23f0029b36 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -1431,6 +1431,9 @@ are declared in tools/grit/grit_args.gni.
+           <message name="IDS_NEW_THOR_IDENTITY" desc="The text label of a menu item for opening a new isolated, disposable identity window">
+             New &amp;Identity
+           </message>
++          <message name="IDS_DESTROY_THOR_IDENTITY" desc="The text label of a menu item for closing and destroying the current isolated identity">
++            Destroy &amp;Identity
++          </message>
+           <message name="IDS_PROFILE_ROW_SIGNED_IN_MESSAGE_WITH_EMAIL" desc="Label that lets the user know what email they are signed into their profile as.">
+             Signed in as <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>
+           </message>
+@@ -1576,6 +1579,9 @@ are declared in tools/grit/grit_args.gni.
+           <message name="IDS_NEW_THOR_IDENTITY" desc="In Title Case: The text label of a menu item for opening a new isolated, disposable identity window">
+             New &amp;Identity
+           </message>
++          <message name="IDS_DESTROY_THOR_IDENTITY" desc="In Title Case: The text label of a menu item for closing and destroying the current isolated identity">
++            Destroy &amp;Identity
++          </message>
+           <message name="IDS_PROFILE_ROW_SIGNED_IN_MESSAGE_WITH_EMAIL" desc="In Title Case: Label that lets the user know what email they are signed into their profile as.">
+             Signed in as <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>
+           </message>
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index fb67fa6dce2c2edd4449ebacc5083bd44f52fcd7..09b9db3a1a1b464ded3149ff09e2ef0fdbf6b0c4 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -720,6 +720,9 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_NEW_THOR_IDENTITY:
+       NewThorIdentity(profile());
+       break;
++    case IDC_DESTROY_THOR_IDENTITY:
++      DestroyThorIdentity(browser_);
++      break;
+     case IDC_CLOSE_WINDOW:
+       base::RecordAction(base::UserMetricsAction("CloseWindowByKey"));
+       CloseWindow(browser_);
+@@ -2012,6 +2015,9 @@ void BrowserCommandController::UpdateSharedCommandsForIncognitoAvailability(
+       IDC_NEW_THOR_IDENTITY,
+       incognito_availability == policy::IncognitoModeAvailability::kEnabled &&
+           !profile->IsGuestSession());
++  command_updater->UpdateCommandEnabled(
++      IDC_DESTROY_THOR_IDENTITY,
++      profile->IsOffTheRecord() && profile->GetOTRProfileID().IsThorIdentity());
+ 
+   const bool forced_incognito =
+       incognito_availability == policy::IncognitoModeAvailability::kForced;
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+index 234b0d23bced77161df6e3a5d5901cd469159308..a80fc221c98ece25a49dab3eb239688fd53a8ea9 100644
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -1238,6 +1238,28 @@ BrowserWindowInterface* NewThorIdentity(Profile* profile) {
+   return identity_browser;
+ }
+ 
++bool DestroyThorIdentity(BrowserWindowInterface* browser) {
++  Profile* identity_profile = browser->GetProfile();
++  if (!identity_profile->IsOffTheRecord() ||
++      !identity_profile->GetOTRProfileID().IsThorIdentity()) {
++    return false;
++  }
++
++  base::RecordAction(UserMetricsAction("DestroyThorIdentity"));
++  // A Thor identity may own more than one native window. Closing every exact
++  // profile match lets BrowserManagerService destroy the memory-only OTR
++  // profile after its final browser closes, without touching sibling identities
++  // or the original profile. Normal Chromium before-unload handling still
++  // applies; teardown is complete only after ProfileDestroyer runs.
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [identity_profile](BrowserWindowInterface* candidate) {
++        if (candidate->GetProfile() == identity_profile)
++          candidate->GetWindow()->Close();
++        return true;
++      });
++  return true;
++}
++
+ void CloseWindow(BrowserWindowInterface* browser) {
+   base::RecordAction(UserMetricsAction("CloseWindow"));
+   browser->GetWindow()->Close();
+diff --git a/chrome/browser/ui/browser_commands.h b/chrome/browser/ui/browser_commands.h
+index 25480188f6dbb0335fbde59de5d7f38ba348dcda..d3ee3df31957bea5aeb6803612dac6aea175b79c 100644
+--- a/chrome/browser/ui/browser_commands.h
++++ b/chrome/browser/ui/browser_commands.h
+@@ -114,5 +114,9 @@ void NewIncognitoWindow(Profile* profile);
+ // enterprise policy, guest mode, shutdown, or browser creation blocks it.
+ BrowserWindowInterface* NewThorIdentity(Profile* profile);
++// Closes every native browser window owned by the current Thor identity. The
++// final close triggers the existing OTR profile teardown. Returns false for
++// regular, guest, primary-Incognito, and non-Thor technical OTR profiles.
++bool DestroyThorIdentity(BrowserWindowInterface* browser);
+ void CloseWindow(BrowserWindowInterface* browser);
+ content::WebContents& NewTab(BrowserWindowInterface* browser,
+                              NewTabTypes context);
+diff --git a/chrome/browser/ui/browser_commands_browsertest.cc b/chrome/browser/ui/browser_commands_browsertest.cc
+index 60799227b2c5d9d2f2ca4640896276ece716f240..53e3b471b841bde06a0a9fcbbf0824002fde615f 100644
+--- a/chrome/browser/ui/browser_commands_browsertest.cc
++++ b/chrome/browser/ui/browser_commands_browsertest.cc
+@@ -117,6 +117,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest,
+       original_profile->GetAllOffTheRecordProfiles().size();
+ 
+   EXPECT_TRUE(ExecuteCommand(browser(), IDC_NEW_THOR_IDENTITY));
++  EXPECT_FALSE(IsCommandEnabled(browser(), IDC_DESTROY_THOR_IDENTITY));
+   BrowserWindowInterface* first_browser = nullptr;
+   GlobalBrowserCollection::GetInstance()->ForEach(
+       [&first_browser](BrowserWindowInterface* candidate) {
+@@ -137,6 +138,7 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest,
+   EXPECT_FALSE(first_profile->CanUseDiskWhenOffTheRecord());
+   EXPECT_EQ(original_profile, first_profile->GetOriginalProfile());
+   EXPECT_EQ(1, first_browser->GetTabStripModel()->count());
++  EXPECT_TRUE(IsCommandEnabled(first_browser, IDC_DESTROY_THOR_IDENTITY));
+ 
+   BrowserWindowInterface* second_browser = NewThorIdentity(original_profile);
+   ASSERT_TRUE(second_browser);
+@@ -158,7 +160,8 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest,
+   EXPECT_TRUE(original_profile->HasOffTheRecordProfile(second_id));
+ 
+   ProfileDestructionWaiter second_waiter(second_profile);
+-  CloseBrowserSynchronously(second_browser->GetBrowserForMigrationOnly());
++  EXPECT_TRUE(ExecuteCommand(second_browser, IDC_DESTROY_THOR_IDENTITY));
++  EXPECT_FALSE(DestroyThorIdentity(browser()));
+   second_waiter.Wait();
+   EXPECT_FALSE(original_profile->HasOffTheRecordProfile(second_id));
+   EXPECT_EQ(initial_otr_count,
+diff --git a/chrome/browser/ui/toolbar/app_menu_model.cc b/chrome/browser/ui/toolbar/app_menu_model.cc
+index 1d474d7a93a07ba6f8797a07de0776b2456b7b04..79cedc0553b6286ea12cfd74dfa815d6749e5567 100644
+--- a/chrome/browser/ui/toolbar/app_menu_model.cc
++++ b/chrome/browser/ui/toolbar/app_menu_model.cc
+@@ -2112,5 +2112,10 @@ void AppMenuModel::Build() {
+     AddItemWithStringIdAndVectorIcon(this, IDC_NEW_THOR_IDENTITY,
+                                      IDS_NEW_THOR_IDENTITY, kAccountCircleIcon);
+   }
++  if (browser_->profile()->IsOffTheRecord() &&
++      browser_->profile()->GetOTRProfileID().IsThorIdentity()) {
++    AddItemWithStringIdAndVectorIcon(this, IDC_DESTROY_THOR_IDENTITY,
++                                     IDS_DESTROY_THOR_IDENTITY, kDeleteIcon);
++  }
+ 
+   AddSeparator(ui::NORMAL_SEPARATOR);
+-- 
+2.50.1

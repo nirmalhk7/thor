@@ -5,13 +5,12 @@
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 
 use chromiumoxide::cdp::browser_protocol::page::{
-    BringToFrontParams, GetNavigationHistoryParams, NavigateToHistoryEntryParams,
-    StopLoadingParams,
+    AddScriptToEvaluateOnNewDocumentParams, BringToFrontParams, GetNavigationHistoryParams,
+    NavigateToHistoryEntryParams, StopLoadingParams,
 };
-use chromiumoxide::cdp::browser_protocol::storage::ClearDataForOriginParams;
 use chromiumoxide::cdp::browser_protocol::target::{
     ActivateTargetParams, OpenDevToolsParams, TargetId,
 };
@@ -40,8 +39,29 @@ pub enum TabLifecycle {
     Expired,
 }
 
-/// Level 2 Isolation: Identity Context
-/// Holds cookies, localStorage, IndexedDB settings, Service Worker settings, and Auth tokens.
+pub const FREEZE_AFTER: Duration = Duration::from_secs(15 * 60);
+pub const DISCARD_AFTER: Duration = Duration::from_secs(60 * 60);
+pub const EXPIRE_AFTER: Duration = Duration::from_secs(24 * 60 * 60);
+
+/// Pure lifecycle policy used by the coordinator and boundary tests.
+pub fn lifecycle_for_idle(current: TabLifecycle, idle: Duration) -> TabLifecycle {
+    if current == TabLifecycle::Expired || idle >= EXPIRE_AFTER {
+        return TabLifecycle::Expired;
+    }
+    if idle >= DISCARD_AFTER {
+        return TabLifecycle::Discarded;
+    }
+    if idle >= FREEZE_AFTER && current == TabLifecycle::Active {
+        return TabLifecycle::Frozen;
+    }
+    current
+}
+
+/// Level 2 identity metadata.
+///
+/// Real cookies, storage, IndexedDB, service workers, permissions, and auth
+/// state live in Chromium's BrowserContext. The maps below are transitional
+/// side-car metadata only and are never treated as evidence of browser storage.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct IdentityContext {
     pub id: String,
@@ -69,7 +89,8 @@ impl IdentityContext {
     }
 
     pub fn ephemeral(profile_id: &str) -> Self {
-        static NEXT_EPHEMERAL_ID: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+        static NEXT_EPHEMERAL_ID: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1);
         let nanos = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .map(|d| d.as_nanos())
@@ -95,7 +116,8 @@ impl IdentityContext {
     }
 
     pub fn set_auth_token(&mut self, realm: &str, token: &str) {
-        self.auth_tokens.insert(realm.to_string(), token.to_string());
+        self.auth_tokens
+            .insert(realm.to_string(), token.to_string());
     }
 
     pub fn get_auth_token(&self, realm: &str) -> Option<&String> {
@@ -154,7 +176,8 @@ pub struct TabSession {
 
 impl TabSession {
     pub(crate) fn from_page(id: TabId, page: Page, runtime: Arc<ChromiumRuntime>) -> Self {
-        let identity_context = IdentityContext::new(&format!("ctx_{}", id.0), "default_profile", false);
+        let identity_context =
+            IdentityContext::new(&format!("ctx_{}", id.0), "default_profile", false);
         Self::from_page_with_context(id, page, runtime, identity_context)
     }
 
@@ -189,6 +212,30 @@ impl TabSession {
 
     pub fn page(&self) -> Option<Page> {
         self.page.lock().clone()
+    }
+
+    /// Install a bootstrap before page scripts on every later navigation, then
+    /// execute it in the current document as well.
+    pub async fn inject_script_on_new_document(&self, script: &str) -> ChromiumResult<()> {
+        let page = self.ensure_active_page()?;
+        page.execute(AddScriptToEvaluateOnNewDocumentParams::new(script))
+            .await?;
+        page.evaluate(script).await?;
+        Ok(())
+    }
+
+    /// Blocking form for the transitional AppKit shell. It has the same
+    /// document-start semantics as [`Self::inject_script_on_new_document`].
+    pub fn inject_script_on_new_document_blocking(&self, script: &str) -> ChromiumResult<()> {
+        let page = self.ensure_active_page()?;
+        let script = script.to_owned();
+        let handle = self.runtime.handle().clone();
+        block_on_handle(&handle, async move {
+            page.execute(AddScriptToEvaluateOnNewDocumentParams::new(&script))
+                .await?;
+            page.evaluate(script).await?;
+            Ok(())
+        })
     }
 
     pub fn runtime(&self) -> &Arc<ChromiumRuntime> {
@@ -242,7 +289,8 @@ impl TabSession {
     pub fn append_history(&self, other: Vec<HistoryEntry>) {
         let mut hist = self.nav_history.lock();
         for mut entry in other {
-            if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str()) {
+            if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str())
+            {
                 entry.sequence = hist.len() as u64;
                 hist.push(entry);
             }
@@ -282,6 +330,18 @@ impl TabSession {
         *self.last_active.lock() = Instant::now();
     }
 
+    pub async fn is_visible(&self) -> ChromiumResult<bool> {
+        let Some(page) = self.page.lock().clone() else {
+            return Ok(false);
+        };
+        let result = page
+            .evaluate("document.visibilityState === 'visible'")
+            .await?;
+        result
+            .into_value::<bool>()
+            .map_err(|error| ChromiumError::Other(anyhow::anyhow!(error)))
+    }
+
     /// Discard the tab: detach CDP page target & release memory while retaining tab metadata.
     pub fn discard_blocking(&self) -> ChromiumResult<()> {
         let stage = self.lifecycle();
@@ -293,11 +353,15 @@ impl TabSession {
         let t0 = Instant::now();
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
+            let page_for_restore = page.clone();
             let handle = self.runtime.handle().clone();
-            let _ = block_on_handle(&handle, async move {
+            if let Err(error) = block_on_handle(&handle, async move {
                 page.close().await?;
                 Ok::<(), ChromiumError>(())
-            });
+            }) {
+                *self.page.lock() = Some(page_for_restore);
+                return Err(error);
+            }
         }
         let discard_ms = t0.elapsed().as_secs_f64() * 1000.0;
         crate::app_state::AppState::global()
@@ -308,7 +372,11 @@ impl TabSession {
         *self.lifecycle.write() = TabLifecycle::Discarded;
         self.frozen.store(true, Ordering::Relaxed);
         self.push_trace("Tab discarded (CDP target detached & memory released)");
-        crate::thor_info!("thor::tab_session", "⚡ [Thor TabSession] Tab {} discarded (memory released)", self.id.0);
+        crate::thor_info!(
+            "thor::tab_session",
+            "⚡ [Thor TabSession] Tab {} discarded (memory released)",
+            self.id.0
+        );
         Ok(())
     }
 
@@ -325,10 +393,23 @@ impl TabSession {
             .lock()
             .last()
             .map(|e| e.url.clone())
-            .unwrap_or_else(|| "https://www.google.com".to_string());
-
-        let restored_session = self.runtime.new_tab_blocking(Some(&last_url))?;
+            .unwrap_or_else(|| "about:blank".to_string());
+        let identity = self.identity_context();
+        let browser_context_id = identity.is_ephemeral.then_some(identity.id.as_str());
+        let restored_session = self
+            .runtime
+            .new_tab_in_context_blocking(Some(&last_url), browser_context_id)?;
         if let Some(new_page) = restored_session.page() {
+            let (scroll_x, scroll_y) = self.scroll_position();
+            if scroll_x != 0.0 || scroll_y != 0.0 {
+                let script = format!("window.scrollTo({scroll_x}, {scroll_y})");
+                let page_for_scroll = new_page.clone();
+                let handle = self.runtime.handle().clone();
+                let _ = block_on_handle(&handle, async move {
+                    page_for_scroll.evaluate(script).await?;
+                    Ok::<(), ChromiumError>(())
+                });
+            }
             *self.page.lock() = Some(new_page);
         }
         let restore_ms = t0.elapsed().as_secs_f64() * 1000.0;
@@ -341,19 +422,27 @@ impl TabSession {
         self.frozen.store(false, Ordering::Relaxed);
         self.touch();
         self.push_trace("Tab restored from discarded state");
-        crate::thor_info!("thor::tab_session", "⚡ [Thor TabSession] Tab {} restored to Active at {last_url}", self.id.0);
+        crate::thor_info!(
+            "thor::tab_session",
+            "⚡ [Thor TabSession] Tab {} restored to Active at {last_url}",
+            self.id.0
+        );
         Ok(())
     }
 
     /// Ensure active page target is restored if discarded.
     fn ensure_active_page(&self) -> ChromiumResult<Page> {
+        if self.lifecycle() == TabLifecycle::Expired {
+            return Err(ChromiumError::Other(anyhow::anyhow!("Tab has expired")));
+        }
         if self.lifecycle() == TabLifecycle::Discarded {
             self.restore_blocking()?;
+        } else if self.lifecycle() == TabLifecycle::Frozen {
+            self.unfreeze_blocking(false)?;
         }
-        self.page
-            .lock()
-            .clone()
-            .ok_or_else(|| ChromiumError::Other(anyhow::anyhow!("No active CDP page target for tab")))
+        self.page.lock().clone().ok_or_else(|| {
+            ChromiumError::Other(anyhow::anyhow!("No active CDP page target for tab"))
+        })
     }
 
     /// Navigate to `url` and wait for the load to settle when possible.
@@ -395,7 +484,9 @@ impl TabSession {
     pub fn back_blocking(&self) -> ChromiumResult<()> {
         let page = self.ensure_active_page()?;
         self.touch();
-        block_on_handle(self.runtime.handle(), async move { history_step(&page, -1).await })
+        block_on_handle(self.runtime.handle(), async move {
+            history_step(&page, -1).await
+        })
     }
 
     /// Go forward in history when possible.
@@ -406,7 +497,9 @@ impl TabSession {
     pub fn forward_blocking(&self) -> ChromiumResult<()> {
         let page = self.ensure_active_page()?;
         self.touch();
-        block_on_handle(self.runtime.handle(), async move { history_step(&page, 1).await })
+        block_on_handle(self.runtime.handle(), async move {
+            history_step(&page, 1).await
+        })
     }
 
     pub async fn reload(&self) -> ChromiumResult<()> {
@@ -474,9 +567,7 @@ impl TabSession {
     pub async fn capture_screenshot(&self) -> ChromiumResult<Vec<u8>> {
         let page = self.ensure_active_page()?;
         let params = chromiumoxide::page::ScreenshotParams::builder()
-            .format(
-                chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-            )
+            .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
             .build();
         page.screenshot(params)
             .await
@@ -487,9 +578,7 @@ impl TabSession {
         let page = self.ensure_active_page()?;
         block_on_handle(self.runtime.handle(), async move {
             let params = chromiumoxide::page::ScreenshotParams::builder()
-                .format(
-                    chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png,
-                )
+                .format(chromiumoxide::cdp::browser_protocol::page::CaptureScreenshotFormat::Png)
                 .build();
             page.screenshot(params)
                 .await
@@ -570,9 +659,7 @@ impl TabSession {
         let browser = self.runtime.browser();
         block_on_handle(self.runtime.handle(), async move {
             let browser = browser.lock().await;
-            browser
-                .execute(OpenDevToolsParams::new(target_id))
-                .await?;
+            browser.execute(OpenDevToolsParams::new(target_id)).await?;
             Ok(())
         })
     }
@@ -706,64 +793,42 @@ impl TabSession {
         }
     }
 
-    /// Close the CDP target and expire session.
-    pub async fn close(self) -> ChromiumResult<()> {
-        *self.lifecycle.write() = TabLifecycle::Expired;
-        let is_ephemeral = self.is_ephemeral_context();
-        if is_ephemeral {
-            self.identity_context.lock().cookies.clear();
-            self.identity_context.lock().local_storage.clear();
-            self.identity_context.lock().auth_tokens.clear();
-        }
+    /// Close the CDP target and expire tab-local state. BrowserContext storage
+    /// is erased by the coordinator when the identity itself is destroyed.
+    pub async fn close(&self) -> ChromiumResult<()> {
+        self.expire_local_state();
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
-            if is_ephemeral {
-                if let Ok(Some(url)) = page.url().await {
-                    if !url.is_empty() {
-                        let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
-                        if !origin.is_empty() {
-                            let _ = page
-                                .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
-                                .await;
-                        }
-                    }
-                }
-            }
             page.close().await?;
         }
         Ok(())
     }
 
-    pub fn close_blocking(self) -> ChromiumResult<()> {
-        *self.lifecycle.write() = TabLifecycle::Expired;
-        let is_ephemeral = self.is_ephemeral_context();
-        if is_ephemeral {
-            self.identity_context.lock().cookies.clear();
-            self.identity_context.lock().local_storage.clear();
-            self.identity_context.lock().auth_tokens.clear();
-        }
+    pub fn close_blocking(&self) -> ChromiumResult<()> {
+        self.expire_local_state();
         let page_opt = self.page.lock().take();
         if let Some(page) = page_opt {
             let handle = self.runtime.handle().clone();
             block_on_handle(&handle, async move {
-                if is_ephemeral {
-                    if let Ok(Some(url)) = page.url().await {
-                        if !url.is_empty() {
-                            let origin = url.split('/').take(3).collect::<Vec<&str>>().join("/");
-                            if !origin.is_empty() {
-                                let _ = page
-                                    .execute(ClearDataForOriginParams::new(origin, "all".to_string()))
-                                    .await;
-                            }
-                        }
-                    }
-                }
                 page.close().await?;
                 Ok(())
             })
         } else {
             Ok(())
         }
+    }
+
+    fn expire_local_state(&self) {
+        *self.lifecycle.write() = TabLifecycle::Expired;
+        self.frozen.store(true, Ordering::Relaxed);
+        self.nav_history.lock().clear();
+        *self.scroll_position.lock() = (0.0, 0.0);
+        self.trace_buffer.lock().clear();
+        *self.cached_title.lock() = None;
+        let mut identity = self.identity_context.lock();
+        identity.cookies.clear();
+        identity.local_storage.clear();
+        identity.auth_tokens.clear();
     }
 
     async fn navigate_history(&self, delta: i64) -> ChromiumResult<()> {
@@ -821,6 +886,30 @@ mod tests {
     }
 
     #[test]
+    fn lifecycle_thresholds_are_exact() {
+        assert_eq!(
+            lifecycle_for_idle(TabLifecycle::Active, FREEZE_AFTER - Duration::from_secs(1)),
+            TabLifecycle::Active
+        );
+        assert_eq!(
+            lifecycle_for_idle(TabLifecycle::Active, FREEZE_AFTER),
+            TabLifecycle::Frozen
+        );
+        assert_eq!(
+            lifecycle_for_idle(TabLifecycle::Frozen, DISCARD_AFTER),
+            TabLifecycle::Discarded
+        );
+        assert_eq!(
+            lifecycle_for_idle(TabLifecycle::Discarded, EXPIRE_AFTER),
+            TabLifecycle::Expired
+        );
+        assert_eq!(
+            lifecycle_for_idle(TabLifecycle::Expired, Duration::ZERO),
+            TabLifecycle::Expired
+        );
+    }
+
+    #[test]
     fn test_identity_context_ephemeral() {
         let ctx = IdentityContext::ephemeral("dev_host");
         assert!(ctx.is_ephemeral);
@@ -835,22 +924,31 @@ mod tests {
         ctx.set_local_storage("theme", "dark");
         ctx.set_auth_token("api.dev", "Bearer token_xyz");
 
-        assert_eq!(ctx.get_cookie("session_id").map(|s| s.as_str()), Some("secret_123"));
-        assert_eq!(ctx.get_local_storage("theme").map(|s| s.as_str()), Some("dark"));
-        assert_eq!(ctx.get_auth_token("api.dev").map(|s| s.as_str()), Some("Bearer token_xyz"));
+        assert_eq!(
+            ctx.get_cookie("session_id").map(|s| s.as_str()),
+            Some("secret_123")
+        );
+        assert_eq!(
+            ctx.get_local_storage("theme").map(|s| s.as_str()),
+            Some("dark")
+        );
+        assert_eq!(
+            ctx.get_auth_token("api.dev").map(|s| s.as_str()),
+            Some("Bearer token_xyz")
+        );
     }
 
     #[test]
     fn test_ephemeral_identity_context_collision() {
-        use std::thread;
         use std::collections::HashSet;
         use std::sync::{Arc, Mutex};
-        
+        use std::thread;
+
         let thread_count = 10;
         let iters = 1000;
         let mut handles = vec![];
         let results = Arc::new(Mutex::new(Vec::new()));
-        
+
         for _ in 0..thread_count {
             let results_clone = Arc::clone(&results);
             handles.push(thread::spawn(move || {
@@ -862,11 +960,11 @@ mod tests {
                 results_clone.lock().unwrap().extend(local_ids);
             }));
         }
-        
+
         for h in handles {
             h.join().unwrap();
         }
-        
+
         let all_ids = results.lock().unwrap();
         let mut unique_ids = HashSet::new();
         let mut collisions = 0;
@@ -875,9 +973,13 @@ mod tests {
                 collisions += 1;
             }
         }
-        
+
         // Assert no collisions
-        assert_eq!(collisions, 0, "Found {} collisions in ephemeral ID generation!", collisions);
+        assert_eq!(
+            collisions, 0,
+            "Found {} collisions in ephemeral ID generation!",
+            collisions
+        );
     }
 }
 
@@ -895,7 +997,9 @@ pub fn normalize_url(url: &str) -> String {
     // Basic normalization: lowercase scheme and host, strip ports, resolve dots
     let mut out = String::new();
     let parts: Vec<&str> = url.splitn(2, "://").collect();
-    if parts.len() != 2 { return url.to_string(); }
+    if parts.len() != 2 {
+        return url.to_string();
+    }
     let scheme = parts[0].to_lowercase();
     out.push_str(&scheme);
     out.push_str("://");
@@ -908,7 +1012,11 @@ pub fn normalize_url(url: &str) -> String {
     // parse host and port
     let host_port: Vec<&str> = authority.split(':').collect();
     let host = host_port[0].to_lowercase();
-    let port = if host_port.len() > 1 { Some(host_port[1]) } else { None };
+    let port = if host_port.len() > 1 {
+        Some(host_port[1])
+    } else {
+        None
+    };
 
     out.push_str(&host);
     if let Some(p) = port {
@@ -926,4 +1034,3 @@ pub fn normalize_url(url: &str) -> String {
     }
     out
 }
-

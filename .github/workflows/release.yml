@@ -1,0 +1,125 @@
+name: Thor Downstream Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Release version (e.g. 0.1.0)'
+        required: true
+        default: '0.1.0'
+
+permissions:
+  contents: read
+
+jobs:
+  privacy_contract:
+    name: Browserless privacy/release contract
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Validate downstream privacy contract
+        run: python3 scripts/privacy_regression_check.py
+
+  package:
+    name: Build and package Thor-owned Chromium (macOS)
+    needs: privacy_contract
+    runs-on: [self-hosted, macOS, thor-chromium-builder]
+    timeout-minutes: 720
+
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Setup Rust Toolchain
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable action, 2026-07-16
+        with:
+          toolchain: 1.97.1
+
+      - name: Setup Rust Cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+
+      - name: Determine Version
+        id: version
+        shell: bash
+        run: |
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            VER="${{ github.event.inputs.version }}"
+            TAG="v${VER}"
+          else
+            VER="${GITHUB_REF_NAME#v}"
+            TAG="${GITHUB_REF_NAME}"
+          fi
+          echo "VER=${VER}" >> "${GITHUB_OUTPUT}"
+          echo "TAG=${TAG}" >> "${GITHUB_OUTPUT}"
+
+      - name: Check Chromium build capacity
+        shell: bash
+        run: |
+          echo "THOR_CHROMIUM_SRC=${RUNNER_TEMP}/thor-chromium-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" >> "${GITHUB_ENV}"
+          available_kb="$(df -Pk "${RUNNER_TEMP}" | awk 'NR == 2 { print $4 }')"
+          required_kb="$((100 * 1024 * 1024))"
+          if (( available_kb < required_kb )); then
+            echo "Thor's Chromium source build requires at least 100 GiB free on the runner volume."
+            exit 1
+          fi
+
+      - name: Setup Chromium depot_tools
+        run: ./scripts/setup_depot_tools.sh
+
+      - name: Fetch pinned Chromium source
+        run: ./scripts/fetch_chromium.sh
+
+      - name: Validate pinned source and patch applicability
+        run: |
+          python3 scripts/privacy_regression_check.py \
+            --chromium-src "${THOR_CHROMIUM_SRC}/src" \
+            --patch-state unapplied
+
+      - name: Apply Thor downstream inputs
+        run: ./scripts/apply_thor_branding.sh
+
+      - name: Validate applied downstream privacy patch set
+        run: |
+          python3 scripts/privacy_regression_check.py \
+            --chromium-src "${THOR_CHROMIUM_SRC}/src" \
+            --patch-state applied
+
+      - name: Build and verify Thor-owned Chromium
+        run: ./scripts/build_chromium.sh
+
+      - name: Package macOS Build
+        run: ./scripts/package_macos.sh "${{ steps.version.outputs.VER }}"
+        env:
+          NOTARIZE: "true"
+          CODESIGN_IDENTITY: ${{ secrets.CODESIGN_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+
+      - name: Verify signed and notarized macOS artifacts
+        run: ./scripts/verify_macos_package.sh "${{ steps.version.outputs.VER }}"
+        env:
+          REQUIRE_NOTARIZED: "true"
+
+      - name: Run packaged-browser privacy acceptance
+        shell: bash
+        run: |
+          inner="dist/Thor.app/Contents/Frameworks/Chromium.app"
+          executable_name="$(plutil -extract CFBundleExecutable raw -o - "$inner/Contents/Info.plist")"
+          executable="$inner/Contents/MacOS/$executable_name"
+          [[ -x "$executable" ]] || { echo "Packaged Thor Chromium executable missing: $executable"; exit 1; }
+          ./scripts/run_privacy_acceptance.sh "$GITHUB_WORKSPACE/$executable"
+
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: thor-release-macos
+          path: |
+            dist/*.dmg
+            dist/*.zip
+            dist/checksums.txt

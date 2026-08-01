@@ -1,0 +1,337 @@
+From c583827a354674180dc8856eb65aeb3f0afa5ee9 Mon Sep 17 00:00:00 2001
+From: Thor downstream maintainers
+Date: Fri, 31 Jul 2026 00:00:00 -0600
+Subject: [PATCH 5/5] Strip known tracking parameters from top-level URLs
+X-Downstream-Base: Chromium 151.0.7922.47
+X-Downstream-Base-Commit: c583827a354674180dc8856eb65aeb3f0afa5ee9
+X-License: Chromium BSD-style license (LICENSE)
+X-Scope: Outermost main-frame GET navigations and their redirects only.
+ Static, conservative URL cleanup is not ad/tracker blocking, CNAME
+ uncloaking, subresource filtering, or signed filter-list enforcement.
+---
+diff --git a/chrome/browser/BUILD.gn b/chrome/browser/BUILD.gn
+--- a/chrome/browser/BUILD.gn
++++ b/chrome/browser/BUILD.gn
+@@ -872,5 +872,7 @@ source_set("core") {
+     "shell_integration.cc",
+     "startup_data.cc",
++    "thor/privacy/thor_url_cleanup_throttle.cc",
++    "thor/privacy/thor_url_cleanup_throttle.h",
+     "unexpire_flags.cc",
+     "unexpire_flags.h",
+     "universal_web_contents_observers.cc",
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -178,6 +178,7 @@
+ #include "chrome/browser/tab_group_sync/tab_group_sync_utils.h"
+ #include "chrome/browser/task_manager/sampling/task_manager_impl.h"
+ #include "chrome/browser/task_manager/task_manager_interface.h"
++#include "chrome/browser/thor/privacy/thor_url_cleanup_throttle.h"
+ #include "chrome/browser/tracing/chrome_tracing_delegate.h"
+ #include "chrome/browser/translate/translate_service.h"
+ #include "chrome/browser/ui/blocked_content/blocked_window_params.h"
+@@ -6079,6 +6080,13 @@ ChromeContentBrowserClient::CreateURLLoaderThrottles(
+   }
+ #endif
+ 
++  // Keep cleanup after Safe Browsing so the security service evaluates the
++  // original destination while the network follows the privacy-cleaned URL.
++  if (auto throttle =
++          thor::privacy::ThorURLCleanupThrottle::MaybeCreate(request)) {
++    result.push_back(std::move(throttle));
++  }
++
+ #if BUILDFLAG(ENABLE_CAPTIVE_PORTAL_DETECTION)
+   result.push_back(
+       std::make_unique<captive_portal::CaptivePortalURLLoaderThrottle>(
+diff --git a/chrome/browser/thor/privacy/thor_url_cleanup_throttle.cc b/chrome/browser/thor/privacy/thor_url_cleanup_throttle.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/thor/privacy/thor_url_cleanup_throttle.cc
+@@ -0,0 +1,141 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/thor/privacy/thor_url_cleanup_throttle.h"
++
++#include <array>
++#include <string>
++#include <string_view>
++
++#include "base/strings/string_util.h"
++#include "net/url_request/redirect_info.h"
++#include "services/network/public/cpp/resource_request.h"
++#include "services/network/public/mojom/url_response_head.mojom.h"
++#include "url/third_party/mozilla/url_parse.h"
++#include "url/url_canon.h"
++
++namespace thor::privacy {
++
++namespace {
++
++constexpr std::array<std::string_view, 14> kTrackingParameters = {
++    "dclid",        "fbclid",              "gclid",
++    "mc_cid",       "mc_eid",              "msclkid",
++    "utm_campaign", "utm_content",         "utm_creative_format",
++    "utm_id",       "utm_marketing_tactic", "utm_medium",
++    "utm_source",   "utm_term",
++};
++
++// Query cleanup must not invalidate common signed or authorization callback
++// URLs. Presence of one of these keys makes the entire query fail open.
++constexpr std::array<std::string_view, 14> kSensitiveParameters = {
++    "auth",             "authorization",    "code",
++    "expires",          "key-pair-id",      "policy",
++    "samlrequest",      "samlresponse",     "sig",
++    "signature",        "state",            "token",
++    "x-amz-signature",  "x-goog-signature",
++};
++
++template <size_t N>
++bool MatchesParameter(
++    std::string_view candidate,
++    const std::array<std::string_view, N>& parameter_names) {
++  for (std::string_view parameter_name : parameter_names) {
++    if (base::EqualsCaseInsensitiveASCII(candidate, parameter_name)) {
++      return true;
++    }
++  }
++  return false;
++}
++
++bool HasSensitiveParameter(const GURL& url) {
++  const std::string_view input = url.query();
++  url::Component cursor(0, input.size());
++  url::Component key_range;
++  url::Component value_range;
++  while (url::ExtractQueryKeyValue(input, &cursor, &key_range, &value_range)) {
++    const std::string_view key =
++        input.substr(key_range.begin, key_range.len);
++    if (MatchesParameter(key, kSensitiveParameters)) {
++      return true;
++    }
++  }
++  return false;
++}
++
++}  // namespace
++
++GURL CleanTrackingParameters(const GURL& url) {
++  if (!url.is_valid() || !url.SchemeIsHTTPOrHTTPS() || !url.has_query() ||
++      HasSensitiveParameter(url)) {
++    return url;
++  }
++
++  const std::string_view input = url.query();
++  url::Component cursor(0, input.size());
++  url::Component key_range;
++  url::Component value_range;
++  std::string output;
++  bool removed_parameter = false;
++
++  while (url::ExtractQueryKeyValue(input, &cursor, &key_range, &value_range)) {
++    const std::string_view key =
++        input.substr(key_range.begin, key_range.len);
++    if (MatchesParameter(key, kTrackingParameters)) {
++      removed_parameter = true;
++      continue;
++    }
++
++    if (!output.empty()) {
++      output.push_back('&');
++    }
++    output.append(input.substr(key_range.begin,
++                               value_range.end() - key_range.begin));
++  }
++
++  if (!removed_parameter) {
++    return url;
++  }
++
++  GURL::Replacements replacements;
++  if (output.empty()) {
++    replacements.ClearQuery();
++  } else {
++    replacements.SetQueryStr(output);
++  }
++  return url.ReplaceComponents(replacements);
++}
++
++// static
++std::unique_ptr<ThorURLCleanupThrottle>
++ThorURLCleanupThrottle::MaybeCreate(const network::ResourceRequest& request) {
++  if (!request.is_outermost_main_frame || request.method != "GET") {
++    return nullptr;
++  }
++  return std::make_unique<ThorURLCleanupThrottle>();
++}
++
++ThorURLCleanupThrottle::ThorURLCleanupThrottle() = default;
++ThorURLCleanupThrottle::~ThorURLCleanupThrottle() = default;
++
++void ThorURLCleanupThrottle::WillStartRequest(
++    network::ResourceRequest* request,
++    bool* /* defer */) {
++  request->url = CleanTrackingParameters(request->url);
++}
++
++void ThorURLCleanupThrottle::WillRedirectRequest(
++    net::RedirectInfo* redirect_info,
++    const network::mojom::URLResponseHead& /* response_head */,
++    bool* /* defer */,
++    network::HttpRequestHeadersUpdateParams* /* headers_update_params */) {
++  if (redirect_info->new_method != "GET") {
++    return;
++  }
++  // Query-only replacement necessarily preserves the redirect origin, as
++  // required by blink::URLLoaderThrottle.
++  redirect_info->new_url = CleanTrackingParameters(redirect_info->new_url);
++}
++
++}  // namespace thor::privacy
+diff --git a/chrome/browser/thor/privacy/thor_url_cleanup_throttle.h b/chrome/browser/thor/privacy/thor_url_cleanup_throttle.h
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/thor/privacy/thor_url_cleanup_throttle.h
+@@ -0,0 +1,45 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef CHROME_BROWSER_THOR_PRIVACY_THOR_URL_CLEANUP_THROTTLE_H_
++#define CHROME_BROWSER_THOR_PRIVACY_THOR_URL_CLEANUP_THROTTLE_H_
++
++#include <memory>
++
++#include "third_party/blink/public/common/loader/url_loader_throttle.h"
++#include "url/gurl.h"
++
++namespace network {
++struct ResourceRequest;
++}  // namespace network
++
++namespace thor::privacy {
++
++// Removes a conservative, static set of campaign identifiers from HTTP(S)
++// URLs. This intentionally fails open for signed and authorization callback
++// query strings and is not a general-purpose filter-list engine.
++GURL CleanTrackingParameters(const GURL& url);
++
++class ThorURLCleanupThrottle final : public blink::URLLoaderThrottle {
++ public:
++  static std::unique_ptr<ThorURLCleanupThrottle> MaybeCreate(
++      const network::ResourceRequest& request);
++
++  ThorURLCleanupThrottle();
++  ThorURLCleanupThrottle(const ThorURLCleanupThrottle&) = delete;
++  ThorURLCleanupThrottle& operator=(const ThorURLCleanupThrottle&) = delete;
++  ~ThorURLCleanupThrottle() override;
++
++  void WillStartRequest(network::ResourceRequest* request,
++                        bool* defer) override;
++  void WillRedirectRequest(
++      net::RedirectInfo* redirect_info,
++      const network::mojom::URLResponseHead& response_head,
++      bool* defer,
++      network::HttpRequestHeadersUpdateParams* headers_update_params) override;
++};
++
++}  // namespace thor::privacy
++
++#endif  // CHROME_BROWSER_THOR_PRIVACY_THOR_URL_CLEANUP_THROTTLE_H_
+diff --git a/chrome/browser/thor/privacy/thor_url_cleanup_throttle_unittest.cc b/chrome/browser/thor/privacy/thor_url_cleanup_throttle_unittest.cc
+new file mode 100644
+--- /dev/null
++++ b/chrome/browser/thor/privacy/thor_url_cleanup_throttle_unittest.cc
+@@ -0,0 +1,78 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "chrome/browser/thor/privacy/thor_url_cleanup_throttle.h"
++
++#include "services/network/public/cpp/resource_request.h"
++#include "testing/gtest/include/gtest/gtest.h"
++
++namespace thor::privacy {
++
++TEST(ThorURLCleanupThrottleTest, RemovesKnownParametersAndPreservesFragment) {
++  EXPECT_EQ(
++      "https://example.test/path?keep=1#fragment",
++      CleanTrackingParameters(GURL(
++          "https://example.test/path?utm_source=news&keep=1&FBCLID=id#fragment"))
++          .spec());
++}
++
++TEST(ThorURLCleanupThrottleTest, RemovesDuplicateAndCaseVariantParameters) {
++  EXPECT_EQ("https://example.test/",
++            CleanTrackingParameters(GURL(
++                "https://example.test/?gclid=one&GCLID=two&utm_medium=email"))
++                .spec());
++}
++
++TEST(ThorURLCleanupThrottleTest, PreservesUnknownAndNonHttpParameters) {
++  const GURL unknown("https://example.test/?campaign=one&source=two");
++  const GURL non_http("file:///tmp/test?utm_source=news");
++  EXPECT_EQ(unknown, CleanTrackingParameters(unknown));
++  EXPECT_EQ(non_http, CleanTrackingParameters(non_http));
++}
++
++TEST(ThorURLCleanupThrottleTest, FailsOpenForSignedAndAuthorizationURLs) {
++  const GURL signed_url(
++      "https://example.test/?utm_source=news&X-Amz-Signature=abc");
++  const GURL oauth_url(
++      "https://example.test/callback?utm_source=news&code=abc&state=xyz");
++  EXPECT_EQ(signed_url, CleanTrackingParameters(signed_url));
++  EXPECT_EQ(oauth_url, CleanTrackingParameters(oauth_url));
++}
++
++TEST(ThorURLCleanupThrottleTest, IsIdempotent) {
++  const GURL original(
++      "https://example.test/?utm_campaign=sale&keep=one&keep=two");
++  const GURL cleaned = CleanTrackingParameters(original);
++  EXPECT_EQ(cleaned, CleanTrackingParameters(cleaned));
++}
++
++TEST(ThorURLCleanupThrottleTest, CreatesOnlyForOutermostGetNavigation) {
++  network::ResourceRequest request;
++  request.url = GURL("https://example.test/?gclid=id");
++  request.method = "GET";
++  request.is_outermost_main_frame = true;
++  EXPECT_TRUE(ThorURLCleanupThrottle::MaybeCreate(request));
++
++  request.is_outermost_main_frame = false;
++  EXPECT_FALSE(ThorURLCleanupThrottle::MaybeCreate(request));
++
++  request.is_outermost_main_frame = true;
++  request.method = "POST";
++  EXPECT_FALSE(ThorURLCleanupThrottle::MaybeCreate(request));
++}
++
++TEST(ThorURLCleanupThrottleTest, InitialRequestUsesCleanedURL) {
++  network::ResourceRequest request;
++  request.url = GURL("https://example.test/?utm_source=news&keep=1");
++  request.method = "GET";
++  request.is_outermost_main_frame = true;
++  auto throttle = ThorURLCleanupThrottle::MaybeCreate(request);
++  ASSERT_TRUE(throttle);
++  bool defer = false;
++  throttle->WillStartRequest(&request, &defer);
++  EXPECT_FALSE(defer);
++  EXPECT_EQ("https://example.test/?keep=1", request.url.spec());
++}
++
++}  // namespace thor::privacy
+diff --git a/chrome/test/BUILD.gn b/chrome/test/BUILD.gn
+--- a/chrome/test/BUILD.gn
++++ b/chrome/test/BUILD.gn
+@@ -5578,6 +5578,7 @@ test("unit_tests") {
+     "../browser/chrome_content_browser_client_parts_unittest.cc",
+     "../browser/chrome_content_browser_client_unittest.cc",
+     "../browser/command_updater_impl_unittest.cc",
++    "../browser/thor/privacy/thor_url_cleanup_throttle_unittest.cc",
+     "../browser/enterprise/connectors/interstitials/enterprise_page_unittest.cc",
+     "../browser/enterprise/encryption/cache_encryption_provider_impl_unittest.cc",
+     "../browser/enterprise/identifiers/profile_id_service_factory_unittest.cc",

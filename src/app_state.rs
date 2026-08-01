@@ -109,6 +109,9 @@ pub struct AppState {
     engine_handle: Mutex<Option<EngineHandle>>,
     vault: BitwardenVault,
     downloads: DownloadManager,
+    browser_defaults: crate::engine::ThorBrowserDefaults,
+    network_privacy_policy: Mutex<crate::engine::NetworkPrivacyPolicy>,
+    privacy_readbacks: Mutex<crate::net::PrivacyRuntimeReadbacks>,
     /// Auto Picture-in-Picture when tab hides while video plays.
     auto_pip: AtomicBool,
     /// Run passive Visit Recon after each navigation.
@@ -130,6 +133,7 @@ impl AppState {
         let tamper = TrafficTamperEngine::new();
         tamper.set_interception_enabled(false);
         let idor = crate::net::idor_matrix::IdorMatrixEngine::new();
+        let browser_defaults = crate::engine::ThorBrowserDefaults::new();
 
         Self {
             profiles,
@@ -142,6 +146,11 @@ impl AppState {
             engine_handle: Mutex::new(None),
             vault: BitwardenVault::new(),
             downloads: DownloadManager::new(),
+            browser_defaults,
+            network_privacy_policy: Mutex::new(
+                crate::engine::ThorBrowserDefaults::network_privacy_policy(),
+            ),
+            privacy_readbacks: Mutex::new(crate::net::PrivacyRuntimeReadbacks::default()),
             auto_pip: AtomicBool::new(true),
             visit_recon_enabled: AtomicBool::new(true),
             last_visit_recon: Mutex::new(None),
@@ -169,7 +178,9 @@ impl AppState {
         &self.security
     }
 
-    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
+    pub fn tab_history(
+        &self,
+    ) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
         self.tab_history.lock()
     }
 
@@ -191,6 +202,49 @@ impl AppState {
     /// Browser-owned download ledger (Cmd+⇧K → Downloads).
     pub fn downloads(&self) -> &DownloadManager {
         &self.downloads
+    }
+
+    /// Thor-owned Chromium privacy and launch defaults.
+    pub fn browser_defaults(&self) -> &crate::engine::ThorBrowserDefaults {
+        &self.browser_defaults
+    }
+
+    /// Snapshot the process-level network policy used for effective readback.
+    pub fn network_privacy_policy(&self) -> crate::engine::NetworkPrivacyPolicy {
+        self.network_privacy_policy.lock().clone()
+    }
+
+    /// Mutable observations produced by real browser/native probes.
+    /// Configuration intent alone must never be recorded here as healthy.
+    pub fn privacy_readbacks(
+        &self,
+    ) -> parking_lot::MutexGuard<'_, crate::net::PrivacyRuntimeReadbacks> {
+        self.privacy_readbacks.lock()
+    }
+
+    /// Record a browser-backed WebRTC policy observation. A matching command
+    /// line is useful evidence, but the effective status remains subject to
+    /// the policy's bounded-age/readback rules.
+    pub fn record_webrtc_policy_observation(
+        &self,
+        observed: crate::engine::WebRtcProbeResult,
+    ) -> Result<(), String> {
+        self.network_privacy_policy
+            .lock()
+            .record_verified_webrtc_probe(observed)
+            .map(|_| ())
+    }
+
+    /// Collect effective network/security status from current policy, a fresh
+    /// signed-bundle verification, and the latest bounded-age observations.
+    pub fn effective_privacy_status(&self) -> Result<crate::net::EffectivePrivacyStatus, String> {
+        let shield = crate::engine::product::thor_shield_extension_path()
+            .map_err(|error| format!("locate Thor Shield: {error}"))?;
+        let policy = self.network_privacy_policy.lock();
+        let readbacks = self.privacy_readbacks.lock();
+        Ok(crate::net::effective_privacy_status(
+            &policy, &shield, &readbacks,
+        ))
     }
 
     pub fn auto_pip_enabled(&self) -> bool {

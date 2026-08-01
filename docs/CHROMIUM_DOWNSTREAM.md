@@ -18,6 +18,7 @@ Thor is a **Chromium downstream browser** (same product model as Chrome / Brave 
 
 | Step | Approx. |
 |------|---------|
+| Full Xcode | Required; Command Line Tools alone cannot configure Chromium |
 | depot_tools | ~100 MB |
 | `fetch chromium` + hooks | 50–100 GB |
 | First `autoninja -C out/Thor chrome` | multi-hour |
@@ -25,22 +26,32 @@ Thor is a **Chromium downstream browser** (same product model as Chrome / Brave 
 
 Set `THOR_CHROMIUM_SRC` to the parent of `src/` (default: `$HOME/thor-chromium`). Keep the checkout **outside** the Rust git worktree when possible.
 
+On macOS, launch Xcode once and complete Apple's license/setup flow before building. Thor's scripts only detect this prerequisite; they never accept the license automatically.
+
+Tagged releases use a self-hosted macOS runner labeled `thor-chromium-builder` with at least 100 GiB free. Configure `CODESIGN_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID` secrets; release packaging fails closed if signing/notarization credentials are absent. Linux and Windows release jobs stay gated until equivalent Thor-owned Chromium downstream build/package pipelines exist; Rust-launcher-only archives are not browser releases.
+
 ## Pin
 
-Revision and snapshot metadata live in [`chromium_manifest.json`](../chromium_manifest.json). Source builds use `chromium_src_revision` (git hash or LKGR tag). Snapshot ZIPs remain a bootstrap cache only — not the product end-state.
+The Chromium source pin and Thor feature policy live in [`thor_browser_manifest.json`](../thor_browser_manifest.json). The build pipeline checks out Chromium directly and applies only Thor-owned branding and configuration. Stock Chromium snapshots are intentionally disabled for packages because they lack that branding and configuration.
+
+`fetch_chromium.sh` materializes the configured tag under `refs/tags/`, checks it against the manifest's exact peeled commit, checks out that commit, and verifies that `gclient sync` did not move `HEAD`. Apply/build/package steps then require that exact commit, origin, numbered patch set, GN input, staged assets, and provenance marker. A matching `chrome/VERSION` alone is not sufficient.
+
+`out/Thor/ThorOwnedChromium.json` is generated after source validation, then sealed to the built browser executable after Ninja completes. It records the exact repository/ref/commit, ordered SHA-256 digests for every numbered patch, `browser/gn_args.thor.gn`, the complete Shield asset tree, `rules.json`, and the executable digest/size/name. Packaging copies that validated marker—not the source manifest—into the application bundle and recomputes both input and executable digests before release.
 
 ## Commands
 
 ```bash
-# One-time tooling
-./scripts/setup_depot_tools.sh
-
-# Fetch pinned Chromium (long)
+# Fetch Thor's pinned Chromium source (long)
 ./scripts/fetch_chromium.sh
 
-# Apply Thor branding overlays + configure out/Thor
+# Apply Thor branding + configure out/Thor
 ./scripts/apply_thor_branding.sh
-./scripts/build_chromium.sh          # content_shell first, then chrome
+python3 ./scripts/privacy_regression_check.py \
+  --chromium-src "$THOR_CHROMIUM_SRC/src" --patch-state applied
+./scripts/build_chromium.sh          # chrome + chromedriver
+./scripts/verify_thor_downstream.sh
+./scripts/package_macos.sh 0.1.0
+./scripts/verify_macos_package.sh 0.1.0
 
 # Run branded browser (no system Chrome)
 ./scripts/run_thor_chromium.sh https://example.com
@@ -48,6 +59,24 @@ Revision and snapshot metadata live in [`chromium_manifest.json`](../chromium_ma
 # Rust Labs sidecar (features / MCP / load) against self-CDP
 THOR_SELF_CDP_URL=http://127.0.0.1:9222 cargo run --bin thor-labs
 ```
+
+The browserless privacy contract can run without Chromium:
+
+```bash
+python3 ./scripts/privacy_regression_check.py
+```
+
+It validates manifest/patch/GN/release-policy invariants. It does not replace the fresh-profile runtime tests listed in [`PRIVACY_SECURITY_PLAN.md`](PRIVACY_SECURITY_PLAN.md).
+
+Run the ignored live acceptance suite against an exact-pin Thor-owned executable:
+
+```bash
+./scripts/run_privacy_acceptance.sh /absolute/path/to/Thor
+```
+
+The wrapper verifies downstream provenance before launch, then exercises startup, privacy-signal readback, WebRTC policy, isolated browser contexts, and disposable-context cleanup. Explicit live selection fails closed when the executable or provenance is missing; ordinary `cargo test` remains browserless.
+
+The pinned macOS release args explicitly retain Chromium official optimization, ThinLTO, PartitionAlloc-as-malloc, and BackupRefPtr support/activation. All are declared by Chromium 151 and checked by the source-aware contract. Thor does not force Chromium's CFI argument on macOS: Chromium 151's own declaration enables official CFI only for Linux x64 and ChromeOS device builds.
 
 ## Isolation mapping (Levels → Chromium)
 

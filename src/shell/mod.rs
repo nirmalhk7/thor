@@ -1,12 +1,12 @@
 #![allow(dead_code)]
 
+pub mod chromium_shell;
+pub mod chromium_tabs;
 pub mod engine_status;
 pub mod gui;
 pub mod ipc_dispatch;
 #[cfg(target_os = "macos")]
 pub mod native_toolbar;
-pub mod chromium_tabs;
-pub mod chromium_shell;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -221,9 +221,8 @@ fn show_palette_overlay(tabs: &ShellTabs, chrome: &Option<WebView>, w: f64, h: f
 
 fn hide_palette_overlay(tabs: &ShellTabs, chrome: &Option<WebView>, w: f64, h: f64) {
     if let Some(wv) = chrome {
-        let _ = wv.evaluate_script(
-            "if (window.__thorCloseModalSilent) window.__thorCloseModalSilent();",
-        );
+        let _ = wv
+            .evaluate_script("if (window.__thorCloseModalSilent) window.__thorCloseModalSilent();");
         let _ = wv.set_visible(false);
         let _ = wv.set_bounds(ShellTabs::content_bounds(w, h, false));
     }
@@ -250,7 +249,12 @@ fn push_locust_stats(chrome: &Option<WebView>, metrics: &LocustScoredMetrics, ru
     );
 }
 
-fn push_decode_result(chrome: &Option<WebView>, badge: &str, html: Option<&str>, text: Option<&str>) {
+fn push_decode_result(
+    chrome: &Option<WebView>,
+    badge: &str,
+    html: Option<&str>,
+    text: Option<&str>,
+) {
     let payload = serde_json::json!({
         "badge": badge,
         "html": html,
@@ -278,9 +282,11 @@ fn sync_tab_chrome_ui(chrome: &Option<WebView>, tab_id: &str, url: &str, title: 
 pub(crate) fn sanitize_and_record(tab_id: &str, url: &str, title: &str) -> String {
     let state = AppState::global();
     let (clean, _) = state.security().sanitize_navigate_url(url);
-    state
-        .tab_history()
-        .record_visit(tab_id, &clean, if title.is_empty() { &clean } else { title });
+    state.tab_history().record_visit(
+        tab_id,
+        &clean,
+        if title.is_empty() { &clean } else { title },
+    );
     clean
 }
 
@@ -294,9 +300,8 @@ fn is_ephemeral_url(url: &str) -> bool {
 
 fn dismiss_page_modals(tabs: &ShellTabs) {
     for wv in tabs.webviews.values() {
-        let _ = wv.evaluate_script(
-            "try{if(window.closeThorModal)window.closeThorModal();}catch(e){}",
-        );
+        let _ =
+            wv.evaluate_script("try{if(window.closeThorModal)window.closeThorModal();}catch(e){}");
     }
 }
 
@@ -396,8 +401,8 @@ pub(crate) fn content_hotkey_script() -> &'static str {
                     { icon: '💻', title: 'Open in VS Code', action_key: 'open_ide_vscode', badge: 'path' },
                     { icon: '⚡', title: 'Open in Cursor', action_key: 'open_ide_cursor', badge: 'path' },
                     { icon: '🚀', title: 'Open in WebStorm', action_key: 'open_ide_webstorm', badge: 'path' },
-                    { icon: '🛡️', title: 'SSL CA install', action_key: 'show_ssl_details', badge: 'CA' },
-                    { icon: '🛡️', title: 'Tracker shield', action_key: 'toggle_security_shield', badge: 'strip' },
+                    { icon: '🛡️', title: 'Connection scheme info', action_key: 'show_ssl_details', badge: 'URL' },
+                    { icon: '🛡️', title: 'Privacy status', action_key: 'engine_status', badge: 'verify' },
                     { icon: '🔑', title: 'Bitwarden vault', action_key: 'open_bitwarden_vault', badge: 'bw' },
                     { icon: '🗑️', title: 'Clear history', action_key: 'clear_history', badge: 'privacy' },
                     { icon: '❄️', title: 'Compact idle tabs', action_key: 'trigger_memory_compaction', badge: 'GC' },
@@ -758,13 +763,18 @@ fn create_content_tab(
                     let _ = proxy_for_ipc.send_event(UserEvent::CloseActiveTab);
                 }
                 // Privileged lab cmds are NOT accepted from content pages (SEC-091).
-                "locust_start" | "locust_stop" | "set_interception_enabled" | "add_tamper_rule"
-                | "install_ca" | "decode_jwt_crack" => {
+                "locust_start"
+                | "locust_stop"
+                | "set_interception_enabled"
+                | "add_tamper_rule"
+                | "install_ca"
+                | "decode_jwt_crack" => {
                     println!(
                         "⚡ [Thor] rejected privileged IPC from content: {cmd} (use toolbar/⌘⇧K)"
                     );
                 }
-                "hotkey_focus_url" => {
+                "hotkey_focus_url" =>
+                {
                     #[cfg(target_os = "macos")]
                     if let Some(tb) = toolbar_for_ipc.borrow().as_ref() {
                         tb.focus_omnibox();
@@ -801,8 +811,7 @@ fn create_content_tab(
                 }
                 "switch_tab" => {
                     if let Some(target) = payload["id"].as_str() {
-                        let _ = proxy_for_ipc
-                            .send_event(UserEvent::SwitchTab(target.to_string()));
+                        let _ = proxy_for_ipc.send_event(UserEvent::SwitchTab(target.to_string()));
                     }
                 }
                 "open_tool" => {
@@ -1001,8 +1010,8 @@ fn create_palette_webview(
                     let _ = crate::dx::ide_bridge::IdeBridge::open_file(ide, path, line, col);
                     let _ = proxy_for_ipc.send_event(UserEvent::ClosePalette);
                 }
-                "feature_list" | "feature_invoke" | "lens_payload"
-                | "bitwarden_status" | "bitwarden_login" | "bitwarden_unlock" | "bitwarden_lock"
+                "feature_list" | "feature_invoke" | "lens_payload" | "bitwarden_status"
+                | "bitwarden_login" | "bitwarden_unlock" | "bitwarden_lock"
                 | "bitwarden_logout" | "bitwarden_search" | "bitwarden_matches"
                 | "bitwarden_autofill" => {
                     let _ = proxy_for_ipc.send_event(UserEvent::FeatureIpc(payload.clone()));
@@ -1138,7 +1147,10 @@ fn open_cmd_k_in_active_tab(tabs: &ShellTabs) {
           else console.warn('[Thor] openThorModal missing');
         }})();"#
     );
-    println!("⚡ [Thor] Opening ⌘K palette in content tab {}", tabs.active);
+    println!(
+        "⚡ [Thor] Opening ⌘K palette in content tab {}",
+        tabs.active
+    );
     let _ = wv.evaluate_script(&script);
     let _ = wv.focus();
 }
@@ -1164,7 +1176,10 @@ fn open_cmd_shift_k_in_active_tab(tabs: &ShellTabs) {
           else console.warn('[Thor] openThorModal missing');
         }})();"#
     );
-    println!("⚡ [Thor] Opening ⌘⇧K palette in content tab {}", tabs.active);
+    println!(
+        "⚡ [Thor] Opening ⌘⇧K palette in content tab {}",
+        tabs.active
+    );
     let _ = wv.evaluate_script(&script);
     let _ = wv.focus();
 }
@@ -1428,13 +1443,31 @@ fn run_omnibar_tool_go(
             }
         }
         native_toolbar::ChromeToolMode::Ssl => {
+            if AppState::global().profiles().get_profile().mode
+                != crate::engine::ProfileMode::DevHost
+            {
+                tb.set_status("CA install requires DevHost profile");
+                return false;
+            }
+            let consent = match crate::net::ssl_ca::CaTrustConsent::authorize(
+                crate::net::ssl_ca::CaTrustAction::Install,
+                &tb.read_ca_confirmation(),
+            ) {
+                Ok(consent) => consent,
+                Err(_) => {
+                    tb.set_status("Type: INSTALL THOR DEV CA FOR CURRENT USER");
+                    return false;
+                }
+            };
             match crate::net::ssl_ca::SslManager::generate_ca_and_leaf() {
                 Ok(paths) => {
                     let ca = paths.ca_cert_pem.display().to_string();
-                    match crate::net::ssl_ca::SslManager::install_ca_trust(&ca) {
-                        Ok(()) => {
-                            tb.set_status("CA installed");
-                            println!("⚡ [Thor SSL] installed {ca}");
+                    match crate::net::ssl_ca::SslManager::install_ca_trust_with_consent(
+                        &ca, consent,
+                    ) {
+                        Ok(readback) => {
+                            tb.set_status("CA installed for current user");
+                            println!("⚡ [Thor SSL] installed {ca}; scope={:?}", readback.scope);
                             true
                         }
                         Err(e) => {
@@ -1576,9 +1609,7 @@ fn handle_decode_payload(chrome: &Option<WebView>, input: &str) {
             if let Some(abi_match) = DecoderStudio::decode_web3_rpc(input) {
                 let html = format!(
                     "<strong>WEB3 ABI SELECTOR:</strong> {} ({})<br>Function: <code>{}</code>",
-                    abi_match.selector,
-                    abi_match.signature,
-                    abi_match.function_name
+                    abi_match.selector, abi_match.signature, abi_match.function_name
                 );
                 push_decode_result(chrome, "WEB3 RPC / CALLED", Some(&html), None);
             } else if crate::dx::web3_inspector::Web3Inspector::is_web3_rpc(input) {
@@ -1700,10 +1731,21 @@ pub(crate) fn setup_macos_app_icon() {
 }
 
 pub fn run() -> anyhow::Result<()> {
-    crate::thor_info!("thor::shell", "Launching Thor Developer Browser UI...");
-    chromium_shell::run_chromium_shell()
-}
+    if crate::engine::legacy_dual_window_requested() {
+        crate::thor_info!(
+            "thor::shell",
+            "Launching transitional legacy dual-window shell..."
+        );
+        return chromium_shell::run_chromium_shell();
+    }
 
+    let executable = crate::engine::discover_owned_chromium_path().ok_or_else(|| {
+        anyhow::anyhow!(
+            "Thor-owned Chromium is required. Build it with ./scripts/fetch_chromium.sh && ./scripts/apply_thor_branding.sh && ./scripts/build_chromium.sh"
+        )
+    })?;
+    crate::engine::run_owned_chromium_browser(executable)
+}
 
 /// Wry-based in-window shell: AppKit native toolbar on top, WKWebView content
 /// fills the area below CHROME_HEIGHT. No external Chromium process is spawned.
@@ -1946,10 +1988,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                         } else {
                             "__thorFeatureResult"
                         };
-                        chrome_eval(
-                            &chrome,
-                            &format!("window.{hook} && window.{hook}({json});"),
-                        );
+                        chrome_eval(&chrome, &format!("window.{hook} && window.{hook}({json});"));
                     }
                     _ => {}
                 }
@@ -2156,10 +2195,7 @@ pub(crate) fn normalize_omnibox_url(raw: &str) -> String {
         if url.contains('.') && !url.contains(' ') {
             url = format!("https://{url}");
         } else {
-            url = format!(
-                "https://www.google.com/search?q={}",
-                url.replace(' ', "+")
-            );
+            url = format!("https://www.google.com/search?q={}", url.replace(' ', "+"));
         }
     }
     url
@@ -2286,8 +2322,12 @@ pub(crate) fn open_tool_in_omnibar_chromium(
                 tb.set_tool_mode(mode);
                 let label = match st.state {
                     crate::dx::bitwarden::VaultState::MissingCli => "bw CLI missing",
-                    crate::dx::bitwarden::VaultState::Unauthenticated => "Not logged in — unlock after bw login",
-                    crate::dx::bitwarden::VaultState::Locked => "Vault locked — enter master password",
+                    crate::dx::bitwarden::VaultState::Unauthenticated => {
+                        "Not logged in — unlock after bw login"
+                    }
+                    crate::dx::bitwarden::VaultState::Locked => {
+                        "Vault locked — enter master password"
+                    }
                     crate::dx::bitwarden::VaultState::Unlocked => "Vault unlocked",
                 };
                 tb.set_status(label);
@@ -2313,7 +2353,9 @@ pub(crate) fn open_tool_in_omnibar_chromium(
                         };
                         tb.set_status(summary);
                     }
-                    ipc_dispatch::DispatchResult::Err(e) => tb.set_status(&format!("IDOR Err: {e}")),
+                    ipc_dispatch::DispatchResult::Err(e) => {
+                        tb.set_status(&format!("IDOR Err: {e}"))
+                    }
                     _ => tb.set_status("IDOR scan completed"),
                 }
             }
@@ -2385,12 +2427,30 @@ pub(crate) fn run_omnibar_tool_go_chromium(
             }
         }
         native_toolbar::ChromeToolMode::Ssl => {
+            if AppState::global().profiles().get_profile().mode
+                != crate::engine::ProfileMode::DevHost
+            {
+                tb.set_status("CA install requires DevHost profile");
+                return false;
+            }
+            let consent = match crate::net::ssl_ca::CaTrustConsent::authorize(
+                crate::net::ssl_ca::CaTrustAction::Install,
+                &tb.read_ca_confirmation(),
+            ) {
+                Ok(consent) => consent,
+                Err(_) => {
+                    tb.set_status("Type: INSTALL THOR DEV CA FOR CURRENT USER");
+                    return false;
+                }
+            };
             match crate::net::ssl_ca::SslManager::generate_ca_and_leaf() {
                 Ok(paths) => {
                     let ca = paths.ca_cert_pem.display().to_string();
-                    match crate::net::ssl_ca::SslManager::install_ca_trust(&ca) {
-                        Ok(()) => {
-                            tb.set_status("CA installed");
+                    match crate::net::ssl_ca::SslManager::install_ca_trust_with_consent(
+                        &ca, consent,
+                    ) {
+                        Ok(_) => {
+                            tb.set_status("CA installed for current user");
                             true
                         }
                         Err(e) => {

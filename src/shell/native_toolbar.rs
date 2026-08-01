@@ -1035,8 +1035,21 @@ impl NativeToolbar {
                 self.place_row(animated, 0.35, &[(self.tool_f0, 160.0)], 80.0, "Open", 48.0);
             }
             ChromeToolMode::Ssl => {
-                self.set_status("ECDSA P-256 local CA");
-                self.place_row(animated, 0.40, &[], 180.0, "Install", 56.0);
+                self.set_status("DevHost only · trusts local TLS for current user");
+                self.set_field(
+                    self.tool_f0,
+                    "",
+                    "type INSTALL THOR DEV CA FOR CURRENT USER",
+                    true,
+                );
+                self.place_row(
+                    animated,
+                    0.40,
+                    &[(self.tool_f0, 190.0)],
+                    225.0,
+                    "Install",
+                    56.0,
+                );
             }
             ChromeToolMode::Shield => {
                 self.set_status("Strip utm_*/gclid/fbclid");
@@ -1111,6 +1124,10 @@ impl NativeToolbar {
         } else {
             p
         }
+    }
+
+    pub fn read_ca_confirmation(&self) -> String {
+        read_nsstring(self.tool_f0)
     }
 
     /// Master password from Vault tool field (never logged by callers).

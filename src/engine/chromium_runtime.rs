@@ -7,6 +7,7 @@
 //!
 //! If none are found, callers receive [`ChromiumError::NotFound`].
 
+use std::collections::HashMap;
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
@@ -31,7 +32,10 @@ impl ChromiumSource {
 
 use anyhow::anyhow;
 use chromiumoxide::browser::{Browser, BrowserConfig, BrowserConfigBuilder};
-use chromiumoxide::cdp::browser_protocol::target::CreateTargetParams;
+use chromiumoxide::cdp::browser_protocol::target::{
+    CreateBrowserContextParams, CreateTargetParams, GetBrowserContextsParams,
+};
+use chromiumoxide::cdp::browser_protocol::browser::GetBrowserCommandLineParams;
 use chromiumoxide::Page;
 use futures::StreamExt;
 use parking_lot::Mutex as SyncMutex;
@@ -40,7 +44,7 @@ use tokio::runtime::{Handle, Runtime};
 use tokio::sync::{oneshot, Mutex};
 use tokio::task::JoinHandle;
 
-use super::tab_session::{TabId, TabSession};
+use super::tab_session::{IdentityContext, TabId, TabSession};
 
 /// Environment variable that overrides Chromium/Chrome discovery.
 pub const THOR_CHROMIUM_PATH_ENV: &str = "THOR_CHROMIUM_PATH";
@@ -253,7 +257,10 @@ fn path_lookup(name: &str) -> Option<PathBuf> {
 fn build_browser_config(cfg: &ChromiumRuntimeConfig) -> ChromiumResult<(BrowserConfig, PathBuf)> {
     let executable = match &cfg.executable {
         Some(p) => p.clone(),
-        None => discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf(),
+        None => discover_chromium_path()
+            .ok_or(ChromiumError::NotFound)?
+            .executable_path()
+            .to_path_buf(),
     };
 
     let mut builder: BrowserConfigBuilder = BrowserConfig::builder()
@@ -305,7 +312,11 @@ impl ChromiumRuntime {
         let handle = rt.handle().clone();
         let rt = Arc::new(rt);
         let rt_keep = Arc::clone(&rt);
-        handle.block_on(Self::launch_with_handle(config, handle.clone(), Some(rt_keep)))
+        handle.block_on(Self::launch_with_handle(
+            config,
+            handle.clone(),
+            Some(rt_keep),
+        ))
     }
 
     /// Connect to an already-running browser via HTTP or WebSocket debug URL.
@@ -395,6 +406,17 @@ impl ChromiumRuntime {
         &self.handle
     }
 
+    /// Read the command line reported by the connected browser through CDP.
+    /// This is a runtime observation for policy diagnostics; callers must not
+    /// treat a matching switch as proof of network enforcement by itself.
+    pub async fn browser_command_line(&self) -> ChromiumResult<Vec<String>> {
+        let browser = self.browser.lock().await;
+        let response = browser
+            .execute(GetBrowserCommandLineParams::default())
+            .await?;
+        Ok(response.result.arguments)
+    }
+
     /// Run an async CDP future from a sync context (shell main thread).
     pub fn block_on<F, T>(&self, fut: F) -> T
     where
@@ -411,11 +433,109 @@ impl ChromiumRuntime {
             let browser = self.browser.lock().await;
             browser.new_page(start).await?
         };
-        Ok(TabSession::from_page(
-            next_tab_id(),
+        Ok(TabSession::from_page(next_tab_id(), page, Arc::clone(self)))
+    }
+
+    /// Create a real, empty Chromium browser context. Chromium gives each
+    /// context independent cookies, storage, service workers, and permission
+    /// state; it is the backing implementation for Thor identity contexts.
+    pub async fn create_identity_context(&self) -> ChromiumResult<String> {
+        let browser = self.browser.lock().await;
+        let context_id = browser
+            .create_browser_context(identity_context_params())
+            .await?;
+        Ok(context_id.into())
+    }
+
+    /// Blocking [`Self::create_identity_context`] for the transitional shell.
+    pub fn create_identity_context_blocking(&self) -> ChromiumResult<String> {
+        let browser = Arc::clone(&self.browser);
+        self.block_on(async move {
+            let browser = browser.lock().await;
+            let context_id = browser
+                .create_browser_context(identity_context_params())
+                .await?;
+            Ok(context_id.into())
+        })
+    }
+
+    /// Destroy a Chromium identity context and its complete storage state.
+    pub async fn dispose_identity_context(&self, context_id: &str) -> ChromiumResult<()> {
+        let browser = self.browser.lock().await;
+        browser
+            .dispose_browser_context(context_id.to_owned())
+            .await?;
+        Ok(())
+    }
+
+    /// Blocking [`Self::dispose_identity_context`] for the transitional shell.
+    pub fn dispose_identity_context_blocking(&self, context_id: &str) -> ChromiumResult<()> {
+        let context_id = context_id.to_owned();
+        let browser = Arc::clone(&self.browser);
+        self.block_on(async move {
+            let browser = browser.lock().await;
+            browser.dispose_browser_context(context_id).await?;
+            Ok(())
+        })
+    }
+
+    /// Enumerate non-default Chromium BrowserContexts currently alive on the
+    /// attached browser. Unknown contexts are not assumed to be Thor-owned.
+    pub async fn identity_contexts(&self) -> ChromiumResult<Vec<String>> {
+        let browser = self.browser.lock().await;
+        let response = browser.execute(GetBrowserContextsParams::default()).await?;
+        Ok(response
+            .result
+            .browser_context_ids
+            .into_iter()
+            .map(Into::into)
+            .collect())
+    }
+
+    /// Create a tab inside a real Chromium browser context. Passing `None`
+    /// uses Thor's primary profile; a context id creates an isolated identity.
+    pub async fn new_tab_in_context(
+        self: &Arc<Self>,
+        url: Option<&str>,
+        browser_context_id: Option<&str>,
+    ) -> ChromiumResult<TabSession> {
+        let start = url.unwrap_or("about:blank");
+        let page = {
+            let browser = self.browser.lock().await;
+            let mut params = CreateTargetParams::builder().url(start);
+            if let Some(context_id) = browser_context_id {
+                params = params.browser_context_id(context_id.to_owned());
+            }
+            browser
+                .new_page(params.build().map_err(ChromiumError::Config)?)
+                .await?
+        };
+        let tab_id = next_tab_id();
+        let identity = match browser_context_id {
+            Some(context_id) => IdentityContext::new(context_id, "default_profile", true),
+            None => IdentityContext::new("default", "default_profile", false),
+        };
+        Ok(TabSession::from_page_with_context(
+            tab_id,
             page,
             Arc::clone(self),
+            identity,
         ))
+    }
+
+    /// Blocking [`Self::new_tab_in_context`] for the transitional shell.
+    pub fn new_tab_in_context_blocking(
+        self: &Arc<Self>,
+        url: Option<&str>,
+        browser_context_id: Option<&str>,
+    ) -> ChromiumResult<TabSession> {
+        let url = url.map(str::to_owned);
+        let browser_context_id = browser_context_id.map(str::to_owned);
+        let this = Arc::clone(self);
+        self.block_on(async move {
+            this.new_tab_in_context(url.as_deref(), browser_context_id.as_deref())
+                .await
+        })
     }
 
     /// Blocking [`Self::new_tab`].
@@ -423,6 +543,35 @@ impl ChromiumRuntime {
         let url = url.map(str::to_owned);
         let this = Arc::clone(self);
         self.block_on(async move { this.new_tab(url.as_deref()).await })
+    }
+
+    /// Adopt the existing page targets of a browser connected through self-CDP.
+    /// These are real product tabs, not newly-created automation targets.
+    pub async fn existing_tabs(self: &Arc<Self>) -> ChromiumResult<Vec<TabSession>> {
+        let (pages, context_by_target) = {
+            let mut browser = self.browser.lock().await;
+            let targets = browser.fetch_targets().await?;
+            let context_by_target: HashMap<String, String> = targets
+                .into_iter()
+                .filter(|target| target.r#type == "page")
+                .filter_map(|target| {
+                    target
+                        .browser_context_id
+                        .map(|context_id| (target.target_id.inner().clone(), context_id.into()))
+                })
+                .collect();
+            (browser.pages().await?, context_by_target)
+        };
+        Ok(pages
+            .into_iter()
+            .map(|page| {
+                let identity = context_by_target
+                    .get(page.target_id().inner())
+                    .map(|context_id| IdentityContext::new(context_id, "default_profile", true))
+                    .unwrap_or_else(|| IdentityContext::new("default", "default_profile", false));
+                TabSession::from_page_with_context(next_tab_id(), page, Arc::clone(self), identity)
+            })
+            .collect())
     }
 
     /// Pop a pre-warmed about:blank page, or create one if the pool is empty.
@@ -516,6 +665,12 @@ fn next_tab_id() -> TabId {
     TabId(NEXT_TAB_ID.fetch_add(1, Ordering::Relaxed))
 }
 
+fn identity_context_params() -> CreateBrowserContextParams {
+    CreateBrowserContextParams::builder()
+        .dispose_on_detach(true)
+        .build()
+}
+
 /// Run `fut` on `handle` from sync code without nested `block_on` panics.
 pub fn block_on_handle<F, T>(handle: &Handle, fut: F) -> T
 where
@@ -557,10 +712,8 @@ mod tests {
 
     #[test]
     fn discovery_respects_env_override() {
-        let dir = std::env::temp_dir().join(format!(
-            "thor-chromium-discovery-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("thor-chromium-discovery-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let fake = dir.join("fake-chromium");
         std::fs::write(&fake, b"#!/bin/sh\n").unwrap();
@@ -578,7 +731,10 @@ mod tests {
         let _ = std::fs::remove_file(&fake);
         let _ = std::fs::remove_dir(&dir);
 
-        assert_eq!(found.map(|s| s.executable_path().to_path_buf()).as_deref(), Some(fake.as_path()));
+        assert_eq!(
+            found.map(|s| s.executable_path().to_path_buf()).as_deref(),
+            Some(fake.as_path())
+        );
     }
 
     #[test]
@@ -600,7 +756,10 @@ mod tests {
     #[test]
     #[ignore = "requires a live Chrome/Chromium install"]
     fn live_launch_smoke() {
-        let path = discover_chromium_path().expect("Chrome not installed").executable_path().to_path_buf();
+        let path = discover_chromium_path()
+            .expect("Chrome not installed")
+            .executable_path()
+            .to_path_buf();
         let cfg = ChromiumRuntimeConfig {
             executable: Some(path),
             headful: false,
@@ -617,16 +776,65 @@ mod tests {
         let _ = Duration::from_millis(1);
     }
 
+    #[tokio::test]
+    #[ignore = "requires a live Thor-owned Chromium build"]
+    async fn live_identity_context_create_readback_destroy() {
+        let path = discover_chromium_path()
+            .expect("Thor-owned Chromium not installed")
+            .executable_path()
+            .to_path_buf();
+        let runtime = ChromiumRuntime::launch(ChromiumRuntimeConfig {
+            executable: Some(path),
+            headful: false,
+            prewarm_pool_size: 0,
+            no_sandbox: true,
+            ..Default::default()
+        })
+        .await
+        .expect("launch");
+
+        let context_id = runtime
+            .create_identity_context()
+            .await
+            .expect("create context");
+        assert!(runtime
+            .identity_contexts()
+            .await
+            .expect("list contexts")
+            .contains(&context_id));
+
+        let tab = runtime
+            .new_tab_in_context(Some("about:blank"), Some(&context_id))
+            .await
+            .expect("context tab");
+        assert_eq!(tab.identity_context().id, context_id);
+        assert!(tab.is_ephemeral_context());
+        tab.close().await.expect("close tab");
+
+        runtime
+            .dispose_identity_context(&context_id)
+            .await
+            .expect("dispose context");
+        assert!(!runtime
+            .identity_contexts()
+            .await
+            .expect("list contexts after dispose")
+            .contains(&context_id));
+        runtime.shutdown().await.expect("shutdown");
+    }
+
     #[test]
     fn test_concurrent_tab_id_generation() {
-        use std::thread;
         use std::sync::{Arc, Mutex};
-        
+        use std::thread;
+
         let thread_count = 10;
         let iters_per_thread = 100_000; // 1,000,000 total IDs
         let mut handles = vec![];
-        let results = Arc::new(Mutex::new(Vec::with_capacity(thread_count * iters_per_thread)));
-        
+        let results = Arc::new(Mutex::new(Vec::with_capacity(
+            thread_count * iters_per_thread,
+        )));
+
         for _ in 0..thread_count {
             let results_clone = Arc::clone(&results);
             handles.push(thread::spawn(move || {
@@ -637,15 +845,19 @@ mod tests {
                 results_clone.lock().unwrap().extend(local_ids);
             }));
         }
-        
+
         for h in handles {
             h.join().unwrap();
         }
-        
+
         let all_ids = results.lock().unwrap();
-        assert_eq!(all_ids.len(), thread_count * iters_per_thread, "Should generate 1,000,000 IDs");
-        
-        // Use a boolean array for fast unique check if IDs are sequential, 
+        assert_eq!(
+            all_ids.len(),
+            thread_count * iters_per_thread,
+            "Should generate 1,000,000 IDs"
+        );
+
+        // Use a boolean array for fast unique check if IDs are sequential,
         // or a HashSet since memory is fine (1M elements in HashSet is ~16MB).
         // A vec with sort and dedup is faster.
         let mut sorted_ids = all_ids.clone();
@@ -653,7 +865,12 @@ mod tests {
         let original_len = sorted_ids.len();
         sorted_ids.dedup();
         let dedup_len = sorted_ids.len();
-        
-        assert_eq!(original_len, dedup_len, "Found {} collisions in Tab ID generation!", original_len - dedup_len);
+
+        assert_eq!(
+            original_len,
+            dedup_len,
+            "Found {} collisions in Tab ID generation!",
+            original_len - dedup_len
+        );
     }
 }

@@ -1,0 +1,38 @@
+{
+  "manifest_version": 3,
+  "name": "Thor Shield",
+  "version": "0.1.0",
+  "description": "Thor-owned tracker blocking and privacy defaults.",
+  "minimum_chrome_version": "113",
+  "permissions": ["browsingData", "contentSettings", "declarativeNetRequestWithHostAccess", "privacy", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": {
+    "service_worker": "service_worker.js",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["fingerprint.js"],
+      "run_at": "document_start",
+      "world": "MAIN",
+      "all_frames": true
+    }
+  ],
+  "options_ui": {
+    "page": "options.html",
+    "open_in_tab": true
+  },
+  "action": {
+    "default_title": "Thor Shield settings"
+  },
+  "declarative_net_request": {
+    "rule_resources": [
+      {
+        "id": "thor_shield_rules",
+        "enabled": true,
+        "path": "rules.json"
+      }
+    ]
+  }
+}

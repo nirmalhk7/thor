@@ -8,14 +8,61 @@ use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
 
+use crate::app_state::AppState;
 use crate::engine::{
-    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig,
-    IdentityContext, TabLifecycle, TabSession,
+    discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig, TabLifecycle,
+    TabSession,
 };
 use crate::shell::engine_status;
-use crate::app_state::AppState;
 
 use super::{sanitize_and_record, TabMeta};
+
+const CONTEXT_DISPOSAL_MAX_ATTEMPTS: u8 = 3;
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ContextDisposalFailure {
+    pub context_id: String,
+    pub attempts: u8,
+    pub error: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CloseTabStatus {
+    Closed,
+    Degraded(ContextDisposalFailure),
+}
+
+fn dispose_context_bounded<E, F>(mut dispose: F) -> Result<u8, (u8, E)>
+where
+    F: FnMut() -> Result<(), E>,
+{
+    let mut last_error = None;
+    for attempt in 1..=CONTEXT_DISPOSAL_MAX_ATTEMPTS {
+        match dispose() {
+            Ok(()) => return Ok(attempt),
+            Err(error) => last_error = Some(error),
+        }
+    }
+    Err((
+        CONTEXT_DISPOSAL_MAX_ATTEMPTS,
+        last_error.expect("disposal attempts are nonzero"),
+    ))
+}
+
+fn retain_context_disposal_failure(
+    failures: &mut HashMap<String, ContextDisposalFailure>,
+    context_id: String,
+    attempts: u8,
+    error: String,
+) -> ContextDisposalFailure {
+    let failure = ContextDisposalFailure {
+        context_id: context_id.clone(),
+        attempts,
+        error,
+    };
+    failures.insert(context_id, failure.clone());
+    failure
+}
 
 pub struct ChromiumTabs {
     pub(crate) runtime: Arc<ChromiumRuntime>,
@@ -25,6 +72,12 @@ pub struct ChromiumTabs {
     hotkey_script: String,
     /// Per-tab CDP Fetch.requestPaused listeners (when intercept is on).
     fetch_handles: HashMap<String, JoinHandle<()>>,
+    /// Real Chromium BrowserContext ids for disposable tabs. Destroying one
+    /// clears the whole context, not just Thor's in-memory tab metadata.
+    ephemeral_contexts: HashMap<String, String>,
+    /// Context ids retained after bounded disposal failures. Entries remain
+    /// available for diagnostics instead of silently losing Chromium storage.
+    failed_context_disposals: HashMap<String, ContextDisposalFailure>,
 }
 
 impl ChromiumTabs {
@@ -56,6 +109,8 @@ impl ChromiumTabs {
             active: String::new(),
             hotkey_script: hotkey_script.to_string(),
             fetch_handles: HashMap::new(),
+            ephemeral_contexts: HashMap::new(),
+            failed_context_disposals: HashMap::new(),
         })
     }
 
@@ -144,16 +199,40 @@ impl ChromiumTabs {
     /// Create a Disposable Isolated Tab with an ephemeral Identity Context.
     pub fn create_disposable_tab(&mut self, tab_id: &str, url: &str) -> ChromiumResult<()> {
         let clean = sanitize_and_record(tab_id, url, "");
-        let session = self.runtime.new_tab_blocking(Some(&clean))?;
-        let profile = crate::app_state::AppState::global()
+        let browser_context_id = self.runtime.create_identity_context_blocking()?;
+        // Register document-start privacy protection while still on about:blank
+        // before the destination can create its first storage or fingerprint.
+        let session = self
+            .runtime
+            .new_tab_in_context_blocking(Some("about:blank"), Some(&browser_context_id))
+            .map_err(|error| {
+                let _ = self
+                    .runtime
+                    .dispose_identity_context_blocking(&browser_context_id);
+                error
+            })?;
+        if crate::app_state::AppState::global()
             .profiles()
-            .get_profile();
-        let profile_id = match profile.mode {
-            crate::engine::profiles::ProfileMode::DevHost => "dev_host",
-            crate::engine::profiles::ProfileMode::StealthTarget => "stealth_target",
-        };
-        let ephemeral_ctx = IdentityContext::ephemeral(profile_id);
-        session.update_identity_context(|ctx| *ctx = ephemeral_ctx);
+            .get_profile()
+            .randomize_fingerprints
+        {
+            session
+                .inject_script_on_new_document_blocking(
+                    crate::engine::fingerprinting::FingerprintProtection::stealth_bootstrap(),
+                )
+                .map_err(|error| {
+                    let _ = self
+                        .runtime
+                        .dispose_identity_context_blocking(&browser_context_id);
+                    error
+                })?;
+        }
+        session.navigate_blocking(&clean).map_err(|error| {
+            let _ = self
+                .runtime
+                .dispose_identity_context_blocking(&browser_context_id);
+            error
+        })?;
         self.reinject(&session);
         self.meta.insert(
             tab_id.to_string(),
@@ -164,6 +243,8 @@ impl ChromiumTabs {
             },
         );
         self.sessions.insert(tab_id.to_string(), session);
+        self.ephemeral_contexts
+            .insert(tab_id.to_string(), browser_context_id);
         self.active = tab_id.to_string();
         self.show_only(tab_id);
         self.publish_active_evaluator();
@@ -228,7 +309,7 @@ impl ChromiumTabs {
         }
     }
 
-    pub fn close_tab(&mut self, tab_id: &str) {
+    pub fn close_tab(&mut self, tab_id: &str) -> CloseTabStatus {
         crate::app_state::AppState::global()
             .tab_history()
             .clear_tab_history(tab_id);
@@ -239,6 +320,30 @@ impl ChromiumTabs {
         if let Some(session) = self.sessions.remove(tab_id) {
             let _ = session.close_blocking();
         }
+        let disposal_failure = self.ephemeral_contexts.remove(tab_id).and_then(|context_id| {
+            match dispose_context_bounded(|| {
+                self.runtime
+                    .dispose_identity_context_blocking(&context_id)
+            }) {
+                Ok(_) => None,
+                Err((attempts, error)) => {
+                    let failure = retain_context_disposal_failure(
+                        &mut self.failed_context_disposals,
+                        context_id,
+                        attempts,
+                        error.to_string(),
+                    );
+                    crate::thor_warn!(
+                        "thor::shell",
+                        "Disposable tab close degraded; retained BrowserContext {} after {} disposal attempts: {}",
+                        failure.context_id,
+                        failure.attempts,
+                        failure.error
+                    );
+                    Some(failure)
+                }
+            }
+        });
         if self.active == tab_id {
             let next = self
                 .meta
@@ -255,6 +360,9 @@ impl ChromiumTabs {
             }
         }
         self.publish_active_evaluator();
+        disposal_failure
+            .map(CloseTabStatus::Degraded)
+            .unwrap_or(CloseTabStatus::Closed)
     }
 
     fn maybe_attach_fetch(&mut self, tab_id: &str) {
@@ -295,7 +403,10 @@ impl ChromiumTabs {
         for id in ids {
             self.maybe_attach_fetch(&id);
         }
-        println!("⚡ [Thor Fetch] intercept ON ({} tabs)", self.fetch_handles.len());
+        println!(
+            "⚡ [Thor Fetch] intercept ON ({} tabs)",
+            self.fetch_handles.len()
+        );
     }
 
     pub fn switch_tab(&mut self, target_id: &str) -> Option<String> {
@@ -418,6 +529,63 @@ impl ChromiumTabs {
             println!("⚡ [Thor 4-Stage Lifecycle] Expiring idle tab (≥24h) & wiping history: {id}");
             self.close_tab(&id);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn context_disposal_retries_until_success() {
+        let mut attempts = 0;
+        let result = dispose_context_bounded(|| {
+            attempts += 1;
+            if attempts < CONTEXT_DISPOSAL_MAX_ATTEMPTS {
+                Err("transient")
+            } else {
+                Ok(())
+            }
+        });
+
+        assert_eq!(result, Ok(CONTEXT_DISPOSAL_MAX_ATTEMPTS));
+        assert_eq!(attempts, CONTEXT_DISPOSAL_MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn context_disposal_stops_after_bounded_failures() {
+        let mut attempts = 0;
+        let result = dispose_context_bounded(|| {
+            attempts += 1;
+            Err("persistent")
+        });
+
+        assert_eq!(result, Err((CONTEXT_DISPOSAL_MAX_ATTEMPTS, "persistent")));
+        assert_eq!(attempts, CONTEXT_DISPOSAL_MAX_ATTEMPTS);
+    }
+
+    #[test]
+    fn failed_context_id_is_retained_with_degraded_details() {
+        let mut failures = HashMap::new();
+        let failure = retain_context_disposal_failure(
+            &mut failures,
+            "browser-context-7".into(),
+            CONTEXT_DISPOSAL_MAX_ATTEMPTS,
+            "CDP unavailable".into(),
+        );
+
+        assert_eq!(
+            failures.get("browser-context-7"),
+            Some(&ContextDisposalFailure {
+                context_id: "browser-context-7".into(),
+                attempts: CONTEXT_DISPOSAL_MAX_ATTEMPTS,
+                error: "CDP unavailable".into(),
+            })
+        );
+        assert!(matches!(
+            CloseTabStatus::Degraded(failure),
+            CloseTabStatus::Degraded(_)
+        ));
     }
 }
 

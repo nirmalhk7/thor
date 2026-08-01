@@ -192,4 +192,3 @@ pub struct RestoreSnapshot {
     pub url: String,
     pub scroll_y: f64,
 }
-

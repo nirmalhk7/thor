@@ -520,4 +520,3 @@ mod tests {
         assert!(stack.badges.iter().any(|b| b.name.contains("WordPress")));
     }
 }
-

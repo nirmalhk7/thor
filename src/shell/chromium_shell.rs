@@ -37,7 +37,10 @@ use super::{
 use super::native_toolbar;
 
 pub fn run_chromium_shell() -> anyhow::Result<()> {
-    crate::thor_info!("thor::shell", "[Thor Shell] Initializing Chromium dual-window shell...");
+    crate::thor_info!(
+        "thor::shell",
+        "[Thor Shell] Initializing Chromium dual-window shell..."
+    );
 
     #[cfg(target_os = "macos")]
     {
@@ -80,13 +83,25 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
         let mut t = tabs.borrow_mut();
         t.create_tab("default_tab", "https://www.google.com")
             .map_err(|e| anyhow::anyhow!("initial Chromium tab: {e}"))?;
-        crate::thor_info!("thor::shell", "⚡ [Thor] Initial Chromium tab ready (dual-window)");
+        crate::thor_info!(
+            "thor::shell",
+            "⚡ [Thor] Initial Chromium tab ready (dual-window)"
+        );
     }
 
     let runtime_for_mcp = tabs.borrow().runtime.clone();
     tokio::spawn(async move {
-        let (engine, handle) =
-            crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
+        let Ok((engine, handle)) =
+            crate::engine::engine_coordinator::BrowserEngine::attach_existing(runtime_for_mcp)
+                .await
+        else {
+            crate::thor_warn!(
+                "thor::shell",
+                "MCP engine could not adopt legacy Chromium tabs"
+            );
+            return;
+        };
+        AppState::global().set_engine_handle(handle.clone());
         tokio::spawn(engine.run());
         crate::mcp::server::start_mcp_server(handle).await;
     });
@@ -124,10 +139,22 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
     let mut next_gc_at = Instant::now() + TAB_GC_INTERVAL;
     let mut next_ipc_at = Instant::now() + Duration::from_millis(250);
 
-    crate::thor_info!("thor::shell", "============================================================");
-    crate::thor_info!("thor::shell", "🚀 [Thor Shell] AppKit chrome + Chromium content (dual-window M2)");
-    crate::thor_info!("thor::shell", "🚀 [Thor Shell] ⌘K / ⌘⇧K via CDP inject · omnibox drives Chromium");
-    crate::thor_info!("thor::shell", "============================================================");
+    crate::thor_info!(
+        "thor::shell",
+        "============================================================"
+    );
+    crate::thor_info!(
+        "thor::shell",
+        "🚀 [Thor Shell] AppKit chrome + Chromium content (dual-window M2)"
+    );
+    crate::thor_info!(
+        "thor::shell",
+        "🚀 [Thor Shell] ⌘K / ⌘⇧K via CDP inject · omnibox drives Chromium"
+    );
+    crate::thor_info!(
+        "thor::shell",
+        "============================================================"
+    );
 
     let _ = CHROME_HEIGHT;
 
@@ -186,7 +213,11 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
                     let on = !AppState::global().tamper().is_interception_enabled();
                     AppState::global().tamper().set_interception_enabled(on);
                     tabs_for_loop.borrow_mut().set_fetch_interception(on);
-                    let msg = if on { "Fetch intercept ON" } else { "Fetch intercept OFF" };
+                    let msg = if on {
+                        "Fetch intercept ON"
+                    } else {
+                        "Fetch intercept OFF"
+                    };
                     println!("⚡ [Thor] {msg}");
                     #[cfg(target_os = "macos")]
                     if let Some(tb) = toolbar_for_loop.borrow_mut().as_mut() {
@@ -456,7 +487,11 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
                         tabs.drain_ipc_queue()
                     };
                     for msg in msgs {
-                        dispatch_chromium_ipc(&msg, &proxy_for_loop, &mut tabs_for_loop.borrow_mut());
+                        dispatch_chromium_ipc(
+                            &msg,
+                            &proxy_for_loop,
+                            &mut tabs_for_loop.borrow_mut(),
+                        );
                     }
                 }
                 if now >= next_gc_at {
@@ -565,8 +600,18 @@ fn handle_download_action(download_id: &str, reveal: bool) {
     };
     let path = std::path::Path::new(&item.target_path);
     if !path.exists() {
+        eprintln!("⚡ [Thor] download path missing: {}", item.target_path);
+        return;
+    }
+    if !reveal
+        && item
+            .security_evidence
+            .as_ref()
+            .map(|evidence| evidence.status)
+            != Some(crate::net::DownloadSecurityStatus::Allowed)
+    {
         eprintln!(
-            "⚡ [Thor] download path missing: {}",
+            "⚡ [Thor] refusing to open unverified or blocked download: {}",
             item.target_path
         );
         return;
@@ -662,12 +707,13 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>, tabs: &mu
         "toggle_devtools" => {
             let _ = proxy.send_event(UserEvent::OpenTool("toggle_devtools".into()));
         }
-        "toggle_pip" => {
-            match tabs.toggle_pip_active() {
-                Some(r) => println!("⚡ [Thor PiP] active={} mode={} ({})", r.active, r.mode, r.detail),
-                None => eprintln!("⚡ [Thor PiP] no active tab"),
-            }
-        }
+        "toggle_pip" => match tabs.toggle_pip_active() {
+            Some(r) => println!(
+                "⚡ [Thor PiP] active={} mode={} ({})",
+                r.active, r.mode, r.detail
+            ),
+            None => eprintln!("⚡ [Thor PiP] no active tab"),
+        },
         "set_auto_pip" => {
             let on = payload["enabled"].as_bool().unwrap_or(true);
             AppState::global().set_auto_pip(on);
@@ -750,12 +796,26 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>, tabs: &mu
                 eprintln!("⚡ [Thor] copy_llm_clean_context error: {e}");
             }
         }
-        "open_ide" | "add_tamper_rule" | "add_bookmark" | "remove_bookmark" | "locust_start"
-        | "locust_stop" | "decode_payload" | "decode_jwt_crack"
-        | "bitwarden_status" | "bitwarden_lock" | "bitwarden_logout" | "bitwarden_search"
-        | "bitwarden_matches" | "bitwarden_autofill"
-        | "feature_list" | "feature_invoke" | "lens_payload"
-        | "forward_intercepted" | "drop_intercepted" | "list_intercepted" => {
+        "open_ide"
+        | "add_tamper_rule"
+        | "add_bookmark"
+        | "remove_bookmark"
+        | "locust_start"
+        | "locust_stop"
+        | "decode_payload"
+        | "decode_jwt_crack"
+        | "bitwarden_status"
+        | "bitwarden_lock"
+        | "bitwarden_logout"
+        | "bitwarden_search"
+        | "bitwarden_matches"
+        | "bitwarden_autofill"
+        | "feature_list"
+        | "feature_invoke"
+        | "lens_payload"
+        | "forward_intercepted"
+        | "drop_intercepted"
+        | "list_intercepted" => {
             // Inject active URL for matches when omitted.
             let mut payload = payload.clone();
             if cmd == "bitwarden_matches" && payload["url"].as_str().unwrap_or("").is_empty() {
@@ -777,7 +837,9 @@ fn dispatch_chromium_ipc(msg: &str, proxy: &EventLoopProxy<UserEvent>, tabs: &mu
                     let hook = match cmd {
                         "bitwarden_search" | "bitwarden_matches" => "__thorBitwardenMatches",
                         "feature_list" => "__thorFeatureList",
-                        "feature_invoke" | "lens_payload" | "list_intercepted"
+                        "feature_invoke"
+                        | "lens_payload"
+                        | "list_intercepted"
                         | "forward_intercepted" => "__thorFeatureResult",
                         _ if cmd.starts_with("bitwarden_") => "__thorBitwardenStatus",
                         _ => "",

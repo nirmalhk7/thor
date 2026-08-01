@@ -36,8 +36,14 @@ mod tests {
     fn test_security_shield_strip_all_four_required_trackers() {
         let dirty_url = "https://checkout.shop.com/pay?utm_source=newsletter&gclid=123456&fbclid=abcdef&msclkid=xyz789&cart_id=9999&currency=USD";
         let (clean_url, stripped) = SecurityShield::sanitize_url(dirty_url);
-        assert!(stripped, "Expected tracking parameters to be detected and stripped");
-        assert_eq!(clean_url, "https://checkout.shop.com/pay?cart_id=9999&currency=USD");
+        assert!(
+            stripped,
+            "Expected tracking parameters to be detected and stripped"
+        );
+        assert_eq!(
+            clean_url,
+            "https://checkout.shop.com/pay?cart_id=9999&currency=USD"
+        );
         assert!(!clean_url.contains("utm_source"));
         assert!(!clean_url.contains("gclid"));
         assert!(!clean_url.contains("fbclid"));
@@ -46,19 +52,23 @@ mod tests {
 
     #[test]
     fn test_security_shield_strip_individual_tracking_params() {
-        let (url1, s1) = SecurityShield::sanitize_url("https://example.com/item?utm_source=twitter&ref_id=42");
+        let (url1, s1) =
+            SecurityShield::sanitize_url("https://example.com/item?utm_source=twitter&ref_id=42");
         assert!(s1);
         assert_eq!(url1, "https://example.com/item?ref_id=42");
 
-        let (url2, s2) = SecurityShield::sanitize_url("https://example.com/item?gclid=google123&session=active");
+        let (url2, s2) =
+            SecurityShield::sanitize_url("https://example.com/item?gclid=google123&session=active");
         assert!(s2);
         assert_eq!(url2, "https://example.com/item?session=active");
 
-        let (url3, s3) = SecurityShield::sanitize_url("https://example.com/item?fbclid=fb456&lang=en");
+        let (url3, s3) =
+            SecurityShield::sanitize_url("https://example.com/item?fbclid=fb456&lang=en");
         assert!(s3);
         assert_eq!(url3, "https://example.com/item?lang=en");
 
-        let (url4, s4) = SecurityShield::sanitize_url("https://example.com/item?msclkid=ms789&tab=overview");
+        let (url4, s4) =
+            SecurityShield::sanitize_url("https://example.com/item?msclkid=ms789&tab=overview");
         assert!(s4);
         assert_eq!(url4, "https://example.com/item?tab=overview");
     }
@@ -66,21 +76,29 @@ mod tests {
     #[test]
     fn test_chromium_compatibility_and_headers() {
         let ua = SecurityShield::chromium_user_agent();
-        assert!(ua.contains("Chrome/126.0.0.0"));
+        assert!(ua.contains("Chrome/151.0.0.0"));
         assert!(ua.contains("Safari/537.36"));
-        assert!(ua.contains("Thor/1.0"));
+        assert!(!ua.contains("Thor"));
 
         let headers = SecurityShield::get_security_headers();
-        assert!(headers.iter().any(|(k, v)| *k == "User-Agent" && v.contains("Chrome/126")));
-        assert!(headers.iter().any(|(k, v)| *k == "Sec-CH-UA" && v.contains("Chromium")));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| *k == "User-Agent" && v.contains("Chrome/151")));
+        assert!(!headers.iter().any(|(_, value)| value.contains("Thor")));
+        assert!(headers
+            .iter()
+            .any(|(k, v)| *k == "Sec-CH-UA" && v.contains("Chromium")));
 
         let settings = SettingsRegistry::get_all_settings();
-        assert!(settings.iter().any(|s| s.title.contains("Engine status") || s.title.contains("Chromium")));
+        assert!(settings
+            .iter()
+            .any(|s| s.title.contains("Engine status") || s.title.contains("Chromium")));
     }
 
     #[test]
     fn test_security_shield_urls_with_only_tracking_params() {
-        let dirty = "https://example.com/landing?utm_source=google&gclid=123&fbclid=abc&msclkid=xyz";
+        let dirty =
+            "https://example.com/landing?utm_source=google&gclid=123&fbclid=abc&msclkid=xyz";
         let (clean, stripped) = SecurityShield::sanitize_url(dirty);
         assert!(stripped);
         assert_eq!(clean, "https://example.com/landing");
@@ -107,8 +125,10 @@ mod tests {
         let headers = SecurityShield::get_security_headers();
         assert!(headers.contains(&("DNT", "1")));
         assert!(headers.contains(&("Sec-GPC", "1")));
-        assert!(headers.contains(&("X-Content-Type-Options", "nosniff")));
-        assert!(headers.contains(&("X-Frame-Options", "SAMEORIGIN")));
+        assert!(!headers
+            .iter()
+            .any(|(name, _)| *name == "X-Content-Type-Options"));
+        assert!(!headers.iter().any(|(name, _)| *name == "X-Frame-Options"));
     }
 
     // =========================================================================
@@ -120,15 +140,24 @@ mod tests {
         let html = r#"<!DOCTYPE html><html><body><div id="root" data-reactroot=""></div><script src="/static/js/react.js"></script></body></html>"#;
         let stack = TechStackDetector::detect("https://myreactapp.dev", html, None);
         assert_eq!(stack.url, "https://myreactapp.dev");
-        assert!(stack.badges.iter().any(|b| b.name == "React" && b.category == "UI" && b.icon == "⚛️"));
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "React" && b.category == "UI" && b.icon == "⚛️"));
     }
 
     #[test]
     fn test_tech_stack_detector_nextjs_matching() {
         let html = r#"<!DOCTYPE html><html><head><script id="__NEXT_DATA__" type="application/json">{"props":{}}</script></head><body><div id="__next"></div></body></html>"#;
         let stack = TechStackDetector::detect("https://nextjs.org", html, Some("Vercel"));
-        assert!(stack.badges.iter().any(|b| b.name == "Next.js" && b.category == "Framework" && b.icon == "▲"));
-        assert!(stack.badges.iter().any(|b| b.name == "React 18" && b.category == "UI" && b.icon == "⚛️"));
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Next.js" && b.category == "Framework" && b.icon == "▲"));
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "React 18" && b.category == "UI" && b.icon == "⚛️"));
         assert_eq!(stack.server_header.as_deref(), Some("Vercel"));
     }
 
@@ -136,20 +165,35 @@ mod tests {
     fn test_tech_stack_detector_rust_wasm_matching() {
         let html = r#"<!DOCTYPE html><html><body><script type="module">import init from './app_bg.wasm'; init();</script></body></html>"#;
         let stack = TechStackDetector::detect("https://wasm-demo.org", html, None);
-        assert!(stack.badges.iter().any(|b| b.name == "Rust (Wasm)" && b.category == "Language" && b.icon == "🦀"));
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Rust (Wasm)" && b.category == "Language" && b.icon == "🦀"));
 
-        let docs_stack = TechStackDetector::detect("https://docs.rs/tokio/latest", "<html></html>", None);
+        let docs_stack =
+            TechStackDetector::detect("https://docs.rs/tokio/latest", "<html></html>", None);
         assert!(docs_stack.badges.iter().any(|b| b.name == "Rust (Wasm)"));
     }
 
     #[test]
     fn test_tech_stack_detector_django_matching() {
         let html = r#"<!DOCTYPE html><html><body><h1>Django Portal</h1></body></html>"#;
-        let stack = TechStackDetector::detect("https://django-app.com", html, Some("gunicorn/20.1.0 (Django 4.2)"));
-        assert!(stack.badges.iter().any(|b| b.name == "Python (Django)" && b.category == "Backend" && b.icon == "🐍"));
+        let stack = TechStackDetector::detect(
+            "https://django-app.com",
+            html,
+            Some("gunicorn/20.1.0 (Django 4.2)"),
+        );
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Python (Django)" && b.category == "Backend" && b.icon == "🐍"));
 
-        let uvicorn_stack = TechStackDetector::detect("https://fastapi-django.com", html, Some("uvicorn"));
-        assert!(uvicorn_stack.badges.iter().any(|b| b.name == "Python (Django)"));
+        let uvicorn_stack =
+            TechStackDetector::detect("https://fastapi-django.com", html, Some("uvicorn"));
+        assert!(uvicorn_stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Python (Django)"));
     }
 
     #[test]
@@ -157,20 +201,32 @@ mod tests {
         // Pure Vue test
         let vue_html = r#"<div id="app" data-v-123456>Vue Component</div>"#;
         let vue_stack = TechStackDetector::detect("https://vuejs.org", vue_html, None);
-        assert!(vue_stack.badges.iter().any(|b| b.name == "Vue.js" && b.category == "UI" && b.icon == "🟢"));
+        assert!(vue_stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Vue.js" && b.category == "UI" && b.icon == "🟢"));
 
         // Nuxt test
         let nuxt_html = r#"<div id="__nuxt"><script src="/_nuxt/entry.js"></script></div>"#;
         let nuxt_stack = TechStackDetector::detect("https://nuxt.com", nuxt_html, None);
-        assert!(nuxt_stack.badges.iter().any(|b| b.name == "Nuxt" && b.category == "Framework" && b.icon == "💚"));
-        assert!(nuxt_stack.badges.iter().any(|b| b.name == "Vue.js" && b.category == "UI" && b.icon == "🟢"));
+        assert!(nuxt_stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Nuxt" && b.category == "Framework" && b.icon == "💚"));
+        assert!(nuxt_stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Vue.js" && b.category == "UI" && b.icon == "🟢"));
     }
 
     #[test]
     fn test_tech_stack_detector_tailwind_matching() {
         let html = r#"<div class="flex items-center justify-between p-4 bg-slate-900 text-white tailwindcss">Tailwind UI</div>"#;
         let stack = TechStackDetector::detect("https://tailwind-ui.com", html, None);
-        assert!(stack.badges.iter().any(|b| b.name == "Tailwind CSS" && b.category == "Styling" && b.icon == "🎨"));
+        assert!(stack
+            .badges
+            .iter()
+            .any(|b| b.name == "Tailwind CSS" && b.category == "Styling" && b.icon == "🎨"));
     }
 
     #[test]
@@ -189,7 +245,8 @@ mod tests {
                 </body>
             </html>
         "#;
-        let stack = TechStackDetector::detect("https://fullstack.app", html, Some("gunicorn/20.1.0"));
+        let stack =
+            TechStackDetector::detect("https://fullstack.app", html, Some("gunicorn/20.1.0"));
 
         let names: Vec<&str> = stack.badges.iter().map(|b| b.name.as_str()).collect();
         assert!(names.contains(&"Next.js"));
@@ -201,7 +258,11 @@ mod tests {
 
     #[test]
     fn test_tech_stack_detector_fallbacks() {
-        let generic_stack = TechStackDetector::detect("https://random-website.xyz", "<html><body>Hello</body></html>", None);
+        let generic_stack = TechStackDetector::detect(
+            "https://random-website.xyz",
+            "<html><body>Hello</body></html>",
+            None,
+        );
         assert_eq!(generic_stack.badges.len(), 1);
         assert_eq!(generic_stack.badges[0].name, "HTML5 / JavaScript");
 
@@ -221,39 +282,38 @@ mod tests {
             "manifest_version": 3
         }"#;
 
-        let parsed = parse_chrome_extension_manifest(manifest_json, "fmkadmapgofadopljbjfkapdkoienihi");
+        let parsed =
+            parse_chrome_extension_manifest(manifest_json, "fmkadmapgofadopljbjfkapdkoienihi");
         assert!(parsed.is_some());
         let item = parsed.unwrap();
         assert_eq!(item.id, "ext_fmkadmapgofadopljbjfkapdkoienihi");
         assert_eq!(item.title, "React Developer Tools v5.2.0");
         assert_eq!(item.item_type, PaletteItemType::Setting);
-        assert_eq!(item.path_or_url, "chrome-extension://fmkadmapgofadopljbjfkapdkoienihi");
+        assert_eq!(
+            item.path_or_url,
+            "chrome-extension://fmkadmapgofadopljbjfkapdkoienihi"
+        );
         assert_eq!(item.category, "Extensions");
         assert_eq!(item.icon.as_deref(), Some("🧩"));
         assert_eq!(item.badge.as_deref(), Some("Extension"));
-        assert_eq!(item.action_key.as_deref(), Some("open_extension_fmkadmapgofadopljbjfkapdkoienihi"));
+        assert_eq!(
+            item.action_key.as_deref(),
+            Some("open_extension_fmkadmapgofadopljbjfkapdkoienihi")
+        );
     }
 
     #[test]
     fn test_chrome_extensions_parser_items() {
         let extensions = read_chrome_extensions();
-        assert!(extensions.len() >= 5, "Expected at least 5 built-in Chrome extensions");
-
-        for ext in &extensions {
-            assert_eq!(ext.item_type, PaletteItemType::Setting);
-            assert_eq!(ext.category, "Extensions");
-            assert_eq!(ext.icon.as_deref(), Some("🧩"));
-            assert_eq!(ext.badge.as_deref(), Some("Extension"));
-            assert!(ext.path_or_url.starts_with("chrome-extension://"));
-            assert!(ext.action_key.is_some());
-        }
-
-        let extension_ids: Vec<&str> = extensions.iter().map(|e| e.id.as_str()).collect();
-        assert!(extension_ids.contains(&"ext_react_devtools"));
-        assert!(extension_ids.contains(&"ext_redux_devtools"));
-        assert!(extension_ids.contains(&"ext_vue_devtools"));
-        assert!(extension_ids.contains(&"ext_ublock"));
-        assert!(extension_ids.contains(&"ext_tailwind"));
+        assert_eq!(extensions.len(), 1, "Only Thor-owned extensions are listed");
+        let shield = &extensions[0];
+        assert_eq!(shield.id, "ext_thor_shield");
+        assert_eq!(shield.item_type, PaletteItemType::Setting);
+        assert_eq!(shield.category, "Extensions");
+        assert_eq!(shield.icon.as_deref(), Some("🛡️"));
+        assert_eq!(shield.badge.as_deref(), Some("Built-in"));
+        assert_eq!(shield.path_or_url, "Thor://settings/security_shield");
+        assert!(shield.action_key.is_none());
     }
 
     #[test]
@@ -263,11 +323,20 @@ mod tests {
         assert_eq!(palette.mode, CmdPaletteMode::SettingsMenu);
 
         let mut settings_and_exts = SettingsRegistry::get_all_settings();
-        settings_and_exts.extend(vec![
-            PaletteItem::new("ext_react_devtools", "React Developer Tools", PaletteItemType::Setting, "Thor://ext/react", None, None, "Extensions", None),
-            PaletteItem::new("ext_ublock", "uBlock Origin", PaletteItemType::Setting, "Thor://ext/ublock", None, None, "Extensions", None),
-        ]);
-        assert!(settings_and_exts.len() >= 13, "Settings registry should contain built-in settings");
+        settings_and_exts.extend(vec![PaletteItem::new(
+            "ext_thor_shield",
+            "Thor Shield",
+            PaletteItemType::Setting,
+            "Thor://settings/security_shield",
+            None,
+            None,
+            "Extensions",
+            None,
+        )]);
+        assert!(
+            settings_and_exts.len() >= 13,
+            "Settings registry should contain built-in settings"
+        );
 
         palette.set_items(settings_and_exts);
 
@@ -281,17 +350,13 @@ mod tests {
         let locust_results = palette.search();
         assert!(!locust_results.is_empty());
 
-        // Search for extension (React)
-        palette.set_query("React".into());
-        let react_ext_results = palette.search();
-        assert!(!react_ext_results.is_empty());
-        assert!(react_ext_results.iter().any(|r| r.title.contains("React Developer Tools")));
-
-        // Search for extension (uBlock)
-        palette.set_query("uBlock".into());
-        let ublock_results = palette.search();
-        assert!(!ublock_results.is_empty());
-        assert_eq!(ublock_results[0].id, "ext_ublock");
+        // Search for Thor's packaged extension.
+        palette.set_query("Shield".into());
+        let shield_results = palette.search();
+        assert!(!shield_results.is_empty());
+        assert!(shield_results
+            .iter()
+            .any(|item| item.id == "ext_thor_shield"));
     }
 
     #[test]
@@ -386,7 +451,9 @@ mod tests {
 
             let items = store.to_palette_items();
             assert_eq!(items.len(), 2);
-            assert!(items.iter().all(|i| i.item_type == PaletteItemType::Bookmark));
+            assert!(items
+                .iter()
+                .all(|i| i.item_type == PaletteItemType::Bookmark));
         }
 
         {
@@ -522,7 +589,10 @@ mod tests {
 
         // Error penalty is error_rate * 2.0 = 40.0
         // Score is lower than 100.0 because of error penalty
-        assert!(scored.score < 65.0, "Score should reflect error rate penalty");
+        assert!(
+            scored.score < 65.0,
+            "Score should reflect error rate penalty"
+        );
     }
 
     #[test]
@@ -564,8 +634,8 @@ mod tests {
 
     #[test]
     fn test_traffic_tamper_engine_integration() {
-        use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
         use std::collections::HashMap;
+        use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
 
         let engine = TrafficTamperEngine::new();
         engine.add_rule(TamperRule {
@@ -592,19 +662,22 @@ mod tests {
 
         let processed = engine.process_outgoing_request(req).unwrap();
         assert!(processed.is_modified);
-        assert_eq!(processed.headers.get("Authorization").map(|s| s.as_str()), Some("Bearer test_token_123"));
+        assert_eq!(
+            processed.headers.get("Authorization").map(|s| s.as_str()),
+            Some("Bearer test_token_123")
+        );
     }
 
     #[test]
     fn test_profile_manager_integration() {
         use thor::engine::profiles::{ProfileManager, ProfileMode};
         let manager = ProfileManager::new();
-        assert_eq!(manager.get_profile().mode, ProfileMode::DevHost);
-        assert!(manager.get_profile().enable_ide_bridge);
-
-        manager.set_mode(ProfileMode::StealthTarget);
         assert_eq!(manager.get_profile().mode, ProfileMode::StealthTarget);
-        assert!(manager.get_profile().strip_tracking_params);
+        assert!(!manager.get_profile().enable_ide_bridge);
+
+        manager.set_mode(ProfileMode::HardenedTarget);
+        assert_eq!(manager.get_profile().mode, ProfileMode::HardenedTarget);
+        assert!(manager.get_profile().privacy.require_isolated_identity);
     }
 
     #[test]
@@ -717,21 +790,33 @@ mod tests {
         ephem_ctx.set_local_storage("token", "jwt_token_123");
         ephem_ctx.set_auth_token("api.internal", "Bearer auth_ephemeral");
 
-        assert_eq!(ephem_ctx.get_cookie("session").map(|s| s.as_str()), Some("secret_ephemeral_val"));
-        assert_eq!(ephem_ctx.get_local_storage("token").map(|s| s.as_str()), Some("jwt_token_123"));
-        assert_eq!(ephem_ctx.get_auth_token("api.internal").map(|s| s.as_str()), Some("Bearer auth_ephemeral"));
+        assert_eq!(
+            ephem_ctx.get_cookie("session").map(|s| s.as_str()),
+            Some("secret_ephemeral_val")
+        );
+        assert_eq!(
+            ephem_ctx.get_local_storage("token").map(|s| s.as_str()),
+            Some("jwt_token_123")
+        );
+        assert_eq!(
+            ephem_ctx.get_auth_token("api.internal").map(|s| s.as_str()),
+            Some("Bearer auth_ephemeral")
+        );
 
         // Level 3: Tab-scoped state (IdentityContext per-tab partition)
         let mut persistent_ctx = IdentityContext::new("ctx_user_1", "dev_host", false);
         persistent_ctx.set_cookie("user_id", "42");
         assert!(!persistent_ctx.is_ephemeral);
-        assert_eq!(persistent_ctx.get_cookie("user_id").map(|s| s.as_str()), Some("42"));
+        assert_eq!(
+            persistent_ctx.get_cookie("user_id").map(|s| s.as_str()),
+            Some("42")
+        );
     }
 
     // b) 4-Stage Tab Lifecycles (Active -> Frozen -> Discarded -> Expired)
     #[test]
     fn test_four_stage_tab_lifecycles() {
-        use thor::engine::tab_session::{TabLifecycle, IdentityContext};
+        use thor::engine::tab_session::{IdentityContext, TabLifecycle};
 
         let mut lifecycle = TabLifecycle::Active;
         assert_eq!(lifecycle, TabLifecycle::Active);
@@ -773,8 +858,8 @@ mod tests {
         assert!(stack.badges.iter().any(|b| b.name == "Python (Django)"));
 
         // Lens 2: Security IDOR matrix (TrafficTamperEngine & TamperRule)
-        use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
         use std::collections::HashMap;
+        use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
         let engine = TrafficTamperEngine::new();
         engine.add_rule(TamperRule {
             id: "idor_test".into(),
@@ -798,7 +883,10 @@ mod tests {
         };
         let processed = engine.process_outgoing_request(req).unwrap();
         assert!(processed.is_modified);
-        assert_eq!(processed.headers.get("X-User-ID").map(|s| s.as_str()), Some("1002"));
+        assert_eq!(
+            processed.headers.get("X-User-ID").map(|s| s.as_str()),
+            Some("1002")
+        );
 
         // Lens 3: Performance (LocustMetricScorer)
         let mut metrics = Vec::new();
@@ -835,34 +923,70 @@ mod tests {
         assert_eq!(decoded.selector, "0x095ea7b3");
 
         let eip55_addr = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
-        assert_eq!(Web3Inspector::validate_eip55_checksum(eip55_addr), Eip55Status::Valid);
+        assert_eq!(
+            Web3Inspector::validate_eip55_checksum(eip55_addr),
+            Eip55Status::Valid
+        );
     }
 
     // d) Thor Load Engine (Scenario parsing, Browser Runner, Protocol Runner)
     #[test]
     fn test_thor_load_engine_integration() {
+        use std::io::{Read, Write};
+        use std::net::TcpListener;
+        use std::sync::atomic::{AtomicBool, Ordering};
+        use std::sync::Arc;
+        use std::time::{Duration, Instant};
         use thor::load::{
-            BrowserRunner, BrowserRunnerConfig, ProtocolRunner, RunnerType, ScenarioCompiler,
-            ScenarioStep, ThorScenario,
+            ProtocolRunner, RunnerType, ScenarioCompiler, ScenarioStep, ThorScenario,
         };
 
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind protocol fixture");
+        listener
+            .set_nonblocking(true)
+            .expect("set protocol fixture nonblocking");
+        let endpoint = format!("http://{}/get", listener.local_addr().unwrap());
+        let stop = Arc::new(AtomicBool::new(false));
+        let server_stop = Arc::clone(&stop);
+        let server = std::thread::spawn(move || {
+            let deadline = Instant::now() + Duration::from_secs(10);
+            while !server_stop.load(Ordering::Relaxed) && Instant::now() < deadline {
+                match listener.accept() {
+                    Ok((mut stream, _)) => {
+                        let _ = stream.set_read_timeout(Some(Duration::from_secs(1)));
+                        let mut request = [0_u8; 2048];
+                        let _ = stream.read(&mut request);
+                        stream
+                            .write_all(
+                                b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{}",
+                            )
+                            .expect("write protocol fixture response");
+                    }
+                    Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
+                        std::thread::sleep(Duration::from_millis(2));
+                    }
+                    Err(error) => panic!("protocol fixture accept failed: {error}"),
+                }
+            }
+        });
+
         // Scenario creation & compilation
-        let scenario = ThorScenario::new("Benchmark Swarm", "https://httpbin.org/get")
+        let scenario = ThorScenario::new("Benchmark Swarm", endpoint.clone())
             .with_runner(RunnerType::Protocol)
-            .with_vus(4)
-            .with_duration(2)
+            .with_vus(2)
+            .with_duration(1)
             .with_header("User-Agent", "Thor-Bench/1.0")
             .add_step(ScenarioStep::HttpRequest {
                 method: "GET".into(),
-                url: "https://httpbin.org/get".into(),
+                url: endpoint,
                 headers: std::collections::HashMap::new(),
                 body: None,
             })
             .add_step(ScenarioStep::Wait { duration_ms: 10 });
 
         let compiled = ScenarioCompiler::compile(scenario).expect("compile scenario");
-        assert_eq!(compiled.vus, 4);
-        assert_eq!(compiled.duration_secs, 2);
+        assert_eq!(compiled.vus, 2);
+        assert_eq!(compiled.duration_secs, 1);
         assert_eq!(compiled.steps.len(), 2);
 
         // JSON serialization and parsing
@@ -872,13 +996,21 @@ mod tests {
 
         // Protocol Runner execution
         let proto_runner = ProtocolRunner::new();
-        let proto_metrics = proto_runner
-            .run_blocking(&parsed)
-            .expect("protocol runner execution");
+        let proto_result = proto_runner.run_blocking(&parsed);
+        stop.store(true, Ordering::Relaxed);
+        server.join().expect("join protocol fixture");
+        let proto_metrics = proto_result.expect("protocol runner execution");
         assert!(proto_metrics.total_requests > 0);
         assert!(proto_metrics.avg_latency_ms >= 0.0);
+    }
 
-        // Browser Runner execution (capturing Web Vitals)
+    #[test]
+    #[ignore = "requires a live Thor-owned Chromium build"]
+    fn test_thor_load_engine_browser_runner_live() {
+        use thor::load::{
+            BrowserRunner, BrowserRunnerConfig, RunnerType, ScenarioStep, ThorScenario,
+        };
+
         let browser_runner = BrowserRunner::new(BrowserRunnerConfig::default());
         let browser_scenario = ThorScenario::new("Web Vitals Probe", "https://example.com")
             .with_runner(RunnerType::Browser)
@@ -927,9 +1059,7 @@ mod tests {
         assert_eq!(store.list().len(), 0);
 
         // Re-add via Cmd+D
-        let re_added = store
-            .add("Thor Docs", url_to_toggle)
-            .expect("re-add");
+        let re_added = store.add("Thor Docs", url_to_toggle).expect("re-add");
         assert_eq!(re_added.url, url_to_toggle);
         assert_eq!(store.list().len(), 1);
 
@@ -951,5 +1081,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
-

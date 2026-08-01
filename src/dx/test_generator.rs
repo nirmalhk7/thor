@@ -889,4 +889,3 @@ mod tests {
         assert!(a11y.contains("label"));
     }
 }
-

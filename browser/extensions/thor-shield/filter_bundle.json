@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "bundleVersion": "2026.07.31.2",
+  "rulesetId": "thor_shield_rules",
+  "rulesPath": "rules.json",
+  "rulesSha256": "1d3221179e83b78280edebd856a371094483a719ed6ea882d8afe585f5b9ef5d",
+  "ruleCount": 44,
+  "keyId": "thor-filter-release-2026-02",
+  "issuedAt": "2026-07-31T00:00:00Z",
+  "expiresAt": "2027-07-31T00:00:00Z",
+  "issuedAtUnix": 1785456000,
+  "expiresAtUnix": 1816992000,
+  "source": "Thor-maintained curated tracker domain baseline",
+  "sourceRevision": "thor-shield-rules-2026.07.31.2",
+  "signatureAlgorithm": "Ed25519",
+  "signature": "/BzjA6S7XOlv+WQ9p4Y2ONYxPj0NqT4G6LIbNVMBKiNhJLtJWP1uPGJWTaSVMwznoIVRObcxmumd6L1DPslhBg=="
+}

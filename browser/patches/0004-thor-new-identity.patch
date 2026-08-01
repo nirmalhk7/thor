@@ -1,0 +1,375 @@
+From c583827a354674180dc8856eb65aeb3f0afa5ee9 Mon Sep 17 00:00:00 2001
+From: Thor downstream maintainers
+Date: Fri, 31 Jul 2026 00:00:00 -0600
+Subject: [PATCH 4/4] Add disposable New Identity browser action
+X-Downstream-Base: Chromium 151.0.7922.47
+X-Downstream-Base-Commit: c583827a354674180dc8856eb65aeb3f0afa5ee9
+X-License: Chromium BSD-style license (LICENSE)
+X-Design: Unique memory-only OTR profile per action; existing
+ BrowserManagerService and ProfileDestroyer own final-window teardown.
+X-Shield-Contract: Non-primary OTR profiles do not run extensions. Thor's
+ native network and Blink policy is the security boundary; the component
+ extension is cosmetic/control UI only and is unavailable in identity windows.
+---
+diff --git a/chrome/app/chrome_command_ids.h b/chrome/app/chrome_command_ids.h
+index 3bdb2131ef0e22f8d43f2f47f43648d25ba5491c..e42b7d238fbcb7784e868ac739096a283b90dd59 100644
+--- a/chrome/app/chrome_command_ids.h
++++ b/chrome/app/chrome_command_ids.h
+@@ -46,6 +46,7 @@
+ // Window management commands
+ #define IDC_NEW_WINDOW                  34000
+ #define IDC_NEW_INCOGNITO_WINDOW        34001
++#define IDC_NEW_THOR_IDENTITY           34002
+ #define IDC_CLOSE_WINDOW                34012
+ #define IDC_ALWAYS_ON_TOP               34013
+ #define IDC_NEW_TAB                     34014
+diff --git a/chrome/app/generated_resources.grd b/chrome/app/generated_resources.grd
+index 5c0d36402d728d542560f5a08b8f607b633c891c..124dfe04d457f6ac1f44edcc98a749cf42cfdedb 100644
+--- a/chrome/app/generated_resources.grd
++++ b/chrome/app/generated_resources.grd
+@@ -1428,6 +1428,9 @@ are declared in tools/grit/grit_args.gni.
+           <message name="IDS_NEW_INCOGNITO_WINDOW" desc="The text label of a menu item for opening a new Incognito window">
+             New &amp;Incognito window
+           </message>
++          <message name="IDS_NEW_THOR_IDENTITY" desc="The text label of a menu item for opening a new isolated, disposable identity window">
++            New &amp;Identity
++          </message>
+           <message name="IDS_PROFILE_ROW_SIGNED_IN_MESSAGE_WITH_EMAIL" desc="Label that lets the user know what email they are signed into their profile as.">
+             Signed in as <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>
+           </message>
+@@ -1570,6 +1573,9 @@ are declared in tools/grit/grit_args.gni.
+           <message name="IDS_NEW_INCOGNITO_WINDOW" desc="In Title Case: The text label of a menu item for opening a new Incognito window">
+             New &amp;Incognito Window
+           </message>
++          <message name="IDS_NEW_THOR_IDENTITY" desc="In Title Case: The text label of a menu item for opening a new isolated, disposable identity window">
++            New &amp;Identity
++          </message>
+           <message name="IDS_PROFILE_ROW_SIGNED_IN_MESSAGE_WITH_EMAIL" desc="In Title Case: Label that lets the user know what email they are signed into their profile as.">
+             Signed in as <ph name="EMAIL">$1<ex>user@gmail.com</ex></ph>
+           </message>
+diff --git a/chrome/browser/net/profile_network_context_service.cc b/chrome/browser/net/profile_network_context_service.cc
+--- a/chrome/browser/net/profile_network_context_service.cc
++++ b/chrome/browser/net/profile_network_context_service.cc
+@@ -224,6 +224,13 @@ bool IsAmbientAuthAllowedForProfile(Profile* profile) {
+     return true;
+   }
+ 
++  // Thor identities are user-visible browsing contexts. Never inherit ambient
++  // OS credentials merely because Chromium classifies them as non-primary OTR.
++  if (profile->IsOffTheRecord() &&
++      profile->GetOTRProfileID().IsThorIdentity()) {
++    return false;
++  }
++
+   // Non-primary OTR profiles are not used to create browser windows and are
+   // only technical means for a task that does not need to leave state after
+   // it's completed.
+diff --git a/chrome/browser/net/profile_network_context_service_browsertest.cc b/chrome/browser/net/profile_network_context_service_browsertest.cc
+--- a/chrome/browser/net/profile_network_context_service_browsertest.cc
++++ b/chrome/browser/net/profile_network_context_service_browsertest.cc
+@@ -726,11 +726,17 @@ class AmbientAuthenticationTestWithPolicy : public policy::PolicyTest {
+     Profile* non_primary_otr_profile = regular_profile->GetOffTheRecordProfile(
+         Profile::OTRProfileID::CreateUniqueForTesting(),
+         /*create_if_needed=*/true);
++    Profile* thor_identity_profile = regular_profile->GetOffTheRecordProfile(
++        Profile::OTRProfileID::CreateUniqueForThorIdentity(),
++        /*create_if_needed=*/true);
+ 
+     EXPECT_TRUE(AmbientAuthenticationTestHelper::IsAmbientAuthAllowedForProfile(
+         regular_profile));
+     EXPECT_TRUE(AmbientAuthenticationTestHelper::IsAmbientAuthAllowedForProfile(
+         non_primary_otr_profile));
++    EXPECT_FALSE(
++        AmbientAuthenticationTestHelper::IsAmbientAuthAllowedForProfile(
++            thor_identity_profile));
+     EXPECT_EQ(AmbientAuthenticationTestHelper::IsAmbientAuthAllowedForProfile(
+                   incognito_profile),
+               AmbientAuthenticationTestHelper::IsIncognitoAllowedInPolicy(
+diff --git a/chrome/browser/profiles/profile.cc b/chrome/browser/profiles/profile.cc
+index 6eac2a2765421b279ab6ee7249d4db6a6ba8a864..d42f411b8d2673cc29e195a14d2adc20587d85e5 100644
+--- a/chrome/browser/profiles/profile.cc
++++ b/chrome/browser/profiles/profile.cc
+@@ -105,6 +105,7 @@ constexpr char kPrimaryOTRProfileID[] = "profile::primary_otr";
+ // See `chrome/browser/PRESUBMIT.py` which enforces this via a warning.
+ constexpr char kDevToolsOTRProfileIDPrefix[] = "Devtools::BrowserContext";
+ constexpr char kMediaRouterOTRProfileIDPrefix[] = "MediaRouter::Presentation";
++constexpr char kThorIdentityOTRProfileIDPrefix[] = "Thor::Identity";
+ constexpr char kTestOTRProfileIDPrefix[] = "Test::OTR";
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+@@ -120,9 +121,9 @@ Profile::OTRProfileID::OTRProfileID(const std::string& profile_id)
+ 
+ bool Profile::OTRProfileID::AllowsBrowserWindows() const {
+   // Non-Primary OTR profiles are not supposed to create Browser windows.
+-  // DevTools::BrowserContext, MediaRouter::Presentation, and
++  // DevTools::BrowserContext, MediaRouter::Presentation, Thor::Identity, and
+   // CaptivePortal::Signin are exceptions to this ban.
+-  if (*this == PrimaryID() || IsDevTools() ||
++  if (*this == PrimaryID() || IsDevTools() || IsThorIdentity() ||
+       base::StartsWith(profile_id_, kMediaRouterOTRProfileIDPrefix,
+                        base::CompareCase::SENSITIVE)) {
+     return true;
+@@ -173,6 +174,16 @@ Profile::OTRProfileID Profile::OTRProfileID::CreateUniqueForMediaRouter() {
+   return CreateUnique(kMediaRouterOTRProfileIDPrefix);
+ }
+ 
++// static
++Profile::OTRProfileID Profile::OTRProfileID::CreateUniqueForThorIdentity() {
++  return CreateUnique(kThorIdentityOTRProfileIDPrefix);
++}
++
++bool Profile::OTRProfileID::IsThorIdentity() const {
++  return base::StartsWith(profile_id_, kThorIdentityOTRProfileIDPrefix,
++                          base::CompareCase::SENSITIVE);
++}
++
+ #if BUILDFLAG(IS_CHROMEOS)
+ // static
+ Profile::OTRProfileID Profile::OTRProfileID::CreateUniqueForCaptivePortal() {
+diff --git a/chrome/browser/profiles/profile.h b/chrome/browser/profiles/profile.h
+index 955b07af5cd0030c3d31d3cbe7e3276600bc5a6d..cb841c65ee7adcc16e03dd43c6fd99aa4c5e056a 100644
+--- a/chrome/browser/profiles/profile.h
++++ b/chrome/browser/profiles/profile.h
+@@ -94,6 +94,12 @@ class Profile : public content::BrowserContext {
+     // Creates a unique OTR profile id to be used for media router.
+     static OTRProfileID CreateUniqueForMediaRouter();
+ 
++    // Creates a unique OTR profile id for a Thor isolated identity window.
++    // Non-primary OTR profiles intentionally do not run extensions. Privacy
++    // and security enforcement for this context must stay in native browser,
++    // network-service, and Blink code rather than the Thor component extension.
++    static OTRProfileID CreateUniqueForThorIdentity();
++
+ #if BUILDFLAG(IS_CHROMEOS)
+     // Creates a unique OTR profile id to be used for captive portal signin on
+     // ChromeOS.
+@@ -109,6 +115,7 @@ class Profile : public content::BrowserContext {
+ 
+     bool AllowsBrowserWindows() const;
+     bool IsDevTools() const;
++    bool IsThorIdentity() const;
+ 
+ #if BUILDFLAG(IS_CHROMEOS)
+     // Returns true if the OTR Profile was created for captive portal signin.
+diff --git a/chrome/browser/ui/browser_command_controller.cc b/chrome/browser/ui/browser_command_controller.cc
+index a457075948e34dcc2df8a1c127c146bf4dc92a02..fb67fa6dce2c2edd4449ebacc5083bd44f52fcd7 100644
+--- a/chrome/browser/ui/browser_command_controller.cc
++++ b/chrome/browser/ui/browser_command_controller.cc
+@@ -717,6 +717,9 @@ void BrowserCommandController::HandleCommandWithDisposition(
+     case IDC_NEW_INCOGNITO_WINDOW:
+       NewIncognitoWindow(profile());
+       break;
++    case IDC_NEW_THOR_IDENTITY:
++      NewThorIdentity(profile());
++      break;
+     case IDC_CLOSE_WINDOW:
+       base::RecordAction(base::UserMetricsAction("CloseWindowByKey"));
+       CloseWindow(browser_);
+@@ -2005,6 +2008,10 @@ void BrowserCommandController::UpdateSharedCommandsForIncognitoAvailability(
+       IDC_NEW_INCOGNITO_WINDOW,
+       incognito_availability != policy::IncognitoModeAvailability::kDisabled &&
+           !profile->IsGuestSession());
++  command_updater->UpdateCommandEnabled(
++      IDC_NEW_THOR_IDENTITY,
++      incognito_availability == policy::IncognitoModeAvailability::kEnabled &&
++          !profile->IsGuestSession());
+ 
+   const bool forced_incognito =
+       incognito_availability == policy::IncognitoModeAvailability::kForced;
+diff --git a/chrome/browser/ui/browser_commands.cc b/chrome/browser/ui/browser_commands.cc
+index 83efe1922093d916df033033654f010c06632777..234b0d23bced77161df6e3a5d5901cd469159308 100644
+--- a/chrome/browser/ui/browser_commands.cc
++++ b/chrome/browser/ui/browser_commands.cc
+@@ -43,6 +43,7 @@
+ #include "chrome/browser/media/router/media_router_feature.h"
+ #include "chrome/browser/prefs/incognito_mode_prefs.h"
+ #include "chrome/browser/profiles/profile.h"
++#include "chrome/browser/profiles/profile_destroyer.h"
+ #include "chrome/browser/reading_list/reading_list_model_factory.h"
+ #include "chrome/browser/resource_coordinator/tab_lifecycle_unit_external.h"
+ #include "chrome/browser/search/search.h"
+@@ -1213,6 +1214,33 @@ void NewIncognitoWindow(Profile* profile) {
+   NewEmptyWindow(profile->GetPrimaryOTRProfile(/*create_if_needed=*/true));
+ }
+ 
++BrowserWindowInterface* NewThorIdentity(Profile* profile) {
++  Profile* original_profile = profile->GetOriginalProfile();
++  if (original_profile->IsGuestSession() ||
++      original_profile->ShutdownStarted() ||
++      IncognitoModePrefs::GetAvailability(original_profile->GetPrefs()) !=
++          policy::IncognitoModeAvailability::kEnabled) {
++    return nullptr;
++  }
++
++  Profile* identity_profile = original_profile->GetOffTheRecordProfile(
++      Profile::OTRProfileID::CreateUniqueForThorIdentity(),
++      /*create_if_needed=*/true);
++  CHECK(identity_profile->AllowsBrowserWindows());
++
++  BrowserWindowInterface* identity_browser = OpenEmptyWindow(
++      identity_profile, /*should_trigger_session_restore=*/false);
++  if (!identity_browser) {
++    // OTR profiles are memory-only, so failed browser creation must not leave
++    // an orphan in the original profile's in-memory OTR map.
++    ProfileDestroyer::DestroyOTRProfileWhenAppropriate(identity_profile);
++    return nullptr;
++  }
++
++  base::RecordAction(UserMetricsAction("NewThorIdentity"));
++  return identity_browser;
++}
++
+ void CloseWindow(BrowserWindowInterface* browser) {
+   base::RecordAction(UserMetricsAction("CloseWindow"));
+   browser->GetWindow()->Close();
+diff --git a/chrome/browser/ui/browser_commands.h b/chrome/browser/ui/browser_commands.h
+index 8edbcd08b4029b3333c960fcccd6475c178745f7..25480188f6dbb0335fbde59de5d7f38ba348dcda 100644
+--- a/chrome/browser/ui/browser_commands.h
++++ b/chrome/browser/ui/browser_commands.h
+@@ -111,6 +111,9 @@ base::WeakPtr<content::NavigationHandle> OpenCurrentURL(
+ void Stop(BrowserWindowInterface* browser);
+ void NewWindow(BrowserWindowInterface* browser);
+ void NewIncognitoWindow(Profile* profile);
++// Opens a new window in a unique in-memory OTR profile. Returns nullptr when
++// enterprise policy, guest mode, shutdown, or browser creation blocks it.
++BrowserWindowInterface* NewThorIdentity(Profile* profile);
+ void CloseWindow(BrowserWindowInterface* browser);
+ content::WebContents& NewTab(BrowserWindowInterface* browser,
+                              NewTabTypes context);
+diff --git a/chrome/browser/ui/browser_commands_browsertest.cc b/chrome/browser/ui/browser_commands_browsertest.cc
+index c0dd7ca8d99b06d64474da1bd7cbbfee55fb9191..60799227b2c5d9d2f2ca4640896276ece716f240 100644
+--- a/chrome/browser/ui/browser_commands_browsertest.cc
++++ b/chrome/browser/ui/browser_commands_browsertest.cc
+@@ -10,6 +10,7 @@
+ #include "base/test/scoped_feature_list.h"
+ #include "chrome/app/chrome_command_ids.h"
+ #include "chrome/browser/lifetime/browser_shutdown.h"
++#include "chrome/browser/prefs/incognito_mode_prefs.h"
+ #include "chrome/browser/profiles/profile.h"
+ #include "chrome/browser/ui/browser.h"
+ #include "chrome/browser/ui/browser_tabstrip.h"
+@@ -27,9 +28,11 @@
+ #include "chrome/browser/ui/views/frame/browser_view.h"
+ #include "chrome/browser/ui/views/tab_search_bubble_host.h"
+ #include "chrome/test/base/in_process_browser_test.h"
++#include "chrome/test/base/profile_destruction_waiter.h"
+ #include "chrome/test/base/ui_test_utils.h"
+ #include "components/commerce/core/pref_names.h"
+ #include "components/content_settings/core/common/pref_names.h"
++#include "components/policy/core/common/policy_pref_names.h"
+ #include "components/prefs/pref_service.h"
+ #include "components/split_tabs/split_tab_id.h"
+ #include "components/tab_groups/tab_group_id.h"
+@@ -106,6 +109,81 @@ class BrowserCommandsTest : public InProcessBrowserTest {
+   };
+ };
+ 
++IN_PROC_BROWSER_TEST_F(BrowserCommandsTest,
++                       NewThorIdentityUsesUniqueDisposableProfiles) {
++  Profile* original_profile = browser()->profile()->GetOriginalProfile();
++  const size_t initial_otr_count =
++      original_profile->GetAllOffTheRecordProfiles().size();
++
++  EXPECT_TRUE(ExecuteCommand(browser(), IDC_NEW_THOR_IDENTITY));
++  BrowserWindowInterface* first_browser = nullptr;
++  GlobalBrowserCollection::GetInstance()->ForEach(
++      [&first_browser](BrowserWindowInterface* candidate) {
++        Profile* candidate_profile = candidate->GetProfile();
++        if (candidate_profile->IsOffTheRecord() &&
++            candidate_profile->GetOTRProfileID().IsThorIdentity()) {
++          first_browser = candidate;
++          return false;
++        }
++        return true;
++      });
++  ASSERT_TRUE(first_browser);
++  Profile* first_profile = first_browser->GetProfile();
++  const Profile::OTRProfileID first_id = first_profile->GetOTRProfileID();
++  EXPECT_TRUE(first_id.IsThorIdentity());
++  EXPECT_TRUE(first_profile->IsOffTheRecord());
++  EXPECT_FALSE(first_profile->IsPrimaryOTRProfile());
++  EXPECT_FALSE(first_profile->CanUseDiskWhenOffTheRecord());
++  EXPECT_EQ(original_profile, first_profile->GetOriginalProfile());
++  EXPECT_EQ(1, first_browser->GetTabStripModel()->count());
++
++  BrowserWindowInterface* second_browser = NewThorIdentity(original_profile);
++  ASSERT_TRUE(second_browser);
++  Profile* second_profile = second_browser->GetProfile();
++  const Profile::OTRProfileID second_id = second_profile->GetOTRProfileID();
++  EXPECT_TRUE(second_id.IsThorIdentity());
++  EXPECT_NE(first_id, second_id);
++  EXPECT_NE(first_profile, second_profile);
++  EXPECT_EQ(initial_otr_count + 2,
++            original_profile->GetAllOffTheRecordProfiles().size());
++
++  ProfileDestructionWaiter first_waiter(first_profile);
++  first_browser->GetTabStripModel()->CloseAllTabs();
++  first_waiter.Wait();
++  EXPECT_FALSE(original_profile->HasOffTheRecordProfile(first_id));
++  EXPECT_TRUE(original_profile->HasOffTheRecordProfile(second_id));
++
++  ProfileDestructionWaiter second_waiter(second_profile);
++  CloseBrowserSynchronously(second_browser->GetBrowserForMigrationOnly());
++  second_waiter.Wait();
++  EXPECT_FALSE(original_profile->HasOffTheRecordProfile(second_id));
++  EXPECT_EQ(initial_otr_count,
++            original_profile->GetAllOffTheRecordProfiles().size());
++}
++
++IN_PROC_BROWSER_TEST_F(BrowserCommandsTest,
++                       NewThorIdentityHonorsIncognitoPolicy) {
++  Profile* original_profile = browser()->profile()->GetOriginalProfile();
++  const size_t initial_otr_count =
++      original_profile->GetAllOffTheRecordProfiles().size();
++  IncognitoModePrefs::SetAvailability(
++      original_profile->GetPrefs(),
++      policy::IncognitoModeAvailability::kDisabled);
++
++  EXPECT_FALSE(IsCommandEnabled(browser(), IDC_NEW_THOR_IDENTITY));
++  EXPECT_EQ(nullptr, NewThorIdentity(original_profile));
++  EXPECT_EQ(initial_otr_count,
++            original_profile->GetAllOffTheRecordProfiles().size());
++
++  IncognitoModePrefs::SetAvailability(
++      original_profile->GetPrefs(),
++      policy::IncognitoModeAvailability::kForced);
++  EXPECT_FALSE(IsCommandEnabled(browser(), IDC_NEW_THOR_IDENTITY));
++  EXPECT_EQ(nullptr, NewThorIdentity(original_profile));
++  EXPECT_EQ(initial_otr_count,
++            original_profile->GetAllOffTheRecordProfiles().size());
++}
++
+ // Verify that calling BookmarkCurrentTab() just after closing all tabs doesn't
+ // cause a crash. https://crbug.com/40557069
+ IN_PROC_BROWSER_TEST_F(BrowserCommandsTest, BookmarkCurrentTabAfterCloseTabs) {
+diff --git a/chrome/browser/ui/browser_manager_service.cc b/chrome/browser/ui/browser_manager_service.cc
+--- a/chrome/browser/ui/browser_manager_service.cc
++++ b/chrome/browser/ui/browser_manager_service.cc
+@@ -128,8 +128,12 @@ void BrowserManagerService::DeleteBrowser(Browser* removed_browser) {
+   // TODO(crbug.com/40159237): Use ScopedProfileKeepAlive for Incognito too,
+   // instead of separate logic for Incognito and regular profiles.
+   target_browser_and_subscriptions->browser.reset();
+-  if (browsers_and_subscriptions_.empty() && profile_->IsIncognitoProfile() &&
+-      !profile_->IsSystemProfile()) {
++  const bool is_disposable_otr_profile =
++      profile_->IsIncognitoProfile() ||
++      (profile_->IsOffTheRecord() &&
++       profile_->GetOTRProfileID().IsThorIdentity());
++  if (browsers_and_subscriptions_.empty() && is_disposable_otr_profile &&
++      !profile_->IsSystemProfile()) {
+ #if BUILDFLAG(ENABLE_PRINT_PREVIEW)
+     // The Printing Background Manager holds onto preview dialog WebContents
+     // whose corresponding print jobs have not yet fully spooled. Make sure
+diff --git a/chrome/browser/ui/toolbar/app_menu_model.cc b/chrome/browser/ui/toolbar/app_menu_model.cc
+index fb1db8e036352934aae1c76b77d9f3f91415ab05..1d474d7a93a07ba6f8797a07de0776b2456b7b04 100644
+--- a/chrome/browser/ui/toolbar/app_menu_model.cc
++++ b/chrome/browser/ui/toolbar/app_menu_model.cc
+@@ -2109,6 +2110,8 @@ void AppMenuModel::Build() {
+     SetElementIdentifierAt(
+         GetIndexOfCommandId(IDC_NEW_INCOGNITO_WINDOW).value(),
+         kIncognitoMenuItem);
++    AddItemWithStringIdAndVectorIcon(this, IDC_NEW_THOR_IDENTITY,
++                                     IDS_NEW_THOR_IDENTITY, kAccountCircleIcon);
+   }
+ 
+   AddSeparator(ui::NORMAL_SEPARATOR);

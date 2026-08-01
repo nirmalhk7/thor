@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Thor Shield</title>
+    <style>
+      :root { color-scheme: dark; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+      body { background: #11151d; color: #eff5ff; margin: 0; padding: 32px; }
+      main { max-width: 760px; margin: auto; }
+      h1 { margin: 0 0 8px; } p { color: #afbdd0; line-height: 1.5; }
+      section { background: #1a2230; border: 1px solid #2b3b51; border-radius: 12px; margin: 18px 0; padding: 8px 18px; }
+      label { display: flex; gap: 12px; align-items: center; padding: 12px 0; border-bottom: 1px solid #263447; cursor: pointer; }
+      label:last-child { border-bottom: 0; } input { inline-size: 18px; block-size: 18px; }
+      .site-tools { display: grid; gap: 10px; padding: 12px 0; }
+      .site-tools input { inline-size: auto; block-size: auto; border: 1px solid #40536e; border-radius: 6px; padding: 9px; background: #0e131c; color: inherit; }
+      .site-tools div { display: flex; gap: 8px; flex-wrap: wrap; }
+      .site-permissions { display: grid !important; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 4px 12px !important; }
+      .site-permissions label { border: 0; padding: 5px 0; }
+      button { border: 1px solid #4b6385; border-radius: 6px; padding: 8px 11px; background: #223047; color: inherit; cursor: pointer; }
+      .note { font-size: 13px; } #status { color: #79d6a3; min-height: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <h1>Thor Shield</h1>
+      <p>Thor-owned tracker rules and Chromium privacy controls. A policy or another extension can prevent Thor from controlling an individual setting.</p>
+      <section id="controls"></section>
+      <section>
+        <h2>Per-site privacy</h2>
+        <p class="note">Choose permissions to block or reset. Reset removes only Thor’s selected overrides and restores Chromium’s inherited policy; it never creates an allow exception.</p>
+        <div class="site-tools">
+          <input id="site-origin" type="url" placeholder="https://example.com" autocomplete="off">
+          <div id="site-permissions" class="site-permissions"></div>
+          <div>
+            <button id="block-site" type="button">Block selected</button>
+            <button id="reset-site" type="button">Reset selected overrides</button>
+            <button id="clear-site" type="button">Clear site data</button>
+          </div>
+        </div>
+      </section>
+      <section>
+        <h2>Enforcement status</h2>
+        <p id="enforcement-status" class="note">Checking signed rules and Chromium controls…</p>
+      </section>
+      <p id="status" role="status"></p>
+      <p class="note">Safe Browsing remains enabled. This extension is transitional: DNR and MAIN-world script controls are not native Blink/network enforcement and can be disabled or observed.</p>
+    </main>
+    <script src="options.js"></script>
+  </body>
+</html>

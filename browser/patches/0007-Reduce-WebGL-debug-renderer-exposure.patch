@@ -1,0 +1,182 @@
+From 16dcd77eb28c7796ba6ab60821d900986dfbcbe8 Mon Sep 17 00:00:00 2001
+From: Thor Browser <engineering@thor.local>
+Date: Fri, 31 Jul 2026 22:38:50 -0600
+Subject: [PATCH 7/7] Reduce WebGL debug renderer exposure
+
+Propagate a renderer-only reduction switch for Stealth, Hardened, empty, and
+unknown Thor privacy-profile values. Blink then removes
+WEBGL_debug_renderer_info from supported extensions and refuses enablement,
+covering document, iframe, and worker/OffscreenCanvas WebGL contexts without
+JavaScript prototype mutation. DevHost remains truthful for graphics debugging.
+
+This deliberately covers only the unmasked GPU vendor/renderer surface; it is
+not broad anti-fingerprinting parity.
+
+---
+ .../browser/chrome_content_browser_client.cc  |  9 +++++++
+ third_party/blink/common/switches.cc          |  5 ++++
+ third_party/blink/public/common/switches.h    |  1 +
+ third_party/blink/renderer/modules/BUILD.gn   |  1 +
+ .../blink/renderer/modules/webgl/BUILD.gn     |  1 +
+ .../modules/webgl/thor_webgl_privacy.h        | 21 ++++++++++++++++
+ .../modules/webgl/thor_webgl_privacy_test.cc  | 24 +++++++++++++++++++
+ .../webgl/webgl_rendering_context_base.cc     |  6 +++++
+ 8 files changed, 68 insertions(+)
+ create mode 100644 third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h
+ create mode 100644 third_party/blink/renderer/modules/webgl/thor_webgl_privacy_test.cc
+
+diff --git a/chrome/browser/chrome_content_browser_client.cc b/chrome/browser/chrome_content_browser_client.cc
+index 5c25d7d..e947fdf 100644
+--- a/chrome/browser/chrome_content_browser_client.cc
++++ b/chrome/browser/chrome_content_browser_client.cc
+@@ -2902,6 +2902,15 @@ void ChromeContentBrowserClient::AppendExtraCommandLineSwitches(
+ #endif
+ 
+   if (process_type == switches::kRendererProcess) {
++    // Empty is Thor's default Stealth profile. Unknown values fail closed in
++    // the native profile policy and therefore also reduce WebGL identifying
++    // data here. DevHost deliberately preserves truthful developer surfaces.
++    if (browser_command_line.GetSwitchValueASCII("thor-privacy-profile") !=
++        "devhost") {
++      command_line->AppendSwitch(
++          blink::switches::kThorReduceWebGLIdentifyingData);
++    }
++
+     content::RenderProcessHost* process =
+         content::RenderProcessHost::FromID(child_process_id);
+     if (process) {
+diff --git a/third_party/blink/common/switches.cc b/third_party/blink/common/switches.cc
+index 33781a8..7231121 100644
+--- a/third_party/blink/common/switches.cc
++++ b/third_party/blink/common/switches.cc
+@@ -61,6 +61,11 @@ const char kDisableZeroCopy[] = "disable-zero-copy";
+ // this for the stats to be logged.
+ const char kDumpRuntimeCallStats[] = "dump-blink-runtime-call-stats";
+ 
++// Prevents WebGL from exposing the unmasked GPU vendor and renderer extension.
++// Thor copies this switch only to Stealth and Hardened renderer processes.
++const char kThorReduceWebGLIdentifyingData[] =
++    "thor-reduce-webgl-identifying-data";
++
+ // Enable desktop Android scrollbars.
+ const char kEnableDesktopAndroidScrollbars[] =
+     "enable-desktop-android-scrollbars";
+diff --git a/third_party/blink/public/common/switches.h b/third_party/blink/public/common/switches.h
+index b46d43d..b724cc1 100644
+--- a/third_party/blink/public/common/switches.h
++++ b/third_party/blink/public/common/switches.h
+@@ -62,6 +62,7 @@ BLINK_COMMON_EXPORT extern const char kShowPaintRects[];
+ BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy[];
+ BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy_Character[];
+ BLINK_COMMON_EXPORT extern const char kTouchTextSelectionStrategy_Direction[];
++BLINK_COMMON_EXPORT extern const char kThorReduceWebGLIdentifyingData[];
+ BLINK_COMMON_EXPORT extern const char kDisableStandardizedBrowserZoom[];
+ BLINK_COMMON_EXPORT extern const char kWebAudioBypassOutputBufferingOptOut[];
+ BLINK_COMMON_EXPORT extern const char kDisableReduceAcceptLanguage[];
+diff --git a/third_party/blink/renderer/modules/BUILD.gn b/third_party/blink/renderer/modules/BUILD.gn
+index d4abe98..50e14cb 100644
+--- a/third_party/blink/renderer/modules/BUILD.gn
++++ b/third_party/blink/renderer/modules/BUILD.gn
+@@ -655,6 +655,7 @@ source_set("unit_tests") {
+     "webaudio/script_processor_node_test.cc",
+     "webaudio/stereo_panner_node_test.cc",
+     "webaudio/testing/mock_web_audio_device.h",
++    "webgl/thor_webgl_privacy_test.cc",
+     "webrtc/rtc_test.cc",
+     "webrtc/webrtc_audio_device_impl_test.cc",
+     "webshare/navigator_share_test.cc",
+diff --git a/third_party/blink/renderer/modules/webgl/BUILD.gn b/third_party/blink/renderer/modules/webgl/BUILD.gn
+index d611207..9b7d65f 100644
+--- a/third_party/blink/renderer/modules/webgl/BUILD.gn
++++ b/third_party/blink/renderer/modules/webgl/BUILD.gn
+@@ -76,6 +76,7 @@ blink_modules_sources("webgl") {
+     "oes_vertex_array_object.h",
+     "ovr_multiview_2.cc",
+     "ovr_multiview_2.h",
++    "thor_webgl_privacy.h",
+     "webgl2_rendering_context.cc",
+     "webgl2_rendering_context.h",
+     "webgl2_rendering_context_base.cc",
+diff --git a/third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h b/third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h
+new file mode 100644
+index 0000000..7c2e331
+--- /dev/null
++++ b/third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h
+@@ -0,0 +1,21 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#ifndef THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_THOR_WEBGL_PRIVACY_H_
++#define THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_THOR_WEBGL_PRIVACY_H_
++
++#include "base/command_line.h"
++#include "third_party/blink/public/common/switches.h"
++
++namespace blink {
++
++inline bool ThorShouldExposeWebGLDebugRendererInfo(
++    const base::CommandLine& command_line) {
++  return !command_line.HasSwitch(
++      switches::kThorReduceWebGLIdentifyingData);
++}
++
++}  // namespace blink
++
++#endif  // THIRD_PARTY_BLINK_RENDERER_MODULES_WEBGL_THOR_WEBGL_PRIVACY_H_
+diff --git a/third_party/blink/renderer/modules/webgl/thor_webgl_privacy_test.cc b/third_party/blink/renderer/modules/webgl/thor_webgl_privacy_test.cc
+new file mode 100644
+index 0000000..a2323b9
+--- /dev/null
++++ b/third_party/blink/renderer/modules/webgl/thor_webgl_privacy_test.cc
+@@ -0,0 +1,24 @@
++// Copyright 2026 Thor downstream maintainers
++// Use of this source code is governed by a BSD-style license that can be
++// found in the LICENSE file.
++
++#include "third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h"
++
++#include "base/command_line.h"
++#include "testing/gtest/include/gtest/gtest.h"
++#include "third_party/blink/public/common/switches.h"
++
++namespace blink {
++
++TEST(ThorWebGLPrivacyTest, ExposesDebugRendererWithoutReductionSwitch) {
++  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
++  EXPECT_TRUE(ThorShouldExposeWebGLDebugRendererInfo(command_line));
++}
++
++TEST(ThorWebGLPrivacyTest, HidesDebugRendererWithReductionSwitch) {
++  base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
++  command_line.AppendSwitch(switches::kThorReduceWebGLIdentifyingData);
++  EXPECT_FALSE(ThorShouldExposeWebGLDebugRendererInfo(command_line));
++}
++
++}  // namespace blink
+diff --git a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+index 319e17e..d5fbf99 100644
+--- a/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
++++ b/third_party/blink/renderer/modules/webgl/webgl_rendering_context_base.cc
+@@ -112,6 +112,7 @@
+ #include "third_party/blink/renderer/modules/webgl/oes_texture_half_float.h"
+ #include "third_party/blink/renderer/modules/webgl/oes_texture_half_float_linear.h"
+ #include "third_party/blink/renderer/modules/webgl/oes_vertex_array_object.h"
++#include "third_party/blink/renderer/modules/webgl/thor_webgl_privacy.h"
+ #include "third_party/blink/renderer/modules/webgl/webgl_active_info.h"
+ #include "third_party/blink/renderer/modules/webgl/webgl_buffer.h"
+ #include "third_party/blink/renderer/modules/webgl/webgl_compressed_texture_astc.h"
+@@ -3819,6 +3820,11 @@ bool WebGLRenderingContextBase::ExtensionTracker::MatchesName(
+ 
+ bool WebGLRenderingContextBase::ExtensionSupportedAndAllowed(
+     const ExtensionTracker* tracker) {
++  if (tracker->MatchesName(WebGLDebugRendererInfo::ExtensionName()) &&
++      !ThorShouldExposeWebGLDebugRendererInfo(
++          *base::CommandLine::ForCurrentProcess())) {
++    return false;
++  }
+   if (tracker->Draft() &&
+       !RuntimeEnabledFeatures::WebGLDraftExtensionsEnabled())
+     return false;
+-- 
+2.50.1 (Apple Git-155)

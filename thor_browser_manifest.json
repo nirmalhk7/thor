@@ -1,0 +1,27 @@
+{
+  "schema_version": 1,
+  "product": "Thor",
+  "purpose": "Pinned Chromium source and Thor-owned downstream build inputs.",
+  "chromium": {
+    "repository": "https://chromium.googlesource.com/chromium/src.git",
+    "ref": "151.0.7922.47",
+    "commit": "c583827a354674180dc8856eb65aeb3f0afa5ee9"
+  },
+  "features": {
+    "privacy": [
+      "native HTTPS-Only mode by default",
+      "native global browser-history saving disabled by default",
+      "native third-party cookie blocking with Privacy Sandbox Topics, Protected Audience/FLEDGE, ad measurement, and Related Website Sets disabled by default",
+      "native DNT with search suggestions, translation offers, preloading, alternate error pages, and hyperlink auditing disabled by default",
+      "native managed GPC with Sec-GPC request signaling and Window/WorkerNavigator API exposure",
+      "native New Identity action with one memory-only OTR profile per disposable window",
+      "native Destroy Identity action requesting closure of every window bound to the selected disposable profile",
+      "native strict origin isolation by default",
+      "native conservative cleanup of known tracking parameters on outermost GET navigations",
+      "native DevHost, Stealth, and Hardened dangerous-API defaults with Hardened JIT disable",
+      "native target-profile WebGL debug renderer reduction (bounded anti-fingerprinting surface)"
+    ],
+    "media": ["Chromium PDF viewer", "Picture-in-Picture", "CDP screenshots"],
+    "performance": ["inactive-tab freeze", "discard", "24-hour expiry", "lean release build"]
+  }
+}

@@ -91,7 +91,7 @@ impl TabHistoryTracker {
             .unwrap_or(0);
 
         let entries = self.history_by_tab.entry(tab_id.to_string()).or_default();
-        
+
         // Avoid duplicate consecutive entry for same URL
         if let Some(last) = entries.back() {
             if last.url == url {
@@ -99,7 +99,11 @@ impl TabHistoryTracker {
             }
         }
 
-        let entry_title = if title.is_empty() { url.to_string() } else { title.to_string() };
+        let entry_title = if title.is_empty() {
+            url.to_string()
+        } else {
+            title.to_string()
+        };
         entries.push_back(TabHistoryEntry {
             url: url.to_string(),
             title: entry_title,
@@ -508,17 +512,17 @@ impl SettingsRegistry {
 pub fn parse_chrome_extension_manifest(manifest_json: &str, ext_id: &str) -> Option<PaletteItem> {
     let parsed: serde_json::Value = serde_json::from_str(manifest_json).ok()?;
     let raw_name = parsed["name"].as_str()?;
-    
+
     // Handle localized name strings like "__MSG_extName__"
     let name = if raw_name.starts_with("__MSG_") {
         ext_id
     } else {
         raw_name
     };
-    
+
     let version = parsed["version"].as_str().unwrap_or("1.0");
     let title = format!("{} v{}", name, version);
-    
+
     Some(PaletteItem::new(
         format!("ext_{}", ext_id),
         title,
@@ -531,117 +535,19 @@ pub fn parse_chrome_extension_manifest(manifest_json: &str, ext_id: &str) -> Opt
     ))
 }
 
-/// Scans system Chrome extension directory to discover installed Chrome extensions
-pub fn discover_installed_chrome_extensions() -> Vec<PaletteItem> {
-    let home = match std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")) {
-        Ok(h) => h,
-        Err(_) => return Vec::new(),
-    };
-
-    let possible_dirs = [
-        format!("{}/Library/Application Support/Google/Chrome/Default/Extensions", home),
-        format!("{}/.config/google-chrome/Default/Extensions", home),
-        format!("{}/AppData/Local/Google/Chrome/User Data/Default/Extensions", home),
-    ];
-
-    let mut discovered = Vec::new();
-
-    for ext_dir_path in &possible_dirs {
-        let dir_path = std::path::Path::new(ext_dir_path);
-        if !dir_path.exists() || !dir_path.is_dir() {
-            continue;
-        }
-
-        if let Ok(entries) = std::fs::read_dir(dir_path) {
-            for entry in entries.flatten() {
-                let ext_id = entry.file_name().to_string_lossy().to_string();
-                let ext_path = entry.path();
-
-                if ext_path.is_dir() {
-                    if let Ok(version_entries) = std::fs::read_dir(&ext_path) {
-                        for v_entry in version_entries.flatten() {
-                            let manifest_path = v_entry.path().join("manifest.json");
-                            if manifest_path.exists() {
-                                if let Ok(manifest_content) = std::fs::read_to_string(&manifest_path) {
-                                    if let Some(item) = parse_chrome_extension_manifest(&manifest_content, &ext_id) {
-                                        discovered.push(item);
-                                        break;
-                                    }
-                                }
-                            }
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    discovered
-}
-
-/// Discovers installed Chrome extensions or default dev extensions
+/// Extensions shipped by Thor itself. Thor never imports a system Chrome profile
+/// or advertises third-party extensions it has not packaged.
 pub fn read_chrome_extensions() -> Vec<PaletteItem> {
-    let mut extensions = vec![
-        PaletteItem::new(
-            "ext_react_devtools",
-            "React Developer Tools v5.2.0",
-            PaletteItemType::Setting,
-            "chrome-extension://fmkadmapgofadopljbjfkapdkoienihi",
-            Some("Extension".into()),
-            Some("🧩".into()),
-            "Extensions",
-            Some("open_extension_react".into()),
-        ),
-        PaletteItem::new(
-            "ext_redux_devtools",
-            "Redux DevTools v3.1.3",
-            PaletteItemType::Setting,
-            "chrome-extension://lmhkpmbekcpmknklioeibfkpmmfibljd",
-            Some("Extension".into()),
-            Some("🧩".into()),
-            "Extensions",
-            Some("open_extension_redux".into()),
-        ),
-        PaletteItem::new(
-            "ext_vue_devtools",
-            "Vue.js devtools v6.5.1",
-            PaletteItemType::Setting,
-            "chrome-extension://nhdogjmejiglipccpnnnhbfiladjaklb",
-            Some("Extension".into()),
-            Some("🧩".into()),
-            "Extensions",
-            Some("open_extension_vue".into()),
-        ),
-        PaletteItem::new(
-            "ext_ublock",
-            "uBlock Origin — Content Blocker & Privacy Guard",
-            PaletteItemType::Setting,
-            "chrome-extension://cjpalhdlnbpafiamejdnhcphjbkeiagm",
-            Some("Extension".into()),
-            Some("🧩".into()),
-            "Extensions",
-            Some("open_extension_ublock".into()),
-        ),
-        PaletteItem::new(
-            "ext_tailwind",
-            "Tailwind CSS DevTools Inspector",
-            PaletteItemType::Setting,
-            "chrome-extension://gnhhdgckkhfamcamhcppdaacflandcbb",
-            Some("Extension".into()),
-            Some("🧩".into()),
-            "Extensions",
-            Some("open_extension_tailwind".into()),
-        ),
-    ];
-
-    let discovered = discover_installed_chrome_extensions();
-    for item in discovered {
-        if !extensions.iter().any(|e| e.id == item.id) {
-            extensions.push(item);
-        }
-    }
-
-    extensions
+    vec![PaletteItem::new(
+        "ext_thor_shield",
+        "Thor Shield — Tracker blocking and privacy defaults",
+        PaletteItemType::Setting,
+        "Thor://settings/security_shield",
+        Some("Built-in".into()),
+        Some("🛡️".into()),
+        "Extensions",
+        None,
+    )]
 }
 
 /// Fallback default bookmarks when Chrome Bookmarks file is not found
@@ -722,12 +628,20 @@ pub fn get_default_bookmarks() -> Vec<PaletteItem> {
 
 /// Reads Chrome Bookmarks JSON from user's Chrome profile on macOS/Linux/Windows
 pub fn read_chrome_bookmarks_json() -> Option<String> {
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
-    
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+
     let possible_paths = [
-        format!("{}/Library/Application Support/Google/Chrome/Default/Bookmarks", home),
+        format!(
+            "{}/Library/Application Support/Google/Chrome/Default/Bookmarks",
+            home
+        ),
         format!("{}/.config/google-chrome/Default/Bookmarks", home),
-        format!("{}/AppData/Local/Google/Chrome/User Data/Default/Bookmarks", home),
+        format!(
+            "{}/AppData/Local/Google/Chrome/User Data/Default/Bookmarks",
+            home
+        ),
     ];
 
     for path in &possible_paths {
@@ -749,7 +663,12 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
         let name = node["name"].as_str().unwrap_or("");
         let node_type = node["type"].as_str().unwrap_or("");
 
-        let current_path = if !folder_path.is_empty() && !name.is_empty() && name != "bookmark_bar" && name != "other" && name != "synced" {
+        let current_path = if !folder_path.is_empty()
+            && !name.is_empty()
+            && name != "bookmark_bar"
+            && name != "other"
+            && name != "synced"
+        {
             format!("{} / {}", folder_path, name)
         } else if name != "bookmark_bar" && name != "other" && name != "synced" {
             name.to_string()
@@ -763,7 +682,10 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
                     "🐙"
                 } else if url.contains("google") || url.contains("gemini") {
                     "🔍"
-                } else if url.contains("chatgpt") || url.contains("perplexity") || url.contains("oneai") {
+                } else if url.contains("chatgpt")
+                    || url.contains("perplexity")
+                    || url.contains("oneai")
+                {
                     "🤖"
                 } else if url.contains("zoom") {
                     "📹"
@@ -776,7 +698,11 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
                 };
 
                 let title = if name.is_empty() { url } else { name };
-                let badge = if folder_path.is_empty() { "Chrome".to_string() } else { folder_path.to_string() };
+                let badge = if folder_path.is_empty() {
+                    "Chrome".to_string()
+                } else {
+                    folder_path.to_string()
+                };
 
                 items.push(PaletteItem::new(
                     format!("bm_{}", items.len()),
@@ -918,7 +844,10 @@ impl CmdPalette {
 
             let mut top_scored: Vec<(i32, usize)> = min_heap.into_iter().map(|r| r.0).collect();
             top_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
-            top_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+            top_scored
+                .into_iter()
+                .map(|(_, idx)| items[idx].clone())
+                .collect()
         } else {
             let num_threads = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -932,8 +861,9 @@ impl CmdPalette {
                 for (chunk_idx, chunk) in items.chunks(chunk_size).enumerate() {
                     let prepared_ref = &prepared;
                     handles.push(s.spawn(move || {
-                        let mut min_heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
-                            std::collections::BinaryHeap::with_capacity(51);
+                        let mut min_heap: std::collections::BinaryHeap<
+                            std::cmp::Reverse<(i32, usize)>,
+                        > = std::collections::BinaryHeap::with_capacity(51);
                         let mut min_score = 0;
                         let base_idx = chunk_idx * chunk_size;
 
@@ -975,11 +905,12 @@ impl CmdPalette {
 
             all_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
             all_scored.truncate(50);
-            all_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+            all_scored
+                .into_iter()
+                .map(|(_, idx)| items[idx].clone())
+                .collect()
         }
     }
-
-
 }
 
 impl Default for CmdPalette {
@@ -1155,7 +1086,6 @@ fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
     }
 }
 
-
 #[inline]
 fn contains_prepared(haystack: &str, query: &PreparedQuery) -> bool {
     let q_len = query.lower_bytes.len();
@@ -1234,12 +1164,6 @@ fn is_subsequence_prepared(haystack: &str, query: &PreparedQuery) -> bool {
     }
 }
 
-
-
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1296,8 +1220,26 @@ mod tests {
     #[test]
     fn test_fuzzy_search_scoring() {
         let items = vec![
-            PaletteItem::new("1", "GitHub", PaletteItemType::Bookmark, "https://github.com", None, None, "Bookmarks", None),
-            PaletteItem::new("2", "Google Search", PaletteItemType::Bookmark, "https://google.com", None, None, "Bookmarks", None),
+            PaletteItem::new(
+                "1",
+                "GitHub",
+                PaletteItemType::Bookmark,
+                "https://github.com",
+                None,
+                None,
+                "Bookmarks",
+                None,
+            ),
+            PaletteItem::new(
+                "2",
+                "Google Search",
+                PaletteItemType::Bookmark,
+                "https://google.com",
+                None,
+                None,
+                "Bookmarks",
+                None,
+            ),
         ];
 
         let mut palette = CmdPalette::new(CmdPaletteMode::BookmarksAndTabHistory);
@@ -1317,7 +1259,8 @@ mod tests {
             "version": "6.5.1",
             "description": "Vue Developer Tools extension"
         }"#;
-        let item = parse_chrome_extension_manifest(manifest, "nhdogjmejiglipccpnnnhbfiladjaklb").unwrap();
+        let item =
+            parse_chrome_extension_manifest(manifest, "nhdogjmejiglipccpnnnhbfiladjaklb").unwrap();
         assert_eq!(item.id, "ext_nhdogjmejiglipccpnnnhbfiladjaklb");
         assert_eq!(item.title, "Vue DevTools v6.5.1");
         assert_eq!(item.category, "Extensions");
@@ -1406,7 +1349,9 @@ mod tests {
             .all(|s| s.item_type != PaletteItemType::Bookmark
                 && s.item_type != PaletteItemType::Tab
                 && s.item_type != PaletteItemType::TabHistory));
-        assert!(settings.iter().any(|s| s.action_key.as_deref() == Some("open_downloads")));
+        assert!(settings
+            .iter()
+            .any(|s| s.action_key.as_deref() == Some("open_downloads")));
     }
 
     #[test]
@@ -1424,6 +1369,7 @@ mod tests {
             received_bytes: 100,
             state: DownloadState::Completed,
             error_reason: None,
+            security_evidence: None,
         }];
         let rows = download_items_to_palette(&items);
         assert_eq!(rows.len(), 1);
@@ -1434,4 +1380,3 @@ mod tests {
         assert!(json.contains("a.zip"));
     }
 }
-

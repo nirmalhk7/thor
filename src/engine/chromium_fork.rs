@@ -32,7 +32,10 @@ impl ChromiumFork {
 
     /// Create a fork handle using explicit discovery.
     pub fn with_discovered(ipc_channel: String) -> ChromiumResult<Self> {
-        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf();
+        let executable = discover_chromium_path()
+            .ok_or(ChromiumError::NotFound)?
+            .executable_path()
+            .to_path_buf();
         Ok(Self {
             process: None,
             ipc_channel,
@@ -63,7 +66,10 @@ impl ChromiumFork {
     }
 
     /// Launch via chromiumoxide and store the runtime (preferred path).
-    pub fn launch_runtime(&mut self, config: ChromiumRuntimeConfig) -> ChromiumResult<Arc<ChromiumRuntime>> {
+    pub fn launch_runtime(
+        &mut self,
+        config: ChromiumRuntimeConfig,
+    ) -> ChromiumResult<Arc<ChromiumRuntime>> {
         let mut config = config;
         if config.executable.is_none() {
             config.executable = self.executable.clone();
@@ -87,7 +93,6 @@ impl ChromiumFork {
                 format!("--remote-debugging-port={port}"),
                 "--no-first-run".into(),
                 "--no-default-browser-check".into(),
-                "--disable-background-networking".into(),
             ])
             .stdout(Stdio::null())
             .stderr(Stdio::null())

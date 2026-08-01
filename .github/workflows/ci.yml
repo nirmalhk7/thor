@@ -1,4 +1,4 @@
-name: CI & Release
+name: CI
 
 on:
   push:
@@ -8,21 +8,26 @@ on:
     branches: [ "main" ]
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   test_and_lint:
-    name: Test & Lint (macOS)
+    name: Test (macOS)
     runs-on: macos-latest
     steps:
       - name: Checkout Code
-        uses: actions/checkout@v4
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+
+      - name: Browserless Privacy and Release Contract
+        run: python3 scripts/privacy_regression_check.py
 
       - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
+        uses: dtolnay/rust-toolchain@4cda84d5c5c54efe2404f9d843567869ab1699d4 # stable action, 2026-07-16
+        with:
+          toolchain: 1.97.1
 
       - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
 
       - name: Cargo Check
         run: cargo check --workspace --all-targets
@@ -33,68 +38,5 @@ jobs:
       - name: Integration Tests
         run: cargo test --test integration_tests
 
-  build_and_release:
-    name: Package & Release macOS Installer
-    needs: test_and_lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
-    runs-on: macos-latest
-    steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Auto-Bump Semantic Version
-        id: semver
-        run: |
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
-          echo "Current Cargo version: ${CURRENT_VERSION}"
-          
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          echo "New Version: ${NEW_VERSION}"
-          
-          sed -i '' "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" Cargo.toml
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add Cargo.toml
-          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]" || true
-          git tag -f "v${NEW_VERSION}" || true
-          git push origin "v${NEW_VERSION}" || true
-          git push origin main || true
-          
-          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Build & Package macOS Installers
-        run: ./scripts/package_macos.sh "${{ steps.semver.outputs.version }}"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ steps.semver.outputs.version }}"
-          name: "Thor Browser v${{ steps.semver.outputs.version }}"
-          body: |
-            ## Thor Browser v${{ steps.semver.outputs.version }} Release
-            
-            High-performance, ephemeral developer browser.
-            
-            ### Artifacts Included:
-            - `Thor-v${{ steps.semver.outputs.version }}-macos.dmg` (macOS Disk Image Installer)
-            - `Thor-v${{ steps.semver.outputs.version }}-macos.zip` (macOS App Zip Archive)
-            - `checksums.txt` (SHA256 Checksums)
-          files: |
-            dist/Thor-v${{ steps.semver.outputs.version }}-macos.dmg
-            dist/Thor-v${{ steps.semver.outputs.version }}-macos.zip
-            dist/checksums.txt
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: Browserless Privacy Tests
+        run: cargo test --test privacy_browser_acceptance
