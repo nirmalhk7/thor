@@ -10,7 +10,7 @@ use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
 use std::io::{Read, Write};
-use std::net::TcpListener;
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::Arc;
 use std::time::Duration;
@@ -1983,10 +1983,11 @@ fn webhook_sink_loop(listener: TcpListener, running: Arc<AtomicBool>) {
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((mut stream, _addr)) => {
-                let mut buf = [0u8; 16384];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
-                if let Some(event) = parse_http_request(&raw) {
+                let _ = stream.set_nonblocking(false);
+                if let Some(event) = read_webhook_request(&mut stream)
+                    .as_deref()
+                    .and_then(parse_http_request)
+                {
                     AppState::global().features().backend().record_webhook(event);
                 }
                 let _ = stream.write_all(
@@ -1997,6 +1998,45 @@ fn webhook_sink_loop(listener: TcpListener, running: Arc<AtomicBool>) {
                 std::thread::sleep(Duration::from_millis(50));
             }
             Err(_) => break,
+        }
+    }
+}
+
+fn read_webhook_request(stream: &mut TcpStream) -> Option<String> {
+    const MAX_REQUEST_BYTES: usize = 16 * 1024;
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let count = match stream.read(&mut chunk) {
+            Ok(0) => return None,
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        };
+        if request.len() + count > MAX_REQUEST_BYTES {
+            return None;
+        }
+        request.extend_from_slice(&chunk[..count]);
+        let Some(header_end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") else {
+            continue;
+        };
+        let headers = String::from_utf8_lossy(&request[..header_end]);
+        let content_length = headers
+            .lines()
+            .filter_map(|line| line.split_once(':'))
+            .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+            .map(|(_, value)| value.trim().parse::<usize>())
+            .transpose()
+            .ok()?
+            .unwrap_or(0);
+        let expected = header_end.checked_add(4)?.checked_add(content_length)?;
+        if expected > MAX_REQUEST_BYTES {
+            return None;
+        }
+        if request.len() >= expected {
+            request.truncate(expected);
+            return Some(String::from_utf8_lossy(&request).into_owned());
         }
     }
 }

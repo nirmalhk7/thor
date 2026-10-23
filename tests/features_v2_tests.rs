@@ -379,8 +379,28 @@ fn test_backend_webhook_sink_receives_real_post() {
     assert_eq!(backend.webhook_sink_port(), Some(port));
 
     let unique_path = format!("/thor-hook-{port}");
-    let resp = raw_http(port, "POST", &unique_path, "{\"event\":\"ping\"}")
-        .expect("POST to webhook sink");
+    let body = "{\"event\":\"ping\"}";
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).expect("connect webhook sink");
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    stream
+        .write_all(format!("POST {unique_path} HTTP/1.1\r\n").as_bytes())
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(80));
+    stream
+        .write_all(
+            format!(
+                "Host: 127.0.0.1\r\nContent-Length: {}\r\nConnection: close\r\n\r\n",
+                body.len()
+            )
+            .as_bytes(),
+        )
+        .unwrap();
+    std::thread::sleep(Duration::from_millis(80));
+    stream.write_all(body.as_bytes()).unwrap();
+    let mut resp = String::new();
+    stream.read_to_string(&mut resp).expect("webhook response");
     assert!(resp.contains("200 OK"), "sink should ack with 200: {resp}");
 
     // The inbound POST is recorded asynchronously by the listener thread.
