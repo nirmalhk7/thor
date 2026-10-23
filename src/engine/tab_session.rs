@@ -591,14 +591,11 @@ impl TabSession {
         let tab_key = format!("tab-{}", self.id.0);
         let page_opt = self.page.lock().clone();
         if let Some(page) = page_opt {
-            match CdpPageFreezer::freeze_page(&page).await {
-                Ok(ms) => {
-                    crate::app_state::AppState::global()
-                        .features()
-                        .perf()
-                        .note_soft_freeze(&tab_key, ms);
-                }
-                Err(_) => {}
+            if let Ok(ms) = CdpPageFreezer::freeze_page(&page).await {
+                crate::app_state::AppState::global()
+                    .features()
+                    .perf()
+                    .note_soft_freeze(&tab_key, ms);
             }
         }
         if also_os_suspend {

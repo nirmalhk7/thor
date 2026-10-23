@@ -6,6 +6,12 @@ pub struct HmrProxy {
     buffer: Arc<Mutex<VecDeque<String>>>,
 }
 
+impl Default for HmrProxy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl HmrProxy {
     pub fn new() -> Self {
         Self {

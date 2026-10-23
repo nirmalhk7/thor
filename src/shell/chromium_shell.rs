@@ -88,7 +88,9 @@ pub fn run_chromium_shell() -> anyhow::Result<()> {
         let (engine, handle) =
             crate::engine::engine_coordinator::BrowserEngine::new(runtime_for_mcp);
         tokio::spawn(engine.run());
-        crate::mcp::server::start_mcp_server(handle).await;
+        if let Err(error) = crate::mcp::server::start_mcp_server(handle).await {
+            crate::thor_warn!("thor::mcp", "MCP server stopped: {error}");
+        }
     });
 
     #[cfg(target_os = "macos")]

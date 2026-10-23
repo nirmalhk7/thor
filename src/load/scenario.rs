@@ -23,20 +23,17 @@ pub struct BudgetEvaluation {
 
 /// Runner execution engine target
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Default)]
 pub enum RunnerType {
     /// Chromium Web Vitals and DOM behavior test runner
     Browser,
     /// High-throughput multi-threaded Rust HTTP/WS scale test runner
+    #[default]
     Protocol,
     /// Dual hybrid runner combining browser UI probes with protocol scale
     Hybrid,
 }
 
-impl Default for RunnerType {
-    fn default() -> Self {
-        RunnerType::Protocol
-    }
-}
 
 /// Individual step within a load scenario
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]

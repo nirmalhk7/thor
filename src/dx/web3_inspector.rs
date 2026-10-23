@@ -148,7 +148,7 @@ impl Web3Inspector {
             return None;
         }
 
-        let selector = format!("0x{}", &clean[..8].to_lowercase());
+        let selector = format!("0x{}", clean[..8].to_lowercase());
         let data = &clean[8..];
 
         let (func_name, sig_owned, param_defs): (&str, String, &[(&str, &str)]) = match selector.as_str() {

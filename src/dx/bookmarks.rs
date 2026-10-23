@@ -201,11 +201,7 @@ impl BookmarkStore {
             }
             let mut bm = Bookmark::new(item.title, item.path_or_url);
             if let Some(folder) = item.badge {
-                if folder != "Default" && folder != "Chrome" && folder != "Dev" {
-                    bm.folder = Some(folder);
-                } else if folder == "Chrome" || !folder.is_empty() {
-                    bm.folder = Some(folder);
-                }
+                bm.folder = Some(folder);
             }
             // Prefer stable id from palette when present.
             if item.id.starts_with("bm_") {
@@ -324,14 +320,22 @@ fn simple_hash(s: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::sync::atomic::{AtomicU64, Ordering};
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    static NEXT_TEMP_DIR: AtomicU64 = AtomicU64::new(0);
 
     fn temp_store_dir() -> PathBuf {
         let nanos = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        let dir = std::env::temp_dir().join(format!("thor_bookmarks_test_{}", nanos));
+        let dir = std::env::temp_dir().join(format!(
+            "thor_bookmarks_test_{}_{}_{}",
+            std::process::id(),
+            nanos,
+            NEXT_TEMP_DIR.fetch_add(1, Ordering::Relaxed)
+        ));
         fs::create_dir_all(&dir).unwrap();
         dir
     }

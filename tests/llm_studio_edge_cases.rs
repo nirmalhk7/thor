@@ -13,7 +13,7 @@ fn test_fragmented_sse_chunks() {
     let m1 = parser.feed_chunk(chunk1, 1050);
     assert_eq!(m1.accumulated_text, "");
     
-    let m2 = parser.feed_chunk(chunk2, 1060);
+    parser.feed_chunk(chunk2, 1060);
     // Because chunk1 was "data: {...", it was not terminated with newline, so `.lines()`
     // would parse it. But wait, `chunk_raw.lines()` doesn't buffer across calls!
     // So if the network chunks are fragmented, SseStreamParser will drop the partial JSON!

@@ -1,34 +1,48 @@
-use std::sync::Arc;
-use std::net::SocketAddr;
 use std::collections::HashMap;
+use std::convert::Infallible;
+use std::net::SocketAddr;
+use std::sync::Arc;
+
 use axum::{
-    routing::{get, post},
-    Router,
-    response::sse::{Event, Sse},
-    extract::{State, Request},
-    http::{StatusCode, HeaderMap},
-    Json,
+    extract::{DefaultBodyLimit, Query, Request, State},
+    http::{HeaderMap, StatusCode},
     middleware::{self, Next},
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse, Response,
+    },
+    routing::{get, post},
+    Json, Router,
 };
-use tokio::sync::{broadcast, Mutex};
-use tokio_stream::wrappers::BroadcastStream;
-use tokio_stream::StreamExt;
+use parking_lot::Mutex;
 use serde_json::Value;
+use subtle::ConstantTimeEq;
+use tokio::sync::{broadcast, Semaphore};
+use tokio_stream::StreamExt;
 
 use crate::engine::engine_coordinator::EngineHandle;
+
 use super::tools;
 
-#[derive(Clone)]
-pub struct McpSession {
-    pub client_id: String,
-    pub tx: broadcast::Sender<Event>,
-}
+type Sessions = Arc<Mutex<HashMap<String, broadcast::Sender<Event>>>>;
 
 #[derive(Clone)]
-pub struct McpState {
-    pub engine: Option<EngineHandle>,
-    pub sessions: Arc<Mutex<HashMap<String, McpSession>>>,
-    pub bearer_token: String,
+struct McpState {
+    engine: Option<EngineHandle>,
+    sessions: Sessions,
+    bearer_token: String,
+    work: Arc<Semaphore>,
+}
+
+struct SessionLease {
+    id: String,
+    sessions: Sessions,
+}
+
+impl Drop for SessionLease {
+    fn drop(&mut self) {
+        self.sessions.lock().remove(&self.id);
+    }
 }
 
 async fn auth_middleware(
@@ -36,100 +50,132 @@ async fn auth_middleware(
     headers: HeaderMap,
     request: Request,
     next: Next,
-) -> Result<axum::response::Response, StatusCode> {
-    if let Some(auth_header) = headers.get("authorization") {
-        if let Ok(auth_str) = auth_header.to_str() {
-            if auth_str == format!("Bearer {}", state.bearer_token) {
-                return Ok(next.run(request).await);
-            }
-        }
+) -> Result<Response, StatusCode> {
+    // Native/stdio clients send no Origin. Untrusted web content cannot become
+    // a browser controller even if a credential leaks into page content.
+    if headers.contains_key("origin") {
+        return Err(StatusCode::FORBIDDEN);
     }
-    Err(StatusCode::UNAUTHORIZED)
+    let expected = format!("Bearer {}", state.bearer_token);
+    let authorized = headers
+        .get("authorization")
+        .is_some_and(|header| bool::from(header.as_bytes().ct_eq(expected.as_bytes())));
+    if !authorized {
+        return Err(StatusCode::UNAUTHORIZED);
+    }
+    Ok(next.run(request).await)
+}
+
+fn hex(bytes: &[u8]) -> String {
+    bytes.iter().map(|byte| format!("{byte:02x}")).collect()
 }
 
 pub fn build_mcp_router(engine: Option<EngineHandle>, token: [u8; 32]) -> Router {
-    let mut token_hex = String::with_capacity(64);
-    for b in token {
-        token_hex.push_str(&format!("{:02x}", b));
-    }
     let state = McpState {
         engine,
+        bearer_token: hex(&token),
         sessions: Arc::new(Mutex::new(HashMap::new())),
-        bearer_token: token_hex,
+        work: Arc::new(Semaphore::new(32)),
     };
-
     Router::new()
+        .route("/mcp", post(streamable_handler))
         .route("/mcp/sse", get(sse_handler))
         .route("/mcp/message", post(message_handler))
-        .layer(middleware::from_fn_with_state(state.clone(), auth_middleware))
+        .layer(DefaultBodyLimit::max(256 * 1024))
+        .layer(middleware::from_fn_with_state(
+            state.clone(),
+            auth_middleware,
+        ))
         .with_state(state)
 }
 
-pub async fn start_mcp_server(engine: EngineHandle) {
-    // Basic random token generation without rand crate
-    let timestamp = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos();
+pub async fn start_mcp_server(engine: EngineHandle) -> anyhow::Result<()> {
     let mut token = [0u8; 32];
-    for i in 0..32 { token[i] = ((timestamp >> (i % 8) * 8) & 0xff) as u8; }
-    
+    getrandom::fill(&mut token)
+        .map_err(|error| anyhow::anyhow!("MCP credential generation: {error}"))?;
     let app = build_mcp_router(Some(engine), token);
-
-    tokio::spawn(async move {
-        let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
-        crate::thor_info!("thor::mcp", "⚡ [Thor MCP] Server listening on http://{}", addr);
-        if let Ok(listener) = tokio::net::TcpListener::bind(addr).await {
-            let _ = axum::serve(listener, app).await;
-        }
-    });
+    let addr = SocketAddr::from(([127, 0, 0, 1], 8765));
+    let listener = tokio::net::TcpListener::bind(addr).await?;
+    let directory = crate::paths::thor_data_dir().join("Mcp");
+    let _connection = super::connection::publish(&directory, listener.local_addr()?, token)?;
+    crate::thor_info!("thor::mcp", "Thor MCP listening on http://{addr}");
+    axum::serve(listener, app).await?;
+    Ok(())
 }
 
-async fn sse_handler(State(state): State<McpState>) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
-    let (tx, rx) = broadcast::channel(100);
-    let client_id = format!("session_{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos());
-    
-    state.sessions.lock().await.insert(client_id.clone(), McpSession {
-        client_id: client_id.clone(),
-        tx: tx.clone(),
-    });
+async fn streamable_handler(
+    State(state): State<McpState>,
+    Json(payload): Json<Value>,
+) -> Result<Response, StatusCode> {
+    let _permit = state
+        .work
+        .try_acquire()
+        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
+    Ok(
+        match tools::handle_message(state.engine.as_ref(), payload).await {
+            Some(response) => Json(response).into_response(),
+            None => StatusCode::ACCEPTED.into_response(),
+        },
+    )
+}
 
-    let stream = BroadcastStream::new(rx)
-        .filter_map(|res| {
-            match res {
-                Ok(e) => Some(Ok(e)),
-                Err(_) => None,
-            }
-        });
-
-    let endpoint_event = Event::default()
+async fn sse_handler(
+    State(state): State<McpState>,
+) -> Result<Sse<impl tokio_stream::Stream<Item = Result<Event, Infallible>>>, StatusCode> {
+    let mut bytes = [0u8; 32];
+    getrandom::fill(&mut bytes).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let id = hex(&bytes);
+    let (sender, receiver) = broadcast::channel(64);
+    {
+        let mut sessions = state.sessions.lock();
+        if sessions.len() >= 32 {
+            return Err(StatusCode::TOO_MANY_REQUESTS);
+        }
+        sessions.insert(id.clone(), sender);
+    }
+    let endpoint = Event::default()
         .event("endpoint")
-        .data(format!("/mcp/message?session_id={}", client_id));
-    
-    let init_stream = tokio_stream::iter(vec![Ok(endpoint_event)]);
-    
-    Sse::new(init_stream.chain(stream))
+        .data(format!("/mcp/message?session_id={id}"));
+    let lease = SessionLease {
+        id,
+        sessions: state.sessions,
+    };
+    // Lag terminates the stream so callers reconnect rather than silently
+    // losing tool replies. Dropping a stream immediately revokes its endpoint.
+    let stream = futures::stream::unfold((receiver, lease), |(mut receiver, lease)| async move {
+        receiver
+            .recv()
+            .await
+            .ok()
+            .map(|event| (Ok(event), (receiver, lease)))
+    });
+    let initial = tokio_stream::iter([Ok(endpoint)]);
+    Ok(Sse::new(initial.chain(stream)).keep_alive(KeepAlive::default()))
 }
 
 async fn message_handler(
     State(state): State<McpState>,
-    axum::extract::Query(query): axum::extract::Query<HashMap<String, String>>,
+    Query(query): Query<HashMap<String, String>>,
     Json(payload): Json<Value>,
-) {
-    if let Some(session_id) = query.get("session_id") {
-        let tx = {
-            let sessions = state.sessions.lock().await;
-            if let Some(session) = sessions.get(session_id) {
-                Some(session.tx.clone())
-            } else { None }
-        };
-        
-        if let Some(tx) = tx {
-            let engine = state.engine.clone();
-            tokio::spawn(async move {
-                let response = tools::handle_message(engine.as_ref(), payload).await;
-                if let Some(res) = response {
-                    let msg = Event::default().event("message").data(serde_json::to_string(&res).unwrap());
-                    let _ = tx.send(msg);
-                }
-            });
+) -> Result<StatusCode, StatusCode> {
+    let id = query.get("session_id").ok_or(StatusCode::BAD_REQUEST)?;
+    let sender = state
+        .sessions
+        .lock()
+        .get(id)
+        .cloned()
+        .ok_or(StatusCode::NOT_FOUND)?;
+    let permit = state
+        .work
+        .clone()
+        .try_acquire_owned()
+        .map_err(|_| StatusCode::TOO_MANY_REQUESTS)?;
+    tokio::spawn(async move {
+        let _permit = permit;
+        if let Some(response) = tools::handle_message(state.engine.as_ref(), payload).await {
+            let event = Event::default().event("message").data(response.to_string());
+            let _ = sender.send(event);
         }
-    }
+    });
+    Ok(StatusCode::ACCEPTED)
 }

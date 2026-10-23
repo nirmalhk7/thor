@@ -292,6 +292,7 @@ struct SseLabHandle {
 
 /// Backend specialist engine.
 pub struct BackendEngine {
+    http: std::sync::OnceLock<Result<crate::api::HttpService, String>>,
     // 1. API workbench history
     history: Mutex<Vec<(ApiRequest, ApiResponse)>>,
     // 2. Auth vault (keyed by context_id, multi-context)
@@ -558,6 +559,7 @@ pub struct HeaderFuzzReport {
 impl BackendEngine {
     pub fn new() -> Self {
         Self {
+            http: std::sync::OnceLock::new(),
             history: Mutex::new(Vec::new()),
             vault: Mutex::new(HashMap::new()),
             webhooks: Mutex::new(Vec::new()),
@@ -616,40 +618,38 @@ impl BackendEngine {
             self.history.lock().push((req.clone(), resp.clone()));
             return Ok(resp);
         }
-        let rt = tokio::runtime::Builder::new_current_thread()
-            .enable_all()
-            .build()
-            .map_err(|e| e.to_string())?;
-        let resp = rt.block_on(async { self.send(req).await })?;
+        let resp = crate::api::blocking::run(self.send(req))??;
         self.history.lock().push((req.clone(), resp.clone()));
         Ok(resp)
     }
 
     pub async fn send(&self, req: &ApiRequest) -> Result<ApiResponse, String> {
-        let method =
-            reqwest::Method::from_bytes(req.method.as_bytes()).unwrap_or(reqwest::Method::GET);
-        let mut builder = reqwest::Client::new().request(method, &req.url);
-        for (k, v) in &req.headers {
-            builder = builder.header(k, v);
+        let mut request = crate::api::RequestSpec::new(&req.method, &req.url);
+        request.headers = req.headers.iter()
+            .map(|(name, value)| crate::api::Header::new(name, value)).collect();
+        if let Some(text) = &req.body {
+            let content_type = req.headers.iter()
+                .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
+                .map(|(_, value)| value.clone()).unwrap_or_else(|| "text/plain".into());
+            request.body = crate::api::RequestBody::Text { text: text.clone(), content_type };
         }
-        if let Some(body) = &req.body {
-            builder = builder.body(body.clone());
+        let response = self.http_service()?.send(&request, &crate::api::Variables::default())
+            .await.map_err(|error| error.to_string())?;
+        if response.body.encoding != "utf8" {
+            return Err("Binary response requires the API workbench binary viewer".into());
         }
-        let start = std::time::Instant::now();
-        let res = builder.send().await.map_err(|e| e.to_string())?;
-        let status = res.status().as_u16();
-        let headers = res
-            .headers()
-            .iter()
-            .map(|(k, v)| (k.to_string(), v.to_str().unwrap_or("").to_string()))
-            .collect();
-        let body = res.text().await.unwrap_or_default();
         Ok(ApiResponse {
-            status,
-            headers,
-            body,
-            latency_ms: start.elapsed().as_secs_f64() * 1000.0,
+            status: response.status,
+            headers: response.headers.into_iter().map(|header| (header.name, header.value)).collect(),
+            body: response.body.data,
+            latency_ms: response.total_ms,
         })
+    }
+
+    /// Shared connection pool used by feature execution and the API workbench.
+    pub fn http_service(&self) -> Result<&crate::api::HttpService, String> {
+        self.http.get_or_init(|| crate::api::HttpService::new().map_err(|error| error.to_string()))
+            .as_ref().map_err(Clone::clone)
     }
 
     pub fn history(&self) -> Vec<(ApiRequest, ApiResponse)> {
@@ -1376,14 +1376,13 @@ impl BackendEngine {
             }
             if i + 1 < pages.len() {
                 let n = &pages[i + 1];
-                if p.next_cursor.is_none() && n.page != p.page + 1 && p.page_size > 0 {
-                    if n.page != p.page + 1 {
+                if p.next_cursor.is_none() && n.page != p.page + 1 && p.page_size > 0
+                    && n.page != p.page + 1 {
                         issues.push(format!(
                             "non-sequential page jump {} -> {}",
                             p.page, n.page
                         ));
                     }
-                }
             }
         }
         if let Some(last) = pages.last() {
@@ -1907,7 +1906,7 @@ impl BackendEngine {
                 error: None,
             });
         }
-        for (name, _pat) in &contract.patterns {
+        for name in contract.patterns.keys() {
             let mut h = base.clone();
             h.insert(name.clone(), "!!!invalid!!!".into());
             cases.push(HeaderFuzzCase {
@@ -2259,7 +2258,7 @@ fn last_ident(s: &str) -> String {
     let s = s.trim().trim_end_matches('(');
     s.split(|c: char| c.is_whitespace() || c == ':' || c == '(')
         .filter(|t| !t.is_empty())
-        .last()
+        .next_back()
         .unwrap_or("")
         .to_string()
 }
@@ -2292,7 +2291,7 @@ fn normalize_sql(sql: &str) -> String {
     while let Some(c) = chars.next() {
         match c {
             '\'' => {
-                while let Some(n) = chars.next() {
+                for n in chars.by_ref() {
                     if n == '\'' {
                         break;
                     }

@@ -1730,7 +1730,7 @@ fn host_of(url: &str) -> String {
         .next()
         .unwrap_or("")
         .split('@')
-        .last()
+        .next_back()
         .unwrap_or("")
         .split(':')
         .next()

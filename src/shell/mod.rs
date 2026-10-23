@@ -129,7 +129,7 @@ impl ShellTabs {
             .iter()
             .map(|(id, m)| (id.as_str(), m.title.as_str(), m.url.as_str(), m.last_active))
             .collect();
-        rows.sort_by(|a, b| b.3.cmp(&a.3));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.3));
         rows.into_iter()
             .map(|(id, title, url, _)| (id, title, url))
             .collect()
@@ -684,6 +684,7 @@ pub(crate) fn content_hotkey_script() -> &'static str {
     "#
 }
 
+#[allow(clippy::too_many_arguments)]
 fn create_content_tab(
     window: &tao::window::Window,
     url: &str,
@@ -1700,6 +1701,14 @@ pub(crate) fn setup_macos_app_icon() {
 }
 
 pub fn run() -> anyhow::Result<()> {
+    let legacy_enabled = ["THOR_LEGACY_DUAL_WINDOW", "THOR_DUAL_WINDOW"]
+        .into_iter()
+        .any(|name| std::env::var(name).is_ok_and(|value| value == "1"));
+    if !legacy_enabled {
+        anyhow::bail!(
+            "Thor requires its embedded CEF runtime; legacy dual-window mode requires THOR_LEGACY_DUAL_WINDOW=1"
+        );
+    }
     crate::thor_info!("thor::shell", "Launching Thor Developer Browser UI...");
     chromium_shell::run_chromium_shell()
 }
@@ -1850,7 +1859,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                 {
                     let tabs_slot = tabs_for_loop.borrow();
                     let mut tb = toolbar_for_loop.borrow_mut();
-                    open_tool_in_omnibar(&tabs_slot, &mut *tb, "locust_active_origin");
+                    open_tool_in_omnibar(&tabs_slot, &mut tb, "locust_active_origin");
                 }
             }
 
@@ -1871,7 +1880,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                         let key = action_key.clone();
                         let tabs_slot = tabs_for_loop.borrow();
                         let mut tb = toolbar_for_loop.borrow_mut();
-                        open_tool_in_omnibar(&tabs_slot, &mut *tb, &key);
+                        open_tool_in_omnibar(&tabs_slot, &mut tb, &key);
                     }
                 }
             }
@@ -1906,7 +1915,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                 {
                     let tabs_slot = tabs_for_loop.borrow();
                     let mut tb = toolbar_for_loop.borrow_mut();
-                    open_tool_in_omnibar(&tabs_slot, &mut *tb, "toggle_profile");
+                    open_tool_in_omnibar(&tabs_slot, &mut tb, "toggle_profile");
                 }
                 #[cfg(not(target_os = "macos"))]
                 toggle_profile_mode();
@@ -2086,7 +2095,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                     let (w, h) = *win_size_for_resize.borrow();
                     let mut tabs_slot = tabs_for_loop.borrow_mut();
                     let mut tb = toolbar_for_loop.borrow_mut();
-                    let done = run_omnibar_tool_go(&mut tabs_slot, &mut *tb, w, h);
+                    let done = run_omnibar_tool_go(&mut tabs_slot, &mut tb, w, h);
                     if done {
                         if let Some(t) = tb.as_mut() {
                             t.set_tool_mode(native_toolbar::ChromeToolMode::Browse);
@@ -2113,7 +2122,7 @@ fn run_wry_shell() -> anyhow::Result<()> {
                     next_gc_at = now + TAB_GC_INTERVAL;
                     let (w, h) = *win_size_for_resize.borrow();
                     let chrome = chrome_for_loop.borrow();
-                    gc_idle_tabs(&mut tabs_for_loop.borrow_mut(), &*chrome, w, h);
+                    gc_idle_tabs(&mut tabs_for_loop.borrow_mut(), &chrome, w, h);
                 }
             }
 

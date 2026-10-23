@@ -1261,7 +1261,7 @@ impl PerfEngine {
                         if let Some(n) = v.get(*k).and_then(|x| x.as_f64()) {
                             return Some(n);
                         }
-                        if let Some(n) = v.pointer(*k).and_then(|x| x.as_f64()) {
+                        if let Some(n) = v.pointer(k).and_then(|x| x.as_f64()) {
                             return Some(n);
                         }
                     }
@@ -1922,7 +1922,7 @@ fn url_host(url: &str) -> String {
         .next()
         .unwrap_or("")
         .split('@')
-        .last()
+        .next_back()
         .unwrap_or("")
         .split(':')
         .next()

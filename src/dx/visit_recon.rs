@@ -412,12 +412,12 @@ impl VisitReconEngine {
                 .find(|p| p.trim().starts_with("max-age="))
                 .and_then(|p| p.trim()["max-age=".len()..].parse::<u64>().ok())
         });
-        let hsts_include_subdomains = hsts.map_or(false, |h| h.to_lowercase().contains("includesubdomains"));
+        let hsts_include_subdomains = hsts.is_some_and(|h| h.to_lowercase().contains("includesubdomains"));
         let hsts_preload = hsts.map_or(false, |h| h.to_lowercase().contains("preload"));
 
         let http_only_cookies = cookies.iter().filter(|c| c.http_only).count();
         let secure_cookies = cookies.iter().filter(|c| c.secure).count();
-        let same_site_strict_cookies = cookies.iter().filter(|c| c.same_site.as_deref().map_or(false, |s| s.eq_ignore_ascii_case("strict"))).count();
+        let same_site_strict_cookies = cookies.iter().filter(|c| c.same_site.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("strict"))).count();
         let same_site_lax_cookies = cookies.iter().filter(|c| c.same_site.as_deref().map_or(false, |s| s.eq_ignore_ascii_case("lax"))).count();
         let same_site_none_cookies = cookies.iter().filter(|c| c.same_site.as_deref().map_or(false, |s| s.eq_ignore_ascii_case("none"))).count();
 

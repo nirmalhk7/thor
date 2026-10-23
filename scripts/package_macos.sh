@@ -1,110 +1,34 @@
-#!/bin/bash
-set -e
+#!/usr/bin/env bash
+# Final build/package step: invoke only after implementation and quality gates.
+set -euo pipefail
 
-VERSION="${1:-0.1.0}"
-echo "============================================================"
-echo "📦 Packaging Thor for macOS (v${VERSION})"
-echo "============================================================"
-
-# Ensure release binary is compiled
-echo "🔨 Compiling release binaries..."
-cargo build --release --bin Thor --bin thor-labs
-
-DIST_DIR="dist"
-APP_DIR="${DIST_DIR}/Thor.app"
-CONTENTS_DIR="${APP_DIR}/Contents"
-MACOS_DIR="${CONTENTS_DIR}/MacOS"
-RESOURCES_DIR="${CONTENTS_DIR}/Resources"
-
-rm -rf "${DIST_DIR}"
-mkdir -p "${MACOS_DIR}" "${RESOURCES_DIR}"
-
-# Copy binary (Rust product launcher / Labs host)
-cp "target/release/Thor" "${MACOS_DIR}/Thor"
-chmod +x "${MACOS_DIR}/Thor"
-if [[ -f "target/release/thor-labs" ]]; then
-  cp "target/release/thor-labs" "${MACOS_DIR}/thor-labs"
-  chmod +x "${MACOS_DIR}/thor-labs"
+ROOT="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ROOT"
+VERSION="$(sed -nE 's/^version = "([^"]+)"/\1/p' Cargo.toml | head -n 1)"
+if [[ -n "${1:-}" && "$1" != "$VERSION" ]]; then
+  echo "Requested version differs from Cargo.toml ($VERSION)" >&2
+  exit 1
 fi
 
-# Stage Thor-owned Chromium into Frameworks (snapshot cache or prior bootstrap)
-FRAMEWORKS_DIR="${CONTENTS_DIR}/Frameworks"
-mkdir -p "${FRAMEWORKS_DIR}"
-CACHE_APP="${HOME}/Library/Application Support/Thor/ChromiumCache/Chromium.app"
-SRC_OUT_APP=""
-if [[ -n "${THOR_CHROMIUM_SRC:-}" ]]; then
-  for candidate in \
-    "${THOR_CHROMIUM_SRC}/src/out/Thor/Chromium.app" \
-    "${THOR_CHROMIUM_SRC}/src/out/Thor/Thor.app" \
-    "${THOR_CHROMIUM_SRC}/out/Thor/Chromium.app"; do
-    if [[ -d "$candidate" ]]; then SRC_OUT_APP="$candidate"; break; fi
-  done
-fi
-if [[ -d "$SRC_OUT_APP" ]]; then
-  echo "→ Bundling Chromium from source build: $SRC_OUT_APP"
-  rm -rf "${FRAMEWORKS_DIR}/Chromium.app"
-  cp -R "$SRC_OUT_APP" "${FRAMEWORKS_DIR}/Chromium.app"
-elif [[ -d "$CACHE_APP" ]]; then
-  echo "→ Bundling Chromium from snapshot cache: $CACHE_APP"
-  rm -rf "${FRAMEWORKS_DIR}/Chromium.app"
-  cp -R "$CACHE_APP" "${FRAMEWORKS_DIR}/Chromium.app"
-elif [[ -d "${DIST_DIR}/Thor.app/Contents/Frameworks/Chromium.app" ]]; then
-  echo "→ Chromium Frameworks already staged"
-else
-  echo "⚠️ No Thor-owned Chromium found. Run ./scripts/bootstrap_chromium_snapshot.sh or build_chromium.sh"
-fi
+cargo build --release --features cef-bundle --bin Thor --bin thor-labs --bin thor-package
+TARGET_DIR="${CARGO_TARGET_DIR:-target}/release"
+"$TARGET_DIR/thor-package" dist/cef
 
-# Create Info.plist
-cat <<EOF > "${CONTENTS_DIR}/Info.plist"
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-    <key>CFBundleExecutable</key>
-    <string>Thor</string>
-    <key>CFBundleIdentifier</key>
-    <string>com.nirmalhk7.thor</string>
-    <key>CFBundleName</key>
-    <string>Thor</string>
-    <key>CFBundleDisplayName</key>
-    <string>Thor Browser</string>
-    <key>CFBundlePackageType</key>
-    <string>APPL</string>
-    <key>CFBundleShortVersionString</key>
-    <string>${VERSION}</string>
-    <key>CFBundleVersion</key>
-    <string>${VERSION}</string>
-    <key>LSMinimumSystemVersion</key>
-    <string>11.0</string>
-    <key>NSHighResolutionCapable</key>
-    <true/>
-</dict>
-</plist>
-EOF
+APP="dist/cef/Thor.app"
+FRAMEWORK="$APP/Contents/Frameworks/Chromium Embedded Framework.framework"
+[[ -d "$FRAMEWORK" ]] || { echo "CEF framework missing from bundle" >&2; exit 1; }
+[[ -x "$APP/Contents/MacOS/Thor" ]] || { echo "Thor executable missing" >&2; exit 1; }
+[[ ! -e "$APP/Contents/Frameworks/Chromium.app" ]] || { echo "Legacy Chromium found in CEF bundle" >&2; exit 1; }
+for helper in "Helper" "Helper (GPU)" "Helper (Renderer)" "Helper (Plugin)" "Helper (Alerts)"; do
+  [[ -x "$APP/Contents/Frameworks/Thor $helper.app/Contents/MacOS/Thor $helper" ]] || {
+    echo "CEF helper missing: $helper" >&2
+    exit 1
+  }
+done
 
-echo "✅ Thor.app bundle created."
-
-# Package ZIP archive
-ZIP_NAME="Thor-v${VERSION}-macos.zip"
-echo "🤐 Creating ${ZIP_NAME}..."
-(cd "${DIST_DIR}" && zip -r "${ZIP_NAME}" "Thor.app" > /dev/null)
-
-# Package DMG installer if hdiutil is available
-DMG_NAME="Thor-v${VERSION}-macos.dmg"
-if command -v hdiutil &> /dev/null; then
-    echo "💿 Creating ${DMG_NAME} using hdiutil..."
-    hdiutil create -volname "Thor Browser" -srcfolder "${APP_DIR}" -ov -format UDZO "${DIST_DIR}/${DMG_NAME}" > /dev/null
-    echo "✅ DMG created successfully."
-else
-    echo "⚠️ hdiutil not found, skipping DMG creation."
-fi
-
-# Calculate SHA256 checksums
-echo "🔒 Computing SHA256 checksums..."
-(cd "${DIST_DIR}" && shasum -a 256 *.* > checksums.txt 2>/dev/null || sha256sum *.* > checksums.txt 2>/dev/null || true)
-
-echo "============================================================"
-echo "🎉 Thor macOS Packaging Complete!"
-echo "Artifacts generated in ./${DIST_DIR}/:"
-ls -la "${DIST_DIR}"
-echo "============================================================"
+ZIP="dist/Thor-v${VERSION}-macos.zip"
+DMG="dist/Thor-v${VERSION}-macos.dmg"
+ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
+hdiutil create -volname Thor -srcfolder "$APP" -ov -format UDZO "$DMG"
+shasum -a 256 "$ZIP" "$DMG" > dist/checksums.txt
+echo "Staged CEF application and development installers in dist/. Signing/notarization required for distribution."

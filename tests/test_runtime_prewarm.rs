@@ -1,6 +1,4 @@
 use thor::engine::chromium_runtime::{ChromiumRuntimeConfig, ChromiumRuntime};
-use std::sync::Arc;
-use std::thread;
 use std::time::Duration;
 
 #[tokio::test]

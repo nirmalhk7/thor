@@ -191,7 +191,9 @@ async fn attach_labs(debug_http: &str) -> anyhow::Result<()> {
     let (engine, handle) = crate::engine::engine_coordinator::BrowserEngine::new(runtime);
     tokio::spawn(engine.run());
     tokio::spawn(async move {
-        crate::mcp::server::start_mcp_server(handle).await;
+        if let Err(error) = crate::mcp::server::start_mcp_server(handle).await {
+            crate::thor_warn!("thor::mcp", "MCP server stopped: {error}");
+        }
     });
     Ok(())
 }

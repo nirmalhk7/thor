@@ -114,6 +114,7 @@ pub struct AppState {
     /// Run passive Visit Recon after each navigation.
     visit_recon_enabled: AtomicBool,
     last_visit_recon: Mutex<Option<crate::dx::visit_recon::VisitReconReport>>,
+    projects: OnceLock<Result<crate::projects::ProjectStore, String>>,
 }
 
 static APP_STATE: OnceLock<AppState> = OnceLock::new();
@@ -145,6 +146,7 @@ impl AppState {
             auto_pip: AtomicBool::new(true),
             visit_recon_enabled: AtomicBool::new(true),
             last_visit_recon: Mutex::new(None),
+            projects: OnceLock::new(),
         }
     }
 
@@ -155,6 +157,13 @@ impl AppState {
 
     pub fn profiles(&self) -> &ProfileManager {
         &self.profiles
+    }
+
+    pub fn projects(&self) -> Result<&crate::projects::ProjectStore, String> {
+        self.projects.get_or_init(|| {
+            crate::projects::ProjectStore::open(&thor_data_dir().join("Projects/projects.sqlite3"))
+                .map_err(|error| error.to_string())
+        }).as_ref().map_err(Clone::clone)
     }
 
     pub fn tamper(&self) -> &TrafficTamperEngine {

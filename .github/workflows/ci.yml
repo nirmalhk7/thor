@@ -1,100 +1,118 @@
-name: CI & Release
+name: Thor CI and Release
 
 on:
   push:
-    branches: [ "main" ]
-    tags: [ "v*" ]
+    branches: ['**']
   pull_request:
-    branches: [ "main" ]
+  workflow_dispatch:
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
-  test_and_lint:
-    name: Test & Lint (macOS)
+  test:
+    name: Test (all branches)
     runs-on: macos-latest
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Install CEF build tools
+        run: |
+          if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null; then
+            brew install cmake ninja
+          fi
+      - name: Test release version logic
+        run: python3 -m unittest discover -s tests -p test_semantic_version.py
+      - name: Check all Rust targets
+        run: cargo check --locked --workspace --all-targets
+      - name: Run all Rust tests
+        run: cargo test --locked --workspace
 
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Cargo Check
-        run: cargo check --workspace --all-targets
-
-      - name: Library Unit Tests
-        run: cargo test --lib
-
-      - name: Integration Tests
-        run: cargo test --test integration_tests
-
-  build_and_release:
-    name: Package & Release macOS Installer
-    needs: test_and_lint
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+  release:
+    name: Release CEF browser (main only)
+    needs: test
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: macos-latest
+    concurrency:
+      group: thor-release-main
+      cancel-in-progress: false
+    permissions:
+      contents: write
     steps:
-      - name: Checkout Code
-        uses: actions/checkout@v4
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           fetch-depth: 0
-          token: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Setup Rust
-        uses: dtolnay/rust-toolchain@stable
-
-      - name: Rust Cache
-        uses: Swatinem/rust-cache@v2
-
-      - name: Auto-Bump Semantic Version
-        id: semver
-        run: |
-          CURRENT_VERSION=$(grep '^version =' Cargo.toml | head -n 1 | cut -d '"' -f 2)
-          echo "Current Cargo version: ${CURRENT_VERSION}"
-          
-          IFS='.' read -r MAJOR MINOR PATCH <<< "${CURRENT_VERSION}"
-          NEW_PATCH=$((PATCH + 1))
-          NEW_VERSION="${MAJOR}.${MINOR}.${NEW_PATCH}"
-          echo "New Version: ${NEW_VERSION}"
-          
-          sed -i '' "s/^version = \"${CURRENT_VERSION}\"/version = \"${NEW_VERSION}\"/" Cargo.toml
-          
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          
-          git add Cargo.toml
-          git commit -m "chore(release): bump version to v${NEW_VERSION} [skip ci]" || true
-          git tag -f "v${NEW_VERSION}" || true
-          git push origin "v${NEW_VERSION}" || true
-          git push origin main || true
-          
-          echo "version=${NEW_VERSION}" >> $GITHUB_OUTPUT
-
-      - name: Build & Package macOS Installers
-        run: ./scripts/package_macos.sh "${{ steps.semver.outputs.version }}"
-
-      - name: Create GitHub Release
-        uses: softprops/action-gh-release@v2
-        with:
-          tag_name: "v${{ steps.semver.outputs.version }}"
-          name: "Thor Browser v${{ steps.semver.outputs.version }}"
-          body: |
-            ## Thor Browser v${{ steps.semver.outputs.version }} Release
-            
-            High-performance, ephemeral developer browser.
-            
-            ### Artifacts Included:
-            - `Thor-v${{ steps.semver.outputs.version }}-macos.dmg` (macOS Disk Image Installer)
-            - `Thor-v${{ steps.semver.outputs.version }}-macos.zip` (macOS App Zip Archive)
-            - `checksums.txt` (SHA256 Checksums)
-          files: |
-            dist/Thor-v${{ steps.semver.outputs.version }}-macos.dmg
-            dist/Thor-v${{ steps.semver.outputs.version }}-macos.zip
-            dist/checksums.txt
+          persist-credentials: false
+      - uses: dtolnay/rust-toolchain@b725eda525362e7cf34af9a7243cac1e3f01a7ec # stable
+      - uses: Swatinem/rust-cache@d1527c8f67ef9af357290475d4af4b0fab8f12e0 # v2
+      - name: Verify main still points at tested commit
+        id: current
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh auth setup-git --hostname github.com
+          git fetch origin main --tags
+          if [[ "$(git rev-parse origin/main)" == "$GITHUB_SHA" ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'main advanced; a newer run will release it'
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Calculate semantic version
+        id: semver
+        if: steps.current.outputs.ready == 'true'
+        run: python3 scripts/semantic_version.py --apply --github-output "$GITHUB_OUTPUT"
+      - name: Check existing release
+        id: existing
+        if: steps.semver.outputs.release == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          TAG: ${{ steps.semver.outputs.tag }}
+        run: |
+          if gh release view "$TAG" >/dev/null 2>&1; then
+            echo "Release $TAG already exists"
+            echo 'publish=false' >> "$GITHUB_OUTPUT"
+          else
+            echo 'publish=true' >> "$GITHUB_OUTPUT"
+          fi
+      - name: Install CEF build tools
+        if: steps.existing.outputs.publish == 'true'
+        run: |
+          if ! command -v cmake >/dev/null || ! command -v ninja >/dev/null; then
+            brew install cmake ninja
+          fi
+      - name: Build and package Thor with embedded CEF
+        if: steps.existing.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.semver.outputs.version }}
+        run: ./scripts/package_macos.sh "$VERSION"
+      - name: Verify release archives
+        if: steps.existing.outputs.publish == 'true'
+        run: shasum -a 256 -c dist/checksums.txt
+      - name: Publish semantic version and GitHub release
+        if: steps.existing.outputs.publish == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          VERSION: ${{ steps.semver.outputs.version }}
+          TAG: ${{ steps.semver.outputs.tag }}
+        run: |
+          set -euo pipefail
+          git config user.name 'github-actions[bot]'
+          git config user.email 'github-actions[bot]@users.noreply.github.com'
+          if ! git diff --quiet -- Cargo.toml Cargo.lock; then
+            git add Cargo.toml Cargo.lock
+            git commit -m "chore(release): bump version to $TAG [skip ci]"
+          fi
+          git fetch origin main
+          test "$(git rev-parse origin/main)" = "$GITHUB_SHA"
+          git push origin HEAD:main
+          gh release create "$TAG" \
+            "dist/Thor-v${VERSION}-macos.zip" \
+            "dist/Thor-v${VERSION}-macos.dmg" \
+            dist/checksums.txt \
+            --target "$(git rev-parse HEAD)" \
+            --title "Thor Browser $TAG" \
+            --generate-notes

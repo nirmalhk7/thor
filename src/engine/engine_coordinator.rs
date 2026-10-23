@@ -42,6 +42,8 @@ pub struct TabRecord {
 
 #[derive(Debug, Clone, Default)]
 pub struct BrowserSnapshot {
+    pub active_target: Option<crate::browser::session::TabRef>,
+    pub tab_details: Vec<crate::browser::session::TabSummary>,
     pub active_tabs: usize,
     pub runtime_status: String,
     pub tabs: Vec<TabId>,
@@ -51,6 +53,7 @@ pub struct BrowserSnapshot {
 }
 
 pub enum EngineCommand {
+    Targeted { target: crate::browser::session::TabRef, command: Box<EngineCommand> },
     CreateTab { identity_id: IdentityContextId, url: String, reply: oneshot::Sender<Result<TabId, EngineError>> },
     CloseTab { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
     ActivateTab { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
@@ -64,6 +67,22 @@ pub enum EngineCommand {
     Discard { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
     MergeTabs { source: TabId, destination: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
     Shutdown { reply: oneshot::Sender<Result<(), EngineError>> },
+}
+
+impl EngineCommand {
+    pub fn reject(self, error: EngineError) {
+        match self {
+            Self::Targeted { command, .. } => command.reject(error),
+            Self::CreateTab { reply, .. } => { let _ = reply.send(Err(error)); }
+            Self::Evaluate { reply, .. } => { let _ = reply.send(Err(error)); }
+            Self::CaptureScreenshot { reply, .. } => { let _ = reply.send(Err(error)); }
+            Self::CloseTab { reply, .. } | Self::ActivateTab { reply, .. }
+            | Self::Navigate { reply, .. } | Self::Back { reply, .. }
+            | Self::Forward { reply, .. } | Self::Reload { reply, .. }
+            | Self::Freeze { reply, .. } | Self::Discard { reply, .. }
+            | Self::MergeTabs { reply, .. } | Self::Shutdown { reply } => { let _ = reply.send(Err(error)); }
+        }
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -145,6 +164,8 @@ impl BrowserEngine {
                     let identities: Vec<IdentityContextId> = self.identities.keys().cloned().collect();
                     
                     let _ = self.snapshot_tx.send(BrowserSnapshot {
+                        active_target: None,
+                        tab_details: Vec::new(),
                         active_tabs: self.tabs.len(),
                         runtime_status: "running".to_string(),
                         tabs,
@@ -167,6 +188,7 @@ impl BrowserEngine {
 
     async fn handle_command(&mut self, cmd: EngineCommand) {
         match cmd {
+            EngineCommand::Targeted { command, .. } => command.reject(EngineError::UnsupportedOperation),
             EngineCommand::CreateTab { identity_id: _, url, reply } => {
                 let runtime = Arc::clone(&self.runtime);
                 match timeout(DEADLINE_LAUNCH_SHUTDOWN, runtime.new_tab(Some(&url))).await {
@@ -389,4 +411,3 @@ mod tests {
         assert_eq!(rx.borrow().active_tabs, 0);
     }
 }
-

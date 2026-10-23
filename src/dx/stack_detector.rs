@@ -9,18 +9,15 @@ pub struct TechBadge {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[derive(Default)]
 pub enum RenderingMode {
     Ssr,
     Csr,
     Hybrid,
+    #[default]
     Unknown,
 }
 
-impl Default for RenderingMode {
-    fn default() -> Self {
-        Self::Unknown
-    }
-}
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DevComponentLocation {
@@ -74,7 +71,7 @@ impl TechStackDetector {
         if html_lower.contains("__next_data__")
             || html_lower.contains("_next/static")
             || url_lower.contains("nextjs.org")
-            || x_powered_by.as_deref().map_or(false, |s| s.to_lowercase().contains("next.js"))
+            || x_powered_by.as_deref().is_some_and(|s| s.to_lowercase().contains("next.js"))
         {
             badges.push(TechBadge {
                 name: "Next.js".into(),

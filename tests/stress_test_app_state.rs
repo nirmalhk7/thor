@@ -21,7 +21,7 @@ fn test_app_state_stress() {
         let addr = listener.local_addr().unwrap();
         let url = format!("http://{addr}/");
 
-        for i in 0..num_threads {
+        for _ in 0..num_threads {
             let b = barrier.clone();
             let u = url.clone();
             handles.push(thread::spawn(move || {

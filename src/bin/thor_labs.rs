@@ -1,7 +1,8 @@
-//! Thor Labs sidecar — FeatureEngine / MCP against self-CDP (owned Chromium).
+//! Thor MCP stdio bridge. Connects to the CEF browser already running in Thor.
 //!
 //! Usage:
-//!   THOR_SELF_CDP_URL=http://127.0.0.1:9222 cargo run --bin thor-labs
+//!   thor-labs --stdio
+//!   THOR_SELF_CDP_URL=http://127.0.0.1:9222 thor-labs --self-cdp (legacy)
 //!
 //! Native messaging host: browser/native_messaging/com.thor.labs.json
 
@@ -11,23 +12,25 @@ use mimalloc::MiMalloc;
 static GLOBAL: MiMalloc = MiMalloc;
 
 fn main() -> anyhow::Result<()> {
-    let _logger = thor::logging::init_logging();
-    let url = std::env::var("THOR_SELF_CDP_URL")
-        .unwrap_or_else(|_| "http://127.0.0.1:9222".to_string());
-
-    thor::thor_info!("thor::labs", "Thor Labs sidecar attaching to {url}");
-
+    let args: Vec<_> = std::env::args().skip(1).collect();
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
+    if args.is_empty() || args == ["--stdio"] {
+        return rt.block_on(thor::mcp::stdio::run());
+    }
+    if args != ["--self-cdp"] {
+        anyhow::bail!("Usage: thor-labs [--stdio | --self-cdp]");
+    }
+    let _logger = thor::logging::init_logging();
+    let url = std::env::var("THOR_SELF_CDP_URL")
+        .map_err(|_| anyhow::anyhow!("--self-cdp requires THOR_SELF_CDP_URL"))?;
+
+    thor::thor_info!("thor::labs", "Thor Labs sidecar attaching to {url}");
 
     rt.block_on(async move {
         let runtime = thor::engine::self_cdp::connect_runtime(url).await?;
-        thor::thor_info!(
-            "thor::labs",
-            "Connected — ws {}",
-            runtime.websocket_url()
-        );
+        thor::thor_info!("thor::labs", "Connected — ws {}", runtime.websocket_url());
 
         let _ = thor::AppState::global();
         let features = thor::AppState::global().features();
@@ -38,10 +41,9 @@ fn main() -> anyhow::Result<()> {
         );
         let _ = features;
 
-        let (engine, handle) =
-            thor::engine::engine_coordinator::BrowserEngine::new(runtime);
+        let (engine, handle) = thor::engine::engine_coordinator::BrowserEngine::new(runtime);
         tokio::spawn(engine.run());
-        thor::mcp::server::start_mcp_server(handle).await;
+        thor::mcp::server::start_mcp_server(handle).await?;
         Ok::<(), anyhow::Error>(())
     })?;
 

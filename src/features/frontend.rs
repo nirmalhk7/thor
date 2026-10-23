@@ -790,11 +790,10 @@ impl FrontendEngine {
         for d in declarations {
             let prop = d.property.to_lowercase();
             let val = d.value.trim().to_lowercase();
-            if prop.contains("color") || val.starts_with('#') || val.starts_with("rgb") {
-                if val.starts_with('#') || val.starts_with("rgb") {
+            if (prop.contains("color") || val.starts_with('#') || val.starts_with("rgb"))
+                && (val.starts_with('#') || val.starts_with("rgb")) {
                     *colors.entry(val.clone()).or_default() += 1;
                 }
-            }
             if prop == "font-size" {
                 *fonts.entry(val.clone()).or_default() += 1;
             }
@@ -1328,7 +1327,7 @@ impl FrontendEngine {
     // 11. Z-Index Visualizer ------------------------------------------------
     pub fn visualize_zindex(&self, elements: &[StackingElement]) -> ZIndexReport {
         let mut ordered: Vec<&StackingElement> = elements.iter().collect();
-        ordered.sort_by(|a, b| a.z_index.unwrap_or(0).cmp(&b.z_index.unwrap_or(0)));
+        ordered.sort_by_key(|a| a.z_index.unwrap_or(0));
         let paint_order = ordered.iter().map(|e| e.selector.clone()).collect();
 
         // Conflicts: same z-index among sibling-level stacking contexts.

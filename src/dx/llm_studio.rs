@@ -359,7 +359,7 @@ mod tests {
     fn test_token_counter() {
         let text = "Hello world, this is a test prompt for Thor AI Lens!";
         let tokens = LlmStudio::count_tokens(text);
-        assert!(tokens >= 10 && tokens <= 18);
+        assert!((10..=18).contains(&tokens));
     }
 
     #[test]

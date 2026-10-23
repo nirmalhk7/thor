@@ -406,12 +406,11 @@ impl ChromiumTabs {
                     println!("⚡ [Thor 4-Stage Lifecycle] Discarding tab after 1h idle: {id}");
                     let _ = session.discard_blocking();
                 }
-            } else if elapsed >= fifteen_min {
-                if session.lifecycle() == TabLifecycle::Active {
+            } else if elapsed >= fifteen_min
+                && session.lifecycle() == TabLifecycle::Active {
                     println!("⚡ [Thor 4-Stage Lifecycle] Freezing tab after 15m idle: {id}");
                     let _ = session.soft_freeze_blocking();
                 }
-            }
         }
 
         for id in expired_victims {

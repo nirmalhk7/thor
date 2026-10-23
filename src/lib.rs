@@ -2,6 +2,8 @@
 #![allow(unexpected_cfgs)]
 
 pub mod app_state;
+pub mod api;
+pub mod browser;
 pub mod daemon;
 pub mod devtools;
 pub mod dx;
@@ -12,6 +14,8 @@ pub mod load;
 pub mod net;
 pub mod network;
 pub mod paths;
+pub mod projects;
+pub mod workbench;
 pub mod shell;
 pub mod mcp;
 pub mod logging;

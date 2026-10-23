@@ -924,7 +924,7 @@ impl CmdPalette {
                 .map(|n| n.get())
                 .unwrap_or(4)
                 .min(8);
-            let chunk_size = (len + num_threads - 1) / num_threads;
+            let chunk_size = len.div_ceil(num_threads);
 
             let thread_results: Vec<Vec<(i32, usize)>> = std::thread::scope(|s| {
                 let mut handles = Vec::with_capacity(num_threads);
@@ -1124,13 +1124,12 @@ fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
         let max_start = s.len() - q_len;
 
         for i in 0..=max_start {
-            if i == 0
+            if (i == 0
                 || s_bytes[i - 1] == b' '
                 || s_bytes[i - 1] == b'-'
                 || s_bytes[i - 1] == b'_'
-                || s_bytes[i - 1] == b'/'
-            {
-                if to_lower_fast(s_bytes[i]) == first_byte {
+                || s_bytes[i - 1] == b'/')
+                && to_lower_fast(s_bytes[i]) == first_byte {
                     let mut is_match = true;
                     for j in 1..q_len {
                         if to_lower_fast(s_bytes[i + j]) != q_bytes[j] {
@@ -1142,7 +1141,6 @@ fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
                         return true;
                     }
                 }
-            }
         }
         false
     } else {

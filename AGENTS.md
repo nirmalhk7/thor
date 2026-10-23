@@ -10,19 +10,20 @@ Thor is a **lighter/faster-than-Chrome** developer browser (fullstack, security,
 > *"A high-performance, ephemeral developer browser where every tab is an isolated experiment and every interaction can become a test, trace, benchmark, finding, or reproducible artifact."*
 
 > **Architectural Principle:**  
-> *"Thor is a Chromium downstream (same product model as Chrome/Brave/Edge): browser chrome + Blink/V8 in one GN/Ninja-built product. Use CDP for developer instrumentation against Thor’s own browser. Use Rust as the Labs sidecar for orchestration, evidence, FeatureEngine, and high-scale load generation."*
+> *"Thor embeds CEF (Chromium Embedded Framework) in its own native browser shell. Ship CEF binaries; do not fetch/build the full Chromium source tree. Rust owns the shell, orchestration, evidence, FeatureEngine, and high-scale load generation. CDP instruments Thor's embedded browser."*
 
 Hard constraints:
 
-1. **User-facing name is always `Thor`** (not `thor`). Crate/module/binary internals: crate `thor`, binary `Thor` (product launcher / Labs) + Chromium-downstream browser binary. Sidecar binary: `thor-labs`.
-2. **Product (Chromium downstream):** One Thor-owned Chromium browser process; many tabs/WebContents. **Do not** use system Google Chrome as the product surface. Build/fetch: see [docs/CHROMIUM_DOWNSTREAM.md](docs/CHROMIUM_DOWNSTREAM.md) and `scripts/{setup_depot_tools,fetch_chromium,build_chromium,run_thor_chromium,bootstrap_chromium_snapshot}.sh`. Branding overlays: `browser/`.
+1. **User-facing name is always `Thor`** (not `thor`). Internals: crate `thor`, binary `Thor`, Labs binary `thor-labs`, and CEF helper subprocesses.
+2. **Product (CEF):** One Thor native shell embeds CEF browsers for tabs, preserving CEF's renderer sandbox and subprocesses. **Do not** use system Google Chrome or a separately visible Chromium window as the product. Full Chromium source builds, branding overlays, and downstream scripts are legacy migration inputs, not the product architecture.
 3. **Legacy dual-window (transitional only):** AppKit shell + CDP to a separate Chromium process (`shell/chromium_shell.rs`). Enable with `THOR_LEGACY_DUAL_WINDOW=1` (or `THOR_DUAL_WINDOW=1`). Not the long-term product. System Chrome discovery requires `THOR_ALLOW_SYSTEM_CHROME=1`.
-4. **Three-Level Isolation Hierarchy** (map onto Chromium Profile / StoragePartition / WebContents — see `browser/isolation/MAPPING.md`):
+4. **Three-Level Isolation Hierarchy** (map onto CEF request contexts and browsers):
    - **Level 1 (Profile)**: Settings, bookmarks, extensions, root CAs, IDE bridge. No global history DB.
-   - **Level 2 (Identity Context)**: Isolated `cookies`, `localStorage`, `IndexedDB`, `ServiceWorkers`, auth tokens (`Admin`, `Standard User`, `Anonymous`, etc.). Disposable Isolated Tabs purge ephemeral identity context on tab close.
+   - **Level 2 (Identity Context)**: Isolated `cookies`, `localStorage`, `IndexedDB`, `ServiceWorkers`, auth tokens (`Admin`, `Standard User`, `Anonymous`, etc.). Logins and site storage persist by default. Explicit disposable identities purge storage after their final tab closes.
    - **Level 3 (Tab)**: Tab-scoped history list, scroll pos, trace buffer, and lifecycle. Wiped clean on tab close / 24h GC.
 5. **Four-Stage Ephemeral Tab Lifecycle**:
-   - `Active` (0–15m foreground) $\rightarrow$ `Frozen` (15m–1h) $\rightarrow$ `Discarded` (1h–24h RAM release) $\rightarrow$ `Expired` ($\ge$24h auto-close & tab history wipe). Prefer Chromium WebContents discard/freeze APIs over remote CDP theater.
+   - `Active` (0–15m background inactivity) $\rightarrow$ `Frozen` (15m–1h) $\rightarrow$ `Discarded` (1h–24h RAM release) $\rightarrow$ `Expired` ($\ge$24h auto-close & tab history wipe). Bind lifecycle to real CEF operations; never report an unperformed operation as successful.
+   - Collections, environments, scenarios, findings, and tool results persist independently of browsing. Passive browsing captures persist only after explicit promotion. Closing a tab deletes unsaved history/captures; crash recovery never restores browsing history.
 6. **Cmd+K** = Sites menu (bookmarks + active-tab history + open tabs). **Cmd+⇧K** = Toolbox menu → **Developer Control Center** (144 engineer features across 6 domain lenses) plus product specialist tools.
 7. **No Fake/Stub UI**: Prefer wiring real Rust engines via **`AppState::global()`** — never mock RNG or pretend crypto. Prefer deepen/capture wiring or honest `Analyzer (offline)` naming over Lab/Workbench theater. Do not claim CEF/Electron as “built like Chrome.”
 8. **Privileged lab IPC** (Locust public, intercept, CA install, SSRF/fixation mutate, live stub/SSE labs) enforced in Rust (`net/consent`, `shell/ipc_dispatch`).
@@ -80,17 +81,15 @@ benches/feature_sla_bench.rs
 
 ## Runtime model
 
-### Product (default)
+### Product target (CEF migration)
 
-1. Discover Thor-owned Chromium (`THOR_CHROMIUM_PATH`, Frameworks, `ChromiumCache`, `$THOR_CHROMIUM_SRC/src/out/Thor`).
-2. Spawn that binary with Thor user-data-dir + `--remote-debugging-port` (self-CDP).
-3. Attach Rust Labs (engine coordinator + MCP). UI is Chromium’s browser chrome — not a second tao content window.
+1. Load bundled CEF and dispatch helper subprocesses before initializing the main application.
+2. Embed CEF tab views in Thor's native shell; use isolated request contexts for identities.
+3. Supervise Labs/MCP; a tool failure must not terminate browsing. Existing Chromium launcher and dual-window paths are transitional only.
 
 ```bash
-./scripts/bootstrap_chromium_snapshot.sh   # owned binary without full source fetch
-./scripts/run_thor_chromium.sh
-cargo run --bin Thor                       # product launcher
-THOR_SELF_CDP_URL=http://127.0.0.1:9222 cargo run --bin thor-labs
+# Do not run Chromium fetch/build/bootstrap scripts for the CEF product.
+# Reserve the final product build until implementation and qlty checks finish.
 ```
 
 ### Legacy dual-window (transitional)
@@ -134,4 +133,4 @@ Live Chromium smoke test is `#[ignore]` (`live_launch_smoke`) — needs Thor-own
 - After shell/UI HTML changes: verify omnibox + action buttons still clickable.
 - Prefer real CDP/HTTP behavior over alerts and simulated metrics.
 - Prefer deepen existing `FeatureId`s + capture loops over minting new IDs; keep `FeatureId::ALL.len() == 144` unless intentionally expanding the registry.
-- Chromium UI changes: single agent owns `chrome/browser` / `browser/` overlays — no parallel UI edits.
+- CEF shell/UI changes: single owner per surface; preserve native omnibox/action hit-testing.

@@ -285,6 +285,12 @@ pub struct MetricsCollector {
     browser_vitals: Mutex<Option<BrowserMetrics>>,
 }
 
+impl Default for MetricsCollector {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl MetricsCollector {
     pub fn new() -> Self {
         let mut buckets: [AtomicUsize; HISTOGRAM_BUCKETS] = unsafe { std::mem::zeroed() };

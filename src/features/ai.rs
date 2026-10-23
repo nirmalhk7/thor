@@ -1268,9 +1268,7 @@ impl AiEngine {
             }
         }
 
-        by_index
-            .into_iter()
-            .map(|(_, p)| ToolCallEvent {
+        by_index.into_values().map(|p| ToolCallEvent {
                 name: if p.name.is_empty() {
                     "unknown".into()
                 } else {
@@ -2037,11 +2035,10 @@ fn validate_json_schema_min(
                 errs.push(format!("{path}: expected number"));
             }
         }
-        "boolean" => {
-            if !value.is_boolean() {
+        "boolean"
+            if !value.is_boolean() => {
                 errs.push(format!("{path}: expected boolean"));
             }
-        }
         _ => {}
     }
     errs

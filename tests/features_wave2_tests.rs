@@ -308,7 +308,7 @@ fn test_orchestrator_invokes_qa_wave2_slugs() {
         }),
     )
     .expect("pack");
-    assert!(pack["result"]["pack_digest"].as_str().unwrap().len() > 0);
+    assert!(!pack["result"]["pack_digest"].as_str().unwrap().is_empty());
 
     let a11y = FeatureOrchestrator::invoke(
         "a11y-test-gen",

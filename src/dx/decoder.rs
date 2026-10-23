@@ -109,11 +109,11 @@ impl DecoderStudio {
     }
 
     fn is_hex(s: &str) -> bool {
-        !s.is_empty() && s.len() % 2 == 0 && s.bytes().all(|b| b.is_ascii_hexdigit())
+        !s.is_empty() && s.len().is_multiple_of(2) && s.bytes().all(|b| b.is_ascii_hexdigit())
     }
 
     fn is_base64(s: &str) -> bool {
-        if s.is_empty() || s.len() % 4 != 0 {
+        if s.is_empty() || !s.len().is_multiple_of(4) {
             return false;
         }
         s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')

@@ -23,6 +23,12 @@ pub struct ResourceBudgetController {
     truncated_count: usize,
 }
 
+impl Default for ResourceBudgetController {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ResourceBudgetController {
     pub fn new() -> Self {
         Self { dropped_count: 0, truncated_count: 0 }

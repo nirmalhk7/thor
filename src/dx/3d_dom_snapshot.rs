@@ -82,7 +82,6 @@ impl DomSnapshot3D {
     /// Renders the 3D layout tree frame
     pub fn render_frame(&self) {
         if !self.is_active {
-            return;
         }
         // wgpu render pass executes over self.layers
     }

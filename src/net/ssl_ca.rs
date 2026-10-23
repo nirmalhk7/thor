@@ -117,7 +117,7 @@ impl SslManager {
         {
             // Register with macOS Keychain
             Command::new("security")
-                .args(&[
+                .args([
                     "add-trusted-cert",
                     "-d",
                     "-r",

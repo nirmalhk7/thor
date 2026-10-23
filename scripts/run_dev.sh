@@ -5,19 +5,8 @@ echo "============================================================"
 echo "⚡ Starting Thor Developer Browser in Auto-Reload Dev Mode"
 echo "============================================================"
 
-# Prefer Thor-owned Chromium (snapshot or source build). Legacy dual-window:
-#   THOR_LEGACY_DUAL_WINDOW=1 ./scripts/run_dev.sh
-
-CACHE_EXE="${HOME}/Library/Application Support/Thor/ChromiumCache/Chromium.app/Contents/MacOS/Chromium"
-if [[ ! -x "$CACHE_EXE" ]] \
-   && [[ -z "${THOR_CHROMIUM_PATH:-}" ]] \
-   && [[ "${THOR_LEGACY_DUAL_WINDOW:-}" != "1" ]]; then
-  echo "→ No owned Chromium cache — bootstrapping snapshot..."
-  "$(cd "$(dirname "$0")" && pwd)/bootstrap_chromium_snapshot.sh" || true
-fi
-
-# Disable git hook conflicts if present
-git config core.hooksPath /dev/null || true
+# Thor loads its embedded CEF framework from the app bundle or CEF_PATH.
+# Development requires a matching CEF distribution; this script never fetches Chromium.
 
 # Run with cargo-watch to automatically recompile & rerun on code changes
 if command -v cargo-watch &> /dev/null; then

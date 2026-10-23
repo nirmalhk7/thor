@@ -1,0 +1,27 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API — Thor</title><link rel="stylesheet" href="/workbench.css"><script defer src="/workbench.js"></script></head>
+<body>
+<aside aria-label="Saved API requests">
+  <h1>API</h1>
+  <label for="project">Project</label><select id="project"><option value="">Select a project</option></select>
+  <form id="project-form"><label class="sr-only" for="project-name">New project name</label><input id="project-name" placeholder="New project name" required maxlength="120"><button type="submit">Create</button></form>
+  <div class="section-label">Saved requests</div><nav id="requests" aria-label="Requests"><p class="muted">Create a project to keep requests.</p></nav>
+  <button id="new-request" class="quiet">New request</button>
+  <p class="aside-note">Requests persist. Browsing history stays separate.</p>
+</aside>
+<main>
+  <header><div><h2>Request</h2><p class="muted">Send, inspect, and save a real HTTP exchange.</p></div><span id="dirty" class="muted">Unsaved</span></header>
+  <form id="request-form">
+    <div class="request-line"><label class="sr-only" for="method">HTTP method</label><input id="method" value="GET" aria-label="HTTP method" spellcheck="false" maxlength="24"><label class="sr-only" for="url">Request URL</label><input id="url" placeholder="https://api.example.com/resource" required spellcheck="false"><button id="send" type="submit">Send <kbd>⌘ ↵</kbd></button><button id="cancel" type="button" class="quiet" disabled>Cancel</button></div>
+    <div class="editor-tabs" role="tablist" aria-label="Request options">
+      <button type="button" id="tab-params" role="tab" aria-selected="true" aria-controls="panel-params" data-panel="params">Params</button><button type="button" id="tab-headers" role="tab" aria-selected="false" aria-controls="panel-headers" data-panel="headers">Headers</button><button type="button" id="tab-body" role="tab" aria-selected="false" aria-controls="panel-body" data-panel="body">Body</button><button type="button" id="tab-auth" role="tab" aria-selected="false" aria-controls="panel-auth" data-panel="auth">Auth</button><button type="button" id="tab-variables" role="tab" aria-selected="false" aria-controls="panel-variables" data-panel="variables">Variables</button>
+    </div>
+    <section id="panel-params" class="editor-panel" role="tabpanel" aria-labelledby="tab-params"><label for="params">Query parameters</label><p class="hint">One name=value per line. Repeated names stay separate.</p><textarea id="params" spellcheck="false" placeholder="limit=20&#10;tag=active"></textarea></section>
+    <section id="panel-headers" class="editor-panel" role="tabpanel" aria-labelledby="tab-headers" hidden><label for="headers">Request headers</label><p class="hint">One Name: value per line. Use Auth for saved credentials.</p><textarea id="headers" spellcheck="false" placeholder="Accept: application/json"></textarea></section>
+    <section id="panel-body" class="editor-panel" role="tabpanel" aria-labelledby="tab-body" hidden><label for="body-type">Body format</label><select id="body-type"><option value="empty">Empty</option><option value="json">JSON</option><option value="text">Text</option><option value="form">Form (name=value per line)</option><option value="binary">Binary (base64)</option></select><label class="sr-only" for="body">Request body</label><textarea id="body" spellcheck="false" placeholder="Request body" disabled></textarea></section>
+    <section id="panel-auth" class="editor-panel" role="tabpanel" aria-labelledby="tab-auth" hidden><label for="auth-type">Authentication</label><select id="auth-type"><option value="none">None</option><option value="bearer">Bearer token</option></select><label for="token">Token</label><input id="token" type="password" autocomplete="off" disabled><label class="checkbox"><input id="persist-token" type="checkbox">Store in macOS Keychain</label><p id="auth-status" class="hint">Temporary tokens remain in memory for this session.</p></section>
+    <section id="panel-variables" class="editor-panel" role="tabpanel" aria-labelledby="tab-variables" hidden><label for="variables">Run variables (JSON object of strings)</label><p class="hint">Use {{name}} in URL, parameters, headers, or body. Values here are not saved.</p><textarea id="variables" spellcheck="false">{}</textarea></section>
+  </form>
+  <div class="save-line"><label class="sr-only" for="request-title">Request name</label><input id="request-title" placeholder="Request name" maxlength="160"><button id="save" class="quiet">Save request</button><span id="save-status" class="muted" role="status"></span></div>
+  <section class="response" aria-labelledby="response-heading"><div class="response-bar"><h2 id="response-heading">Response</h2><span id="response-summary" class="muted">No request sent</span><button id="copy-response" class="quiet" disabled>Copy body</button></div><p id="message" role="status" aria-live="polite">Enter a URL and send a request.</p><details id="response-headers" hidden><summary>Response headers</summary><pre id="response-header-text"></pre></details><pre id="response-body" tabindex="0" aria-label="Response body"></pre></section>
+</main></body></html>
