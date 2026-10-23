@@ -29,7 +29,8 @@ jobs:
       - name: Check all Rust targets
         run: cargo check --locked --workspace --all-targets
       - name: Run all Rust tests
-        run: cargo test --locked --workspace
+        # Several tests mutate process-wide THOR_DATA_DIR and AppState.
+        run: cargo test --locked --workspace -- --test-threads=1
 
   release:
     name: Release CEF browser (main only)

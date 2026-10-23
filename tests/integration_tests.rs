@@ -842,8 +842,7 @@ mod tests {
     #[test]
     fn test_thor_load_engine_integration() {
         use thor::load::{
-            BrowserRunner, BrowserRunnerConfig, ProtocolRunner, RunnerType, ScenarioCompiler,
-            ScenarioStep, ThorScenario,
+            ProtocolRunner, RunnerType, ScenarioCompiler, ScenarioStep, ThorScenario,
         };
 
         // Scenario creation & compilation
@@ -877,8 +876,17 @@ mod tests {
             .expect("protocol runner execution");
         assert!(proto_metrics.total_requests > 0);
         assert!(proto_metrics.avg_latency_ms >= 0.0);
+    }
 
-        // Browser Runner execution (capturing Web Vitals)
+    // Legacy browser runner launches a separate Chromium process. Run this
+    // probe only when a Thor-owned browser executable is explicitly available.
+    #[test]
+    #[ignore = "requires a Thor-owned legacy Chromium executable"]
+    fn test_legacy_browser_runner_web_vitals() {
+        use thor::load::{
+            BrowserRunner, BrowserRunnerConfig, RunnerType, ScenarioStep, ThorScenario,
+        };
+
         let browser_runner = BrowserRunner::new(BrowserRunnerConfig::default());
         let browser_scenario = ThorScenario::new("Web Vitals Probe", "https://example.com")
             .with_runner(RunnerType::Browser)
@@ -951,5 +959,3 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
-
-
