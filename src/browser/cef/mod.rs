@@ -8,24 +8,36 @@ use std::path::{Path, PathBuf};
 
 use ::cef::{args::Args, *};
 
+#[cfg(target_os = "macos")]
+const KEYCHAIN_SERVICE_NAME: &str = "Thor Safe Storage";
+#[cfg(target_os = "macos")]
+const KEYCHAIN_ACCOUNT_NAME: &str = "Thor";
+
 /// Dispatch subprocesses before initializing logging, Tokio, or application UI.
 pub fn run() -> anyhow::Result<()> {
     let executable = std::env::current_exe()?;
     let helper = std::env::args().any(|arg| arg.starts_with("--type="));
-    let _framework = load_framework(&executable, helper)?;
-    let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
     let args = Args::new();
-    #[cfg(target_os = "macos")]
-    if !helper {
-        mac::initialize()?;
-    }
+    // CEF requires helper sandbox initialization before loading the framework.
+    // Declaring it first also keeps the sandbox alive until framework unload.
     #[cfg(target_os = "macos")]
     let _sandbox = helper.then(|| {
         let mut sandbox = sandbox::Sandbox::new();
         sandbox.initialize(args.as_main_args());
         sandbox
     });
-    let status = execute_process(Some(args.as_main_args()), None, std::ptr::null_mut());
+    let _framework = load_framework(&executable, helper)?;
+    let _ = api_hash(sys::CEF_API_VERSION_LAST, 0);
+    #[cfg(target_os = "macos")]
+    if !helper {
+        mac::initialize()?;
+    }
+    let mut app = host::ThorApp::new();
+    let status = execute_process(
+        Some(args.as_main_args()),
+        Some(&mut app),
+        std::ptr::null_mut(),
+    );
     if status >= 0 {
         if status != 0 {
             anyhow::bail!("CEF subprocess exited with {status}");
@@ -46,10 +58,13 @@ pub fn run() -> anyhow::Result<()> {
         persist_session_cookies: 1,
         log_severity: LogSeverity::DISABLE,
         user_agent_product: CefString::from("Thor"),
-        background_color: 0xff121318,
+        background_color: 0xff151a20,
+        #[cfg(target_os = "macos")]
+        keychain_service_name: CefString::from(KEYCHAIN_SERVICE_NAME),
+        #[cfg(target_os = "macos")]
+        keychain_account_name: CefString::from(KEYCHAIN_ACCOUNT_NAME),
         ..Default::default()
     };
-    let mut app = host::ThorApp::new();
     if initialize(
         Some(args.as_main_args()),
         Some(&settings),

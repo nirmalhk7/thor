@@ -38,20 +38,35 @@ pub enum Eip55Status {
 pub fn keccak256(data: &[u8]) -> [u8; 32] {
     const ROUNDS: usize = 24;
     const RC: [u64; ROUNDS] = [
-        0x0000000000000001, 0x0000000000008082, 0x800000000000808a, 0x8000000080008000,
-        0x000000000000808b, 0x0000000080000001, 0x8000000080008081, 0x8000000000008009,
-        0x000000000000008a, 0x0000000000000088, 0x0000000080008009, 0x000000008000000a,
-        0x000000008000808b, 0x800000000000008b, 0x8000000000008089, 0x8000000000008003,
-        0x8000000000008002, 0x8000000000000080, 0x000000000000800a, 0x800000008000000a,
-        0x8000000080008081, 0x8000000000008080, 0x0000000080000001, 0x8000000080008008,
+        0x0000000000000001,
+        0x0000000000008082,
+        0x800000000000808a,
+        0x8000000080008000,
+        0x000000000000808b,
+        0x0000000080000001,
+        0x8000000080008081,
+        0x8000000000008009,
+        0x000000000000008a,
+        0x0000000000000088,
+        0x0000000080008009,
+        0x000000008000000a,
+        0x000000008000808b,
+        0x800000000000008b,
+        0x8000000000008089,
+        0x8000000000008003,
+        0x8000000000008002,
+        0x8000000000000080,
+        0x000000000000800a,
+        0x800000008000000a,
+        0x8000000080008081,
+        0x8000000000008080,
+        0x0000000080000001,
+        0x8000000080008008,
     ];
 
     const R: [u32; 25] = [
-        0, 1, 62, 28, 27,
-        36, 44, 6, 55, 20,
-        3, 10, 43, 25, 39,
-        41, 45, 15, 21, 8,
-        18, 2, 61, 56, 14,
+        0, 1, 62, 28, 27, 36, 44, 6, 55, 20, 3, 10, 43, 25, 39, 41, 45, 15, 21, 8, 18, 2, 61, 56,
+        14,
     ];
 
     let mut state = [0u64; 25];
@@ -72,7 +87,7 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
         }
 
         // Keccak-f[1600] permutation
-        for round in 0..ROUNDS {
+        for rc in RC.iter().take(ROUNDS) {
             // Theta
             let mut c = [0u64; 5];
             for x in 0..5 {
@@ -102,12 +117,13 @@ pub fn keccak256(data: &[u8]) -> [u8; 32] {
             // Chi
             for x in 0..5 {
                 for y in 0..5 {
-                    state[x + y * 5] = b[x + y * 5] ^ ((!b[((x + 1) % 5) + y * 5]) & b[((x + 2) % 5) + y * 5]);
+                    state[x + y * 5] =
+                        b[x + y * 5] ^ ((!b[((x + 1) % 5) + y * 5]) & b[((x + 2) % 5) + y * 5]);
                 }
             }
 
             // Iota
-            state[0] ^= RC[round];
+            state[0] ^= *rc;
         }
     }
 
@@ -143,7 +159,10 @@ impl Web3Inspector {
 
     /// Decode 4-byte ABI selector from raw EVM calldata hex (e.g. `0xa9059cbb...`)
     pub fn decode_abi_selector(calldata_hex: &str) -> Option<AbiSelectorMatch> {
-        let clean = calldata_hex.trim().strip_prefix("0x").unwrap_or(calldata_hex.trim());
+        let clean = calldata_hex
+            .trim()
+            .strip_prefix("0x")
+            .unwrap_or(calldata_hex.trim());
         if clean.len() < 8 || !clean.bytes().all(|b| b.is_ascii_hexdigit()) {
             return None;
         }
@@ -151,17 +170,46 @@ impl Web3Inspector {
         let selector = format!("0x{}", clean[..8].to_lowercase());
         let data = &clean[8..];
 
-        let (func_name, sig_owned, param_defs): (&str, String, &[(&str, &str)]) = match selector.as_str() {
-            "0xa9059cbb" => ("transfer", "transfer(address,uint256)".into(), &[("to", "address"), ("value", "uint256")]),
-            "0x095ea7b3" => ("approve", "approve(address,uint256)".into(), &[("spender", "address"), ("value", "uint256")]),
-            "0x70a08231" => ("balanceOf", "balanceOf(address)".into(), &[("account", "address")]),
-            "0x23b872dd" => ("transferFrom", "transferFrom(address,address,uint256)".into(), &[("from", "address"), ("to", "address"), ("value", "uint256")]),
-            "0x38ed1739" => ("swapExactTokensForTokens", "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)".into(), &[("amountIn", "uint256"), ("amountOutMin", "uint256")]),
-            "0x18c974f0" => ("swapExactETHForTokens", "swapExactETHForTokens(uint256,address[],address,uint256)".into(), &[("amountOutMin", "uint256")]),
-            "0xd058711f" => ("deposit", "deposit()".into(), &[]),
-            "0x2e1a7d4d" => ("withdraw", "withdraw(uint256)".into(), &[("wad", "uint256")]),
-            _ => ("unknown", format!("{}(bytes)", selector), &[]),
-        };
+        let (func_name, sig_owned, param_defs): (&str, String, &[(&str, &str)]) =
+            match selector.as_str() {
+                "0xa9059cbb" => (
+                    "transfer",
+                    "transfer(address,uint256)".into(),
+                    &[("to", "address"), ("value", "uint256")],
+                ),
+                "0x095ea7b3" => (
+                    "approve",
+                    "approve(address,uint256)".into(),
+                    &[("spender", "address"), ("value", "uint256")],
+                ),
+                "0x70a08231" => (
+                    "balanceOf",
+                    "balanceOf(address)".into(),
+                    &[("account", "address")],
+                ),
+                "0x23b872dd" => (
+                    "transferFrom",
+                    "transferFrom(address,address,uint256)".into(),
+                    &[("from", "address"), ("to", "address"), ("value", "uint256")],
+                ),
+                "0x38ed1739" => (
+                    "swapExactTokensForTokens",
+                    "swapExactTokensForTokens(uint256,uint256,address[],address,uint256)".into(),
+                    &[("amountIn", "uint256"), ("amountOutMin", "uint256")],
+                ),
+                "0x18c974f0" => (
+                    "swapExactETHForTokens",
+                    "swapExactETHForTokens(uint256,address[],address,uint256)".into(),
+                    &[("amountOutMin", "uint256")],
+                ),
+                "0xd058711f" => ("deposit", "deposit()".into(), &[]),
+                "0x2e1a7d4d" => (
+                    "withdraw",
+                    "withdraw(uint256)".into(),
+                    &[("wad", "uint256")],
+                ),
+                _ => ("unknown", format!("{}(bytes)", selector), &[]),
+            };
 
         let mut params = Vec::new();
         for (i, (p_name, p_type)) in param_defs.iter().enumerate() {
@@ -206,7 +254,11 @@ impl Web3Inspector {
                 expected.push(c);
             } else {
                 let byte = hash[i / 2];
-                let hash_nibble = if i % 2 == 0 { (byte >> 4) & 0x0F } else { byte & 0x0F };
+                let hash_nibble = if i % 2 == 0 {
+                    (byte >> 4) & 0x0F
+                } else {
+                    byte & 0x0F
+                };
                 if hash_nibble >= 8 {
                     expected.push(c.to_ascii_uppercase());
                 } else {
@@ -215,7 +267,11 @@ impl Web3Inspector {
             }
         }
 
-        let full_input = if address.trim().starts_with("0x") { address.trim().to_string() } else { format!("0x{}", clean) };
+        let full_input = if address.trim().starts_with("0x") {
+            address.trim().to_string()
+        } else {
+            format!("0x{}", clean)
+        };
         if full_input == expected {
             Eip55Status::Valid
         } else {
@@ -257,14 +313,20 @@ mod tests {
         let decoded = Web3Inspector::decode_abi_selector(calldata).unwrap();
         assert_eq!(decoded.selector, "0xa9059cbb");
         assert_eq!(decoded.function_name, "transfer");
-        assert_eq!(decoded.params[0].value_raw, "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed");
+        assert_eq!(
+            decoded.params[0].value_raw,
+            "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed"
+        );
     }
 
     #[test]
     fn test_eip55_checksum_validation() {
         // Known valid EIP-55 address
         let addr = "0x5aAeb6053F3E94C9b9A09f33669435E7Ef1BeAed";
-        assert_eq!(Web3Inspector::validate_eip55_checksum(addr), Eip55Status::Valid);
+        assert_eq!(
+            Web3Inspector::validate_eip55_checksum(addr),
+            Eip55Status::Valid
+        );
 
         // Invalid checksum (all lowercase when should have uppercase chars)
         let invalid_addr = "0x5aaeb6053f3e94c9b9a09f33669435e7ef1beaed";

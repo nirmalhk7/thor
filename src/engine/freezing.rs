@@ -1,17 +1,14 @@
-//! Process / page freeze hooks for Thor (OS signals + CDP lifecycle).
+//! Process / page freeze hooks retained for the legacy CDP runtime.
 //!
-//! Product (Chromium downstream) should prefer in-process WebContents discard/freeze
-//! APIs (see `browser/isolation/MAPPING.md`). CDP lifecycle below is the self-CDP /
-//! legacy dual-window bridge until those hooks are wired in `chrome/`.
+//! The embedded CEF host does not report a freeze or discard operation through
+//! this module. These helpers must not be presented as CEF lifecycle support.
 
 use chromiumoxide::cdp::browser_protocol::page::SetWebLifecycleStateParams;
 use chromiumoxide::Page;
 
 use super::chromium_runtime::ChromiumResult;
 
-/// Preferred Chromium-downstream lifecycle operations (documentation + bridge names).
-/// Implementations call into browser process APIs once Thor chrome is in-tree; until
-/// then [`CdpPageFreezer`] provides the self-CDP equivalent.
+/// Legacy Chromium lifecycle operation names retained for migration compatibility.
 pub struct ChromiumLifecycleHooks;
 
 impl ChromiumLifecycleHooks {
@@ -156,7 +153,10 @@ impl TabLifecycleManager {
         if Self::can_transition(current, next) {
             Ok(next)
         } else {
-            Err(format!("Invalid 4-Stage Lifecycle transition from {:?} to {:?}", current, next))
+            Err(format!(
+                "Invalid 4-Stage Lifecycle transition from {:?} to {:?}",
+                current, next
+            ))
         }
     }
 }
@@ -176,13 +176,29 @@ mod tests {
 
     #[test]
     fn test_four_stage_lifecycle_transitions() {
-        assert!(TabLifecycleManager::can_transition(TabLifecycle::Active, TabLifecycle::Frozen));
-        assert!(TabLifecycleManager::can_transition(TabLifecycle::Frozen, TabLifecycle::Discarded));
-        assert!(TabLifecycleManager::can_transition(TabLifecycle::Discarded, TabLifecycle::Expired));
-        assert!(TabLifecycleManager::can_transition(TabLifecycle::Discarded, TabLifecycle::Active));
-        assert!(!TabLifecycleManager::can_transition(TabLifecycle::Expired, TabLifecycle::Active));
+        assert!(TabLifecycleManager::can_transition(
+            TabLifecycle::Active,
+            TabLifecycle::Frozen
+        ));
+        assert!(TabLifecycleManager::can_transition(
+            TabLifecycle::Frozen,
+            TabLifecycle::Discarded
+        ));
+        assert!(TabLifecycleManager::can_transition(
+            TabLifecycle::Discarded,
+            TabLifecycle::Expired
+        ));
+        assert!(TabLifecycleManager::can_transition(
+            TabLifecycle::Discarded,
+            TabLifecycle::Active
+        ));
+        assert!(!TabLifecycleManager::can_transition(
+            TabLifecycle::Expired,
+            TabLifecycle::Active
+        ));
 
-        let state = TabLifecycleManager::transition(TabLifecycle::Active, TabLifecycle::Frozen).unwrap();
+        let state =
+            TabLifecycleManager::transition(TabLifecycle::Active, TabLifecycle::Frozen).unwrap();
         assert_eq!(state, TabLifecycle::Frozen);
     }
 }
@@ -192,4 +208,3 @@ pub struct RestoreSnapshot {
     pub url: String,
     pub scroll_y: f64,
 }
-

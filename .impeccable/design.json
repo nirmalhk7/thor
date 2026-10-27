@@ -1,0 +1,227 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-10-26T07:20:10.073803+00:00",
+  "title": "Design System: Thor",
+  "extensions": {
+    "colorMeta": {
+      "accent": {
+        "role": "primary",
+        "displayName": "Ice Blue"
+      },
+      "accent-hover": {
+        "role": "primary",
+        "displayName": "Pale Ice"
+      },
+      "api-action": {
+        "role": "secondary",
+        "displayName": "Deep Request Blue"
+      },
+      "api-action-hover": {
+        "role": "secondary",
+        "displayName": "Request Blue Hover"
+      },
+      "api-action-border": {
+        "role": "secondary",
+        "displayName": "Request Blue Border"
+      },
+      "graphite": {
+        "role": "neutral",
+        "displayName": "Graphite"
+      },
+      "inset": {
+        "role": "neutral",
+        "displayName": "Inset Graphite"
+      },
+      "raised": {
+        "role": "neutral",
+        "displayName": "Raised Graphite"
+      },
+      "separator": {
+        "role": "neutral",
+        "displayName": "Steel Separator"
+      },
+      "text": {
+        "role": "neutral",
+        "displayName": "Near White"
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted Steel"
+      },
+      "error": {
+        "role": "tertiary",
+        "displayName": "Soft Error Rose"
+      }
+    },
+    "typographyMeta": {
+      "headline": {
+        "displayName": "Home Heading",
+        "purpose": "Home introduction; compact system heading, not a separate display face."
+      },
+      "body": {
+        "displayName": "Interface Body",
+        "purpose": "HTML interface text."
+      },
+      "mono": {
+        "displayName": "Security Data",
+        "purpose": "Security analysis editors and results; API line heights remain surface specific."
+      },
+      "native-menu-caption": {
+        "displayName": "Command Caption",
+        "purpose": "Native Sites and Toolbox heading."
+      },
+      "native-menu-search": {
+        "displayName": "Command Search",
+        "purpose": "Native command-menu text input."
+      },
+      "native-menu-row": {
+        "displayName": "Command Result",
+        "purpose": "Native result labels; geometry stays owned by CEF."
+      }
+    },
+    "shadows": [],
+    "motion": [
+      {
+        "name": "workspace-state",
+        "value": "150ms ease-out",
+        "purpose": "Background, arrow color, and arrow transform only with no reduced-motion preference."
+      },
+      {
+        "name": "api-state",
+        "value": "120ms ease-out",
+        "purpose": "API button/field background and border only with no reduced-motion preference."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "workspace-narrow",
+        "value": "720px"
+      },
+      {
+        "name": "api-compact",
+        "value": "900px"
+      },
+      {
+        "name": "api-stacked",
+        "value": "600px"
+      },
+      {
+        "name": "control-center-compact",
+        "value": "800px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Analysis Action",
+      "kind": "button",
+      "refersTo": "button-analyze",
+      "description": "Security analysis action; workspace focus offset is preserved.",
+      "html": "<button class=\"ds-analyze\">Analyze headers</button>",
+      "css": ".ds-analyze{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:var(--accent,#90b8f8);color:var(--inset,#101419);padding:9px 18px;border:0;border-radius:5px;font-weight:600;cursor:pointer}.ds-analyze:hover{background:#b4d0fc}.ds-analyze:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}.ds-analyze:disabled{opacity:.5;cursor:default}"
+    },
+    {
+      "name": "API Action",
+      "kind": "button",
+      "refersTo": "button-api",
+      "description": "Deep blue API action, with the source minimum height.",
+      "html": "<button class=\"ds-send\">Send</button>",
+      "css": ".ds-send{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:#244d7e;color:var(--text,#edf1f5);border:1px solid #396b9f;border-radius:6px;padding:8px 12px;min-height:34px;font-weight:500;cursor:pointer}.ds-send:hover{background:#2f6097}.ds-send:active{filter:brightness(.9)}.ds-send:disabled{opacity:.5;cursor:default}.ds-analyze:focus-visible,.ds-quiet:focus-visible,.ds-send:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:2px}@media(prefers-reduced-motion:no-preference){.ds-send{transition:background-color 120ms ease-out,border-color 120ms ease-out}}"
+    },
+    {
+      "name": "Quiet API Action",
+      "kind": "button",
+      "refersTo": "button-quiet",
+      "description": "Secondary action with a transparent fill and fine border.",
+      "html": "<button class=\"ds-quiet\">Save request</button>",
+      "css": ".ds-quiet{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;background:transparent;color:var(--text,#edf1f5);border:1px solid var(--line,#34404d);border-radius:6px;padding:8px 12px;min-height:34px;font-weight:500;cursor:pointer}.ds-quiet:hover{background:var(--raised,#202831)}.ds-quiet:active{filter:brightness(.9)}.ds-quiet:disabled{opacity:.5;cursor:default}.ds-analyze:focus-visible,.ds-quiet:focus-visible,.ds-send:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:2px}@media(prefers-reduced-motion:no-preference){.ds-quiet{transition:background-color 120ms ease-out,border-color 120ms ease-out}}"
+    },
+    {
+      "name": "Destination Field",
+      "kind": "input",
+      "refersTo": "destination",
+      "description": "Home address input container; sample omits navigation behavior.",
+      "html": "<form class=\"ds-destination\"><input aria-label=\"Website address\" placeholder=\"Enter a URL or localhost address\"><button type=\"button\" aria-label=\"Open website\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14m-5-5 5 5-5 5\"/></svg></button></form>",
+      "css": ".ds-destination{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;display:flex;align-items:center;gap:16px;background:var(--inset,#101419);border:1px solid var(--line,#34404d);border-radius:8px;padding:8px 10px 8px 18px;color:var(--text,#edf1f5)}.ds-destination:focus-within{border-color:var(--accent,#90b8f8)}.ds-destination input{font:inherit;font-size:14px;width:100%;min-width:0;height:36px;border:0;outline:none;background:transparent;color:inherit;caret-color:var(--accent,#90b8f8)}.ds-destination input::placeholder{color:var(--muted,#a6b0bd);opacity:1}.ds-destination button{border:0;background:var(--raised,#202831);border-radius:5px;width:36px;height:36px;color:var(--accent,#90b8f8);display:grid;place-items:center;cursor:pointer}.ds-destination button:hover{background:#303c4a}.ds-destination button:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}.ds-destination svg{width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round}"
+    },
+    {
+      "name": "Analysis Field",
+      "kind": "input",
+      "refersTo": "analysis-field",
+      "description": "Monospace multiline editor for pasted analysis inputs.",
+      "html": "<textarea class=\"ds-analysis-field\" aria-label=\"Response headers\" placeholder=\"Paste response headers, one Name: value per line.\"></textarea>",
+      "css": ".ds-analysis-field{width:100%;min-height:180px;padding:14px;background:var(--inset,#101419);color:var(--text,#edf1f5);border:1px solid var(--line,#34404d);border-radius:6px;resize:vertical;font:12px/1.7 ui-monospace,SFMono-Regular,Consolas,monospace;caret-color:var(--accent,#90b8f8)}.ds-analysis-field::placeholder{color:var(--muted,#a6b0bd);opacity:1}.ds-analysis-field:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}"
+    },
+    {
+      "name": "Workspace Navigation",
+      "kind": "nav",
+      "refersTo": "workspace-nav",
+      "description": "Muted links with raised hover and blue current-page state.",
+      "html": "<nav class=\"ds-workspace-nav\" aria-label=\"Workspace\"><a href=\"/api\">API</a><a href=\"/security\" aria-current=\"page\">Security</a></nav>",
+      "css": ".ds-workspace-nav{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;display:flex;gap:6px}.ds-workspace-nav a{padding:6px 12px;color:var(--muted,#a6b0bd);border-radius:5px;text-decoration:none}.ds-workspace-nav a:hover{background:var(--raised,#202831);color:var(--text,#edf1f5)}.ds-workspace-nav a[aria-current=page]{background:var(--raised,#202831);color:var(--accent,#90b8f8)}.ds-workspace-nav a:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}"
+    },
+    {
+      "name": "Workflow Row",
+      "kind": "custom",
+      "refersTo": "workflow-row",
+      "description": "Text-led home destination with a visible trailing arrow and state motion.",
+      "html": "<a class=\"ds-workflow\" href=\"/api\"><svg viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"m8 5-6 7 6 7m8-14 6 7-6 7m-3-16-2 18\"/></svg><div><h2>API workspace</h2><p>Compose requests, inspect responses, and keep your work in projects.</p></div><svg class=\"ds-arrow\" viewBox=\"0 0 24 24\" aria-hidden=\"true\"><path d=\"M5 12h14m-5-5 5 5-5 5\"/></svg></a>",
+      "css": ".ds-workflow{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;display:flex;align-items:center;gap:20px;min-height:105px;padding:22px 8px;border-bottom:1px solid var(--line,#34404d);color:var(--text,#edf1f5);text-decoration:none}.ds-workflow h2{font-size:15px;font-weight:500;margin:0}.ds-workflow p{color:var(--muted,#a6b0bd);margin:6px 0 0;max-width:52ch}.ds-workflow svg{width:24px;height:24px;color:var(--accent,#90b8f8);fill:none;stroke:currentColor;stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round;flex:none}.ds-workflow .ds-arrow{margin-left:auto;color:var(--muted,#a6b0bd);width:18px;height:20px}.ds-workflow:hover,.ds-workflow:focus-visible{background:var(--raised,#202831)}.ds-workflow:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}.ds-workflow:hover .ds-arrow,.ds-workflow:focus-visible .ds-arrow{color:var(--accent,#90b8f8);transform:translateX(3px)}@media(prefers-reduced-motion:no-preference){.ds-workflow{transition:background-color 150ms ease-out}.ds-workflow .ds-arrow{transition:transform 150ms ease-out,color 150ms ease-out}}@media(max-width:720px){.ds-workflow{gap:16px}}"
+    },
+    {
+      "name": "Feature Search",
+      "kind": "input",
+      "refersTo": "feature-search",
+      "description": "Control Center registry filter with explicit readable placeholder.",
+      "html": "<input class=\"ds-feature-search\" type=\"search\" aria-label=\"Find a feature\" placeholder=\"Search name, domain, or slug\">",
+      "css": ".ds-feature-search{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;width:100%;padding:10px 12px;border:1px solid var(--line,#34404d);border-radius:6px;background:var(--inset,#101419);color:var(--text,#edf1f5);caret-color:var(--accent,#90b8f8)}.ds-feature-search::placeholder{color:var(--muted,#a6b0bd);opacity:1}.ds-feature-search:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}"
+    },
+    {
+      "name": "Feature Choice",
+      "kind": "button",
+      "refersTo": "feature-choice",
+      "description": "Real registry-row pattern; selected preview with muted category/status metadata.",
+      "html": "<button class=\"ds-feature-choice\" type=\"button\" aria-pressed=\"true\"><span>Feature name</span><small>Category \u00b7 Status</small></button>",
+      "css": ".ds-feature-choice{font:13px/1.5 -apple-system,BlinkMacSystemFont,\"Segoe UI\",sans-serif;display:block;width:100%;padding:12px;text-align:left;border:0;border-bottom:1px solid var(--line,#34404d);background:transparent;color:var(--text,#edf1f5);cursor:pointer}.ds-feature-choice small{display:block;margin-top:4px;color:var(--muted,#a6b0bd);font-size:11px}.ds-feature-choice:hover,.ds-feature-choice[aria-pressed=true]{background:var(--raised,#202831)}.ds-feature-choice[aria-pressed=true]{color:var(--accent,#90b8f8)}.ds-feature-choice:focus-visible{outline:2px solid var(--accent,#90b8f8);outline-offset:4px}.ds-feature-choice:disabled{opacity:.65;cursor:wait}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Graphite Workspace",
+    "overview": "Graphite Workspace is a compact, dark instrument for browser work, API requests, and security evidence. Flat graphite surfaces, pale text, restrained ice blue, and precise separators keep controls legible without competing with the content.\n\nThe implemented language is functional and text led. A standard macOS title bar sits above one native navigation/address row; embedded HTML uses system sans for interface text and monospace for request data and results. Native controls and HTML share the core graphite palette. Sites and Toolbox use native command overlays outside page DOM. This record captures source values; runtime evidence is tracked separately, and no finish approval is recorded here.",
+    "keyCharacteristics": [
+      "Compact controls with clear active and focus states.",
+      "Inset fields and tonal surface changes rather than decorative elevation.",
+      "Small corners, fine separators, and restrained outline icons.",
+      "Short state transitions that respect reduced motion."
+    ],
+    "rules": [
+      {
+        "name": "The Shared Graphite Rule",
+        "body": "Use the shared graphite, inset, text, muted, and ice blue roles across native controls and embedded content. Use raised and separator roles for HTML regions and native command menus. Preserve semantic state distinctions.",
+        "section": "colors"
+      },
+      {
+        "name": "The Data Type Rule",
+        "body": "Use monospace for request data, technical results, and shortcut keys; retain sans serif for interface text. The current native omnibox and home address field also use sans serif.",
+        "section": "typography"
+      },
+      {
+        "name": "The Tonal Depth Rule",
+        "body": "Use inset and raised surface tones plus fine separators for structure. The inspected surfaces define no shadows or glow.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "Do reuse the shared palette roles for native and HTML surfaces, including raised selection and separator enclosure in native command menus.",
+      "Do retain explicit focus, selected, disabled, and error states from the owning surface.",
+      "Do use compact sans serif interface text and monospace technical editors and results.",
+      "Do keep native control geometry owned by CEF and HTML control geometry owned by its stylesheet.",
+      "Do respect reduced motion when extending existing transitions."
+    ],
+    "donts": [
+      "Don't add glow or decorative shadow to the Graphite Workspace surfaces.",
+      "Don't replace native controls with visual replicas that compromise omnibox or action hit-testing.",
+      "Don't turn source inconsistencies or unverified native rendering into rules for future screens."
+    ]
+  }
+}

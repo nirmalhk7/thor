@@ -1,0 +1,104 @@
+:root {
+  color-scheme: dark;
+  --bg: #151a20; --inset: #101419; --raised: #202831; --line: #34404d;
+  --text: #edf1f5; --muted: #a6b0bd; --accent: #90b8f8; --error: #f3a6a6;
+  font: 13px/1.5 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body { margin: 0; background: var(--bg); color: var(--text); }
+::selection { background: #36547d; color: #fff; }
+a { color: inherit; text-decoration: none; text-underline-offset: 4px; }
+button, input, select, textarea { font: inherit; color: inherit; }
+button, input, select, textarea, a { -webkit-tap-highlight-color: transparent; }
+:focus-visible { outline: 2px solid var(--accent); outline-offset: 4px; }
+input, textarea { caret-color: var(--accent); }
+button { cursor: pointer; }
+button:disabled { opacity: .5; cursor: default; }
+svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex: none; }
+h1, h2, p { margin: 0; }
+h1 { font-size: 34px; line-height: 1.2; font-weight: 500; letter-spacing: -.03em; }
+h2 { font-size: 15px; font-weight: 500; }
+.muted { color: var(--muted); }
+.topline { display: flex; justify-content: space-between; align-items: center; padding: 28px 36px; }
+.wordmark { font-size: 15px; font-weight: 600; letter-spacing: -.02em; display: flex; align-items: center; gap: 10px; }
+.wordmark svg { color: var(--accent); }
+.context-link { color: var(--muted); display: flex; align-items: center; gap: 8px; }
+.context-link:hover { color: var(--text); }
+.start { width: min(720px, calc(100% - 64px)); margin: clamp(40px, 10vh, 112px) auto 48px; }
+.start-intro { margin: 14px 0 30px; font-size: 14px; color: var(--muted); }
+.destination { display: flex; align-items: center; gap: 16px; background: var(--inset); border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px 8px 18px; }
+.destination:focus-within { border-color: var(--accent); }
+.destination > svg { color: var(--muted); }
+.destination input { width: 100%; min-width: 0; height: 36px; border: 0; outline: none; background: transparent; font-size: 14px; }
+.destination input::placeholder { color: var(--muted); opacity: 1; }
+.destination button { border: 0; background: var(--raised); border-radius: 5px; width: 36px; height: 36px; color: var(--accent); display: grid; place-items: center; }
+.destination button:hover { background: #303c4a; }
+.workflow-list { margin-top: 40px; border-top: 1px solid var(--line); }
+.workflow { display: flex; align-items: center; gap: 20px; min-height: 105px; padding: 22px 8px; border-bottom: 1px solid var(--line); }
+.workflow > svg { width: 24px; height: 24px; color: var(--accent); }
+.workflow .description { color: var(--muted); margin-top: 6px; max-width: 52ch; }
+.workflow .arrow { margin-left: auto; color: var(--muted); width: 18px; }
+.workflow:hover, .workflow:focus-visible { background: var(--raised);  }
+.workflow:hover .arrow, .workflow:focus-visible .arrow { color: var(--accent); transform: translateX(3px); }
+.footnote { color: var(--muted); margin-top: 28px; font-size: 12px; max-width: 65ch; }
+kbd { font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; padding: 2px 5px; border: 1px solid var(--line); border-radius: 4px; color: var(--muted); }
+.shortcuts { display: flex; gap: 24px; margin-top: 24px; color: var(--muted); font-size: 12px; flex-wrap: wrap; }
+.workspace-nav { display: flex; gap: 6px; }
+.workspace-nav a { padding: 6px 12px; color: var(--muted); border-radius: 5px; }
+.workspace-nav a:hover { background: var(--raised); color: var(--text); }
+.workspace-nav a[aria-current=page] { background: var(--raised); color: var(--accent); }
+.security { display: grid; grid-template-columns: 190px minmax(0, 1fr); border-top: 1px solid var(--line); min-height: calc(100vh - 90px); }
+.tool-list { padding: 28px 16px; border-right: 1px solid var(--line); background: var(--inset); }
+.tool-list button { display: block; width: 100%; border: 0; border-radius: 5px; background: transparent; text-align: left; padding: 10px 12px; color: var(--muted); margin-bottom: 4px; }
+.tool-list button:hover { color: var(--text); background: var(--raised); }
+.tool-list button[aria-selected=true] { color: var(--accent); background: var(--raised); }
+.tool-list p { color: var(--muted); margin: 28px 12px 0; font-size: 12px; }
+.analyzer { padding: 32px 40px; min-width: 0; max-width: 1120px; }
+.analyzer h1 { font-size: 25px; }
+.analyzer header p { color: var(--muted); margin-top: 10px; max-width: 65ch; }
+.analyzer form { margin: 28px 0; }
+.analyzer label { display: block; margin-bottom: 8px; }
+.analyzer textarea { width: 100%; min-height: 180px; padding: 14px; background: var(--inset); border: 1px solid var(--line); border-radius: 6px; resize: vertical; font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; }
+.analyzer textarea::placeholder { color: var(--muted); opacity: 1; }
+.analyze { background: var(--accent); color: var(--inset); padding: 9px 18px; border: 0; border-radius: 5px; font-weight: 600; margin-top: 16px; }
+.analyze:hover { background: #b4d0fc; }
+.result-head { display: flex; align-items: center; justify-content: space-between; padding-bottom: 14px; border-bottom: 1px solid var(--line); }
+#status, #feature-status { color: var(--muted); font-size: 12px; }
+#status[data-error=true], #feature-status[data-error=true], #feature-count[data-error=true] { color: var(--error); }
+#result, #feature-result { white-space: pre-wrap; overflow-wrap: anywhere; font: 12px/1.7 ui-monospace, SFMono-Regular, Consolas, monospace; color: var(--text); min-height: 140px; }
+#result:empty::before { content: "Results appear here after analysis."; font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: var(--muted); }
+#address-error { color: var(--error); min-height: 20px; margin-top: 8px; font-size: 12px; }
+.sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+[hidden] { display: none !important; }
+@media (max-width: 720px) {
+  .topline { padding: 22px 24px; }
+  .start { width: calc(100% - 48px); margin-top: 42px; }
+  h1 { font-size: 28px; }
+  .workflow { gap: 16px; }
+  .security { display: block; }
+  .tool-list { display: flex; gap: 4px; padding: 14px 20px; border-right: 0; border-bottom: 1px solid var(--line); flex-wrap: wrap; }
+  .tool-list button { width: auto; margin: 0; }
+  .tool-list p { margin: 4px 12px; width: 100%; }
+  .analyzer { padding: 28px 24px; }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .workflow { transition: background-color 150ms ease-out; }
+  .workflow .arrow { transition: transform 150ms ease-out, color 150ms ease-out; }
+}
+
+.control-center{display:grid;grid-template-columns:280px minmax(0,1fr);max-width:1440px;margin:0 auto}
+.feature-list{padding:28px 20px;border-right:1px solid var(--line)}
+.feature-list label{display:block;margin-bottom:8px}
+.feature-list input{width:100%;padding:10px 12px;border:1px solid var(--line);border-radius:6px;background:var(--inset);color:var(--text);font:inherit;caret-color:var(--accent)}
+.feature-list input::placeholder{color:var(--muted);opacity:1}
+.feature-list p,.input-note{font-size:12px;color:var(--muted)}
+#features{max-height:calc(100vh - 225px);overflow:auto}
+.feature-choice{display:block;width:100%;padding:12px;text-align:left;border:0;border-bottom:1px solid var(--line);background:transparent;color:var(--text);font:inherit;cursor:pointer}
+.feature-choice small{display:block;margin-top:4px;color:var(--muted);font-size:11px}
+.feature-choice:hover,.feature-choice[aria-pressed=true]{background:var(--raised)}
+.feature-choice[aria-pressed=true]{color:var(--accent)}
+.feature-choice:disabled{opacity:.65;cursor:wait}
+.input-note{max-width:65ch;margin:10px 0 16px}
+@media(max-width:800px){.control-center{grid-template-columns:220px minmax(0,1fr)}.control-center .analyzer{padding:28px 24px}}
+
+#feature-result:empty::before{content:"Feature output appears here after execution.";font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--muted)}

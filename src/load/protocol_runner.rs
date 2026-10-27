@@ -32,7 +32,7 @@ impl ProtocolRunner {
         let end_time = Instant::now() + duration;
 
         let mut handles = Vec::new();
-        
+
         let interval = scenario.target_rps.map(|rps| {
             if rps > 0 {
                 Duration::from_secs_f64((vus as f64) / (rps as f64))
@@ -172,13 +172,21 @@ impl ProtocolRunner {
             }
             ScenarioStep::WebSocketConnect { url, messages } => {
                 let start = Instant::now();
-                
+
                 // We use connect_async to handle actual WS connection
-                if let Ok((mut ws_stream, resp)) = tokio_tungstenite::connect_async(url.clone()).await {
+                if let Ok((mut ws_stream, resp)) =
+                    tokio_tungstenite::connect_async(url.clone()).await
+                {
                     let mut payload_bytes = 0;
                     use futures::{SinkExt, StreamExt};
                     for msg in messages {
-                        if let Ok(_) = ws_stream.send(tokio_tungstenite::tungstenite::Message::Text(msg.clone())).await {
+                        #[allow(clippy::redundant_pattern_matching)]
+                        if let Ok(_) = ws_stream
+                            .send(tokio_tungstenite::tungstenite::Message::Text(
+                                msg.clone().into(),
+                            ))
+                            .await
+                        {
                             payload_bytes += msg.len() as u64;
                             if let Some(Ok(m)) = ws_stream.next().await {
                                 payload_bytes += m.into_data().len() as u64;

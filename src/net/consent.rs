@@ -182,11 +182,19 @@ mod tests {
 
     #[test]
     fn blocked_abuse_targets_expanded() {
-        assert!(is_blocked_abuse_target("http://169.254.169.254/latest/meta-data/"));
+        assert!(is_blocked_abuse_target(
+            "http://169.254.169.254/latest/meta-data/"
+        ));
         assert!(is_blocked_abuse_target("http://metadata.google.internal/"));
-        assert!(is_blocked_abuse_target("http://100.100.100.200/latest/meta-data/"));
-        assert!(is_blocked_abuse_target("http://168.63.129.16/metadata/instance"));
-        assert!(is_blocked_abuse_target("http://[fd00:ec2::254]/latest/meta-data/"));
+        assert!(is_blocked_abuse_target(
+            "http://100.100.100.200/latest/meta-data/"
+        ));
+        assert!(is_blocked_abuse_target(
+            "http://168.63.129.16/metadata/instance"
+        ));
+        assert!(is_blocked_abuse_target(
+            "http://[fd00:ec2::254]/latest/meta-data/"
+        ));
         assert!(!is_blocked_abuse_target("https://example.com/"));
     }
 

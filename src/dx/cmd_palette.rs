@@ -31,6 +31,9 @@ pub struct PaletteItem {
 }
 
 impl PaletteItem {
+    // Keep the positional API stable: this constructor mirrors the public fields and is used
+    // throughout the feature suite and integration tests.
+    #[allow(clippy::too_many_arguments)]
     pub fn new(
         id: impl Into<String>,
         title: impl Into<String>,
@@ -91,7 +94,7 @@ impl TabHistoryTracker {
             .unwrap_or(0);
 
         let entries = self.history_by_tab.entry(tab_id.to_string()).or_default();
-        
+
         // Avoid duplicate consecutive entry for same URL
         if let Some(last) = entries.back() {
             if last.url == url {
@@ -99,7 +102,11 @@ impl TabHistoryTracker {
             }
         }
 
-        let entry_title = if title.is_empty() { url.to_string() } else { title.to_string() };
+        let entry_title = if title.is_empty() {
+            url.to_string()
+        } else {
+            title.to_string()
+        };
         entries.push_back(TabHistoryEntry {
             url: url.to_string(),
             title: entry_title,
@@ -153,7 +160,7 @@ impl TabHistoryTracker {
                 ));
             }
         }
-        keyed.sort_by(|a, b| b.0.cmp(&a.0));
+        keyed.sort_by_key(|item| std::cmp::Reverse(item.0));
         keyed.into_iter().map(|(_, item)| item).collect()
     }
 }
@@ -332,7 +339,7 @@ impl SettingsRegistry {
             ),
             PaletteItem::new(
                 "set_devtools",
-                "Toggle Chromium Developer Tools",
+                "Toggle Browser Developer Tools",
                 PaletteItemType::Setting,
                 "Thor://settings/devtools",
                 Some("F12 / CDP".into()),
@@ -362,10 +369,10 @@ impl SettingsRegistry {
             ),
             PaletteItem::new(
                 "set_engine",
-                "Engine status (Chromium downstream)",
+                "Engine status (CEF)",
                 PaletteItemType::Setting,
                 "Thor://settings/engine",
-                Some("chromium · self-CDP".into()),
+                Some("cef · embedded".into()),
                 Some("ℹ️".into()),
                 "Settings",
                 Some("engine_status".into()),
@@ -508,17 +515,17 @@ impl SettingsRegistry {
 pub fn parse_chrome_extension_manifest(manifest_json: &str, ext_id: &str) -> Option<PaletteItem> {
     let parsed: serde_json::Value = serde_json::from_str(manifest_json).ok()?;
     let raw_name = parsed["name"].as_str()?;
-    
+
     // Handle localized name strings like "__MSG_extName__"
     let name = if raw_name.starts_with("__MSG_") {
         ext_id
     } else {
         raw_name
     };
-    
+
     let version = parsed["version"].as_str().unwrap_or("1.0");
     let title = format!("{} v{}", name, version);
-    
+
     Some(PaletteItem::new(
         format!("ext_{}", ext_id),
         title,
@@ -539,9 +546,15 @@ pub fn discover_installed_chrome_extensions() -> Vec<PaletteItem> {
     };
 
     let possible_dirs = [
-        format!("{}/Library/Application Support/Google/Chrome/Default/Extensions", home),
+        format!(
+            "{}/Library/Application Support/Google/Chrome/Default/Extensions",
+            home
+        ),
         format!("{}/.config/google-chrome/Default/Extensions", home),
-        format!("{}/AppData/Local/Google/Chrome/User Data/Default/Extensions", home),
+        format!(
+            "{}/AppData/Local/Google/Chrome/User Data/Default/Extensions",
+            home
+        ),
     ];
 
     let mut discovered = Vec::new();
@@ -562,8 +575,12 @@ pub fn discover_installed_chrome_extensions() -> Vec<PaletteItem> {
                         for v_entry in version_entries.flatten() {
                             let manifest_path = v_entry.path().join("manifest.json");
                             if manifest_path.exists() {
-                                if let Ok(manifest_content) = std::fs::read_to_string(&manifest_path) {
-                                    if let Some(item) = parse_chrome_extension_manifest(&manifest_content, &ext_id) {
+                                if let Ok(manifest_content) =
+                                    std::fs::read_to_string(&manifest_path)
+                                {
+                                    if let Some(item) =
+                                        parse_chrome_extension_manifest(&manifest_content, &ext_id)
+                                    {
                                         discovered.push(item);
                                         break;
                                     }
@@ -722,12 +739,20 @@ pub fn get_default_bookmarks() -> Vec<PaletteItem> {
 
 /// Reads Chrome Bookmarks JSON from user's Chrome profile on macOS/Linux/Windows
 pub fn read_chrome_bookmarks_json() -> Option<String> {
-    let home = std::env::var("HOME").or_else(|_| std::env::var("USERPROFILE")).ok()?;
-    
+    let home = std::env::var("HOME")
+        .or_else(|_| std::env::var("USERPROFILE"))
+        .ok()?;
+
     let possible_paths = [
-        format!("{}/Library/Application Support/Google/Chrome/Default/Bookmarks", home),
+        format!(
+            "{}/Library/Application Support/Google/Chrome/Default/Bookmarks",
+            home
+        ),
         format!("{}/.config/google-chrome/Default/Bookmarks", home),
-        format!("{}/AppData/Local/Google/Chrome/User Data/Default/Bookmarks", home),
+        format!(
+            "{}/AppData/Local/Google/Chrome/User Data/Default/Bookmarks",
+            home
+        ),
     ];
 
     for path in &possible_paths {
@@ -749,13 +774,7 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
         let name = node["name"].as_str().unwrap_or("");
         let node_type = node["type"].as_str().unwrap_or("");
 
-        let current_path = if !folder_path.is_empty() && !name.is_empty() && name != "bookmark_bar" && name != "other" && name != "synced" {
-            format!("{} / {}", folder_path, name)
-        } else if name != "bookmark_bar" && name != "other" && name != "synced" {
-            name.to_string()
-        } else {
-            folder_path.to_string()
-        };
+        let current_path = bookmark_folder_path(folder_path, name);
 
         if node_type == "url" {
             if let Some(url) = node["url"].as_str() {
@@ -763,7 +782,10 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
                     "🐙"
                 } else if url.contains("google") || url.contains("gemini") {
                     "🔍"
-                } else if url.contains("chatgpt") || url.contains("perplexity") || url.contains("oneai") {
+                } else if url.contains("chatgpt")
+                    || url.contains("perplexity")
+                    || url.contains("oneai")
+                {
                     "🤖"
                 } else if url.contains("zoom") {
                     "📹"
@@ -776,7 +798,11 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
                 };
 
                 let title = if name.is_empty() { url } else { name };
-                let badge = if folder_path.is_empty() { "Chrome".to_string() } else { folder_path.to_string() };
+                let badge = if folder_path.is_empty() {
+                    "Chrome".to_string()
+                } else {
+                    folder_path.to_string()
+                };
 
                 items.push(PaletteItem::new(
                     format!("bm_{}", items.len()),
@@ -796,6 +822,15 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
         }
     }
 
+    fn bookmark_folder_path(folder_path: &str, name: &str) -> String {
+        let visible_name = !matches!(name, "bookmark_bar" | "other" | "synced");
+        match (folder_path.is_empty(), name.is_empty(), visible_name) {
+            (false, false, true) => format!("{folder_path} / {name}"),
+            (_, false, true) => name.to_string(),
+            _ => folder_path.to_string(),
+        }
+    }
+
     if let Some(roots) = parsed.get("roots") {
         if let Some(bar) = roots.get("bookmark_bar") {
             extract_nodes(bar, "", &mut items);
@@ -808,11 +843,7 @@ pub fn parse_chrome_bookmarks(json_str: &str) -> Result<Vec<PaletteItem>, serde_
         }
     }
 
-    if items.is_empty() {
-        Ok(items)
-    } else {
-        Ok(items)
-    }
+    Ok(items)
 }
 
 /// Command palette mode selected by hotkey.
@@ -917,8 +948,11 @@ impl CmdPalette {
             }
 
             let mut top_scored: Vec<(i32, usize)> = min_heap.into_iter().map(|r| r.0).collect();
-            top_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
-            top_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+            top_scored.sort_unstable_by_key(|item| std::cmp::Reverse(item.0));
+            top_scored
+                .into_iter()
+                .map(|(_, idx)| items[idx].clone())
+                .collect()
         } else {
             let num_threads = std::thread::available_parallelism()
                 .map(|n| n.get())
@@ -932,8 +966,9 @@ impl CmdPalette {
                 for (chunk_idx, chunk) in items.chunks(chunk_size).enumerate() {
                     let prepared_ref = &prepared;
                     handles.push(s.spawn(move || {
-                        let mut min_heap: std::collections::BinaryHeap<std::cmp::Reverse<(i32, usize)>> =
-                            std::collections::BinaryHeap::with_capacity(51);
+                        let mut min_heap: std::collections::BinaryHeap<
+                            std::cmp::Reverse<(i32, usize)>,
+                        > = std::collections::BinaryHeap::with_capacity(51);
                         let mut min_score = 0;
                         let base_idx = chunk_idx * chunk_size;
 
@@ -973,13 +1008,14 @@ impl CmdPalette {
                 all_scored.extend(res);
             }
 
-            all_scored.sort_unstable_by(|a, b| b.0.cmp(&a.0));
+            all_scored.sort_unstable_by_key(|item| std::cmp::Reverse(item.0));
             all_scored.truncate(50);
-            all_scored.into_iter().map(|(_, idx)| items[idx].clone()).collect()
+            all_scored
+                .into_iter()
+                .map(|(_, idx)| items[idx].clone())
+                .collect()
         }
     }
-
-
 }
 
 impl Default for CmdPalette {
@@ -1129,18 +1165,19 @@ fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
                 || s_bytes[i - 1] == b'-'
                 || s_bytes[i - 1] == b'_'
                 || s_bytes[i - 1] == b'/')
-                && to_lower_fast(s_bytes[i]) == first_byte {
-                    let mut is_match = true;
-                    for j in 1..q_len {
-                        if to_lower_fast(s_bytes[i + j]) != q_bytes[j] {
-                            is_match = false;
-                            break;
-                        }
-                    }
-                    if is_match {
-                        return true;
+                && to_lower_fast(s_bytes[i]) == first_byte
+            {
+                let mut is_match = true;
+                for j in 1..q_len {
+                    if to_lower_fast(s_bytes[i + j]) != q_bytes[j] {
+                        is_match = false;
+                        break;
                     }
                 }
+                if is_match {
+                    return true;
+                }
+            }
         }
         false
     } else {
@@ -1152,7 +1189,6 @@ fn word_starts_with_prepared(s: &str, query: &PreparedQuery) -> bool {
         false
     }
 }
-
 
 #[inline]
 fn contains_prepared(haystack: &str, query: &PreparedQuery) -> bool {
@@ -1232,12 +1268,6 @@ fn is_subsequence_prepared(haystack: &str, query: &PreparedQuery) -> bool {
     }
 }
 
-
-
-
-
-
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -1294,8 +1324,26 @@ mod tests {
     #[test]
     fn test_fuzzy_search_scoring() {
         let items = vec![
-            PaletteItem::new("1", "GitHub", PaletteItemType::Bookmark, "https://github.com", None, None, "Bookmarks", None),
-            PaletteItem::new("2", "Google Search", PaletteItemType::Bookmark, "https://google.com", None, None, "Bookmarks", None),
+            PaletteItem::new(
+                "1",
+                "GitHub",
+                PaletteItemType::Bookmark,
+                "https://github.com",
+                None,
+                None,
+                "Bookmarks",
+                None,
+            ),
+            PaletteItem::new(
+                "2",
+                "Google Search",
+                PaletteItemType::Bookmark,
+                "https://google.com",
+                None,
+                None,
+                "Bookmarks",
+                None,
+            ),
         ];
 
         let mut palette = CmdPalette::new(CmdPaletteMode::BookmarksAndTabHistory);
@@ -1315,7 +1363,8 @@ mod tests {
             "version": "6.5.1",
             "description": "Vue Developer Tools extension"
         }"#;
-        let item = parse_chrome_extension_manifest(manifest, "nhdogjmejiglipccpnnnhbfiladjaklb").unwrap();
+        let item =
+            parse_chrome_extension_manifest(manifest, "nhdogjmejiglipccpnnnhbfiladjaklb").unwrap();
         assert_eq!(item.id, "ext_nhdogjmejiglipccpnnnhbfiladjaklb");
         assert_eq!(item.title, "Vue DevTools v6.5.1");
         assert_eq!(item.category, "Extensions");
@@ -1404,7 +1453,9 @@ mod tests {
             .all(|s| s.item_type != PaletteItemType::Bookmark
                 && s.item_type != PaletteItemType::Tab
                 && s.item_type != PaletteItemType::TabHistory));
-        assert!(settings.iter().any(|s| s.action_key.as_deref() == Some("open_downloads")));
+        assert!(settings
+            .iter()
+            .any(|s| s.action_key.as_deref() == Some("open_downloads")));
     }
 
     #[test]
@@ -1432,4 +1483,3 @@ mod tests {
         assert!(json.contains("a.zip"));
     }
 }
-

@@ -48,11 +48,21 @@ pub struct ApiResponse {
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub enum AuthScheme {
-    Bearer { token: String },
-    Basic { username: String, password: String },
-    ApiKey { header: String, key: String },
+    Bearer {
+        token: String,
+    },
+    Basic {
+        username: String,
+        password: String,
+    },
+    ApiKey {
+        header: String,
+        key: String,
+    },
     /// Shared secret for webhook HMAC verification (WebhookSignatureVault).
-    WebhookSecret { secret: String },
+    WebhookSecret {
+        secret: String,
+    },
 }
 
 // ---------------------------------------------------------------------------
@@ -314,7 +324,6 @@ impl Default for BackendEngine {
     }
 }
 
-
 // ===========================================================================
 // Wave-2 backend features (12)
 // ===========================================================================
@@ -334,8 +343,12 @@ pub struct WebhookSigInput {
     pub tolerance_secs: i64,
 }
 
-fn default_algo() -> String { "sha256".into() }
-fn default_tol() -> i64 { 300 }
+fn default_algo() -> String {
+    "sha256".into()
+}
+fn default_tol() -> i64 {
+    300
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct WebhookSigReport {
@@ -625,22 +638,38 @@ impl BackendEngine {
 
     pub async fn send(&self, req: &ApiRequest) -> Result<ApiResponse, String> {
         let mut request = crate::api::RequestSpec::new(&req.method, &req.url);
-        request.headers = req.headers.iter()
-            .map(|(name, value)| crate::api::Header::new(name, value)).collect();
+        request.headers = req
+            .headers
+            .iter()
+            .map(|(name, value)| crate::api::Header::new(name, value))
+            .collect();
         if let Some(text) = &req.body {
-            let content_type = req.headers.iter()
+            let content_type = req
+                .headers
+                .iter()
                 .find(|(name, _)| name.eq_ignore_ascii_case("content-type"))
-                .map(|(_, value)| value.clone()).unwrap_or_else(|| "text/plain".into());
-            request.body = crate::api::RequestBody::Text { text: text.clone(), content_type };
+                .map(|(_, value)| value.clone())
+                .unwrap_or_else(|| "text/plain".into());
+            request.body = crate::api::RequestBody::Text {
+                text: text.clone(),
+                content_type,
+            };
         }
-        let response = self.http_service()?.send(&request, &crate::api::Variables::default())
-            .await.map_err(|error| error.to_string())?;
+        let response = self
+            .http_service()?
+            .send(&request, &crate::api::Variables::default())
+            .await
+            .map_err(|error| error.to_string())?;
         if response.body.encoding != "utf8" {
             return Err("Binary response requires the API workbench binary viewer".into());
         }
         Ok(ApiResponse {
             status: response.status,
-            headers: response.headers.into_iter().map(|header| (header.name, header.value)).collect(),
+            headers: response
+                .headers
+                .into_iter()
+                .map(|header| (header.name, header.value))
+                .collect(),
             body: response.body.data,
             latency_ms: response.total_ms,
         })
@@ -648,8 +677,10 @@ impl BackendEngine {
 
     /// Shared connection pool used by feature execution and the API workbench.
     pub fn http_service(&self) -> Result<&crate::api::HttpService, String> {
-        self.http.get_or_init(|| crate::api::HttpService::new().map_err(|error| error.to_string()))
-            .as_ref().map_err(Clone::clone)
+        self.http
+            .get_or_init(|| crate::api::HttpService::new().map_err(|error| error.to_string()))
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     pub fn history(&self) -> Vec<(ApiRequest, ApiResponse)> {
@@ -790,13 +821,8 @@ impl BackendEngine {
         }
         let listener =
             TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
-        let bound = listener
-            .local_addr()
-            .map_err(|e| e.to_string())?
-            .port();
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| e.to_string())?;
+        let bound = listener.local_addr().map_err(|e| e.to_string())?.port();
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let running = Arc::new(AtomicBool::new(true));
         let flag = running.clone();
         std::thread::spawn(move || webhook_sink_loop(listener, flag));
@@ -1203,7 +1229,7 @@ impl BackendEngine {
             .filter(|(_, c)| *c >= 3)
             .map(|(template, count)| QueryCount { template, count })
             .collect();
-        n_plus_one.sort_by(|a, b| b.count.cmp(&a.count));
+        n_plus_one.sort_by_key(|item| std::cmp::Reverse(item.count));
         DbReport {
             adjacency,
             n_plus_one,
@@ -1267,8 +1293,14 @@ impl BackendEngine {
         let expected_l = expected.to_lowercase();
         let valid = provided == expected_l
             || provided == hex
-            || provided.strip_prefix("sha256=").map(|s| s == hex.as_str()).unwrap_or(false)
-            || provided.strip_prefix("v1=").map(|s| s == hex.as_str()).unwrap_or(false);
+            || provided
+                .strip_prefix("sha256=")
+                .map(|s| s == hex.as_str())
+                .unwrap_or(false)
+            || provided
+                .strip_prefix("v1=")
+                .map(|s| s == hex.as_str())
+                .unwrap_or(false);
         let mut timestamp_ok = true;
         if let (Some(ts), Some(now)) = (input.timestamp, input.now) {
             timestamp_ok = (now - ts).abs() <= input.tolerance_secs;
@@ -1288,7 +1320,10 @@ impl BackendEngine {
     }
 
     pub fn rate_limit_probe(&self, samples: &[RateLimitSample]) -> RateLimitReport {
-        let limited: Vec<_> = samples.iter().filter(|s| s.status == 429 || s.remaining == Some(0)).collect();
+        let limited: Vec<_> = samples
+            .iter()
+            .filter(|s| s.status == 429 || s.remaining == Some(0))
+            .collect();
         let inferred_limit = samples.iter().filter_map(|s| s.limit).max();
         let retries: Vec<f64> = limited.iter().filter_map(|s| s.retry_after_secs).collect();
         let avg_retry_after = if retries.is_empty() {
@@ -1376,19 +1411,23 @@ impl BackendEngine {
             }
             if i + 1 < pages.len() {
                 let n = &pages[i + 1];
-                if p.next_cursor.is_none() && n.page != p.page + 1 && p.page_size > 0
-                    && n.page != p.page + 1 {
-                        issues.push(format!(
-                            "non-sequential page jump {} -> {}",
-                            p.page, n.page
-                        ));
-                    }
+                if p.next_cursor.is_none()
+                    && n.page != p.page + 1
+                    && p.page_size > 0
+                    && n.page != p.page + 1
+                {
+                    issues.push(format!("non-sequential page jump {} -> {}", p.page, n.page));
+                }
             }
         }
         if let Some(last) = pages.last() {
-            if last.items == last.page_size as usize && last.next_cursor.is_none() && last.total.is_none()
+            if last.items == last.page_size as usize
+                && last.next_cursor.is_none()
+                && last.total.is_none()
             {
-                issues.push("last page full-sized without next cursor/total — may be truncated".into());
+                issues.push(
+                    "last page full-sized without next cursor/total — may be truncated".into(),
+                );
             }
         }
         PaginationReport {
@@ -1523,11 +1562,7 @@ impl BackendEngine {
         let (bound_port, live, live_event_count) = {
             let slot = self.sse_lab.lock();
             match slot.as_ref() {
-                Some(h) => (
-                    Some(h.port),
-                    true,
-                    h.event_count.load(Ordering::SeqCst),
-                ),
+                Some(h) => (Some(h.port), true, h.event_count.load(Ordering::SeqCst)),
                 None => (None, false, 0),
             }
         };
@@ -1551,9 +1586,7 @@ impl BackendEngine {
     ) -> Result<u16, String> {
         if let Some(url) = advertise_url {
             if !crate::net::consent::is_private_or_local_url(url) {
-                return Err(format!(
-                    "SSE/WS lab refuses non-local advertise URL: {url}"
-                ));
+                return Err(format!("SSE/WS lab refuses non-local advertise URL: {url}"));
             }
         }
         let mut slot = self.sse_lab.lock();
@@ -1562,13 +1595,8 @@ impl BackendEngine {
         }
         let listener =
             TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
-        let bound = listener
-            .local_addr()
-            .map_err(|e| e.to_string())?
-            .port();
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| e.to_string())?;
+        let bound = listener.local_addr().map_err(|e| e.to_string())?.port();
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let running = Arc::new(AtomicBool::new(true));
         let event_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let events = Arc::new(Mutex::new(events));
@@ -1635,7 +1663,9 @@ impl BackendEngine {
             None => return out,
         };
         for (path, item) in paths {
-            let Some(obj) = item.as_object() else { continue };
+            let Some(obj) = item.as_object() else {
+                continue;
+            };
             for (method, op) in obj {
                 let m = method.to_lowercase();
                 if !matches!(
@@ -1666,7 +1696,16 @@ impl BackendEngine {
     ) -> OpenApiTrafficReport {
         let declared: BTreeMap<String, &OpenApiPath> = paths
             .iter()
-            .map(|p| (format!("{} {}", p.method.to_uppercase(), normalize_api_path(&p.path)), p))
+            .map(|p| {
+                (
+                    format!(
+                        "{} {}",
+                        p.method.to_uppercase(),
+                        normalize_api_path(&p.path)
+                    ),
+                    p,
+                )
+            })
             .collect();
         let mut matched = 0usize;
         let mut unmatched = Vec::new();
@@ -1708,12 +1747,16 @@ impl BackendEngine {
             if s.step == "authorize" && !s.params.contains_key("redirect_uri") {
                 issues.push("authorize missing redirect_uri".into());
             }
-            if s.step == "token" && s.params.get("grant_type").map(|g| g.as_str()) == Some("authorization_code")
+            if s.step == "token"
+                && s.params.get("grant_type").map(|g| g.as_str()) == Some("authorization_code")
                 && !s.params.contains_key("code")
             {
                 issues.push("token exchange missing code".into());
             }
-            if s.url.contains("http://") && !s.url.contains("localhost") && !s.url.contains("127.0.0.1") {
+            if s.url.contains("http://")
+                && !s.url.contains("localhost")
+                && !s.url.contains("127.0.0.1")
+            {
                 issues.push(format!("insecure http endpoint: {}", s.url));
             }
         }
@@ -1763,14 +1806,18 @@ impl BackendEngine {
             *streams.entry(f.stream_id).or_default() += 1;
             total_bytes += f.message_bytes;
             if f.flags.contains("END") && f.message_bytes == 0 && streams[&f.stream_id] == 1 {
-                issues.push(format!("stream {} ended with empty sole frame", f.stream_id));
+                issues.push(format!(
+                    "stream {} ended with empty sole frame",
+                    f.stream_id
+                ));
             }
         }
         for w in frames.windows(2) {
-            if w[0].stream_id == w[1].stream_id
-                && w[1].timestamp_ms < w[0].timestamp_ms
-            {
-                issues.push(format!("out-of-order timestamps on stream {}", w[0].stream_id));
+            if w[0].stream_id == w[1].stream_id && w[1].timestamp_ms < w[0].timestamp_ms {
+                issues.push(format!(
+                    "out-of-order timestamps on stream {}",
+                    w[0].stream_id
+                ));
             }
         }
         GrpcStreamReport {
@@ -1822,9 +1869,7 @@ impl BackendEngine {
     ) -> Result<u16, String> {
         if let Some(url) = advertise_url {
             if !crate::net::consent::is_private_or_local_url(url) {
-                return Err(format!(
-                    "live stub refuses non-local advertise URL: {url}"
-                ));
+                return Err(format!("live stub refuses non-local advertise URL: {url}"));
             }
         }
         let mut slot = self.live_stub.lock();
@@ -1833,13 +1878,8 @@ impl BackendEngine {
         }
         let listener =
             TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind failed: {e}"))?;
-        let bound = listener
-            .local_addr()
-            .map_err(|e| e.to_string())?
-            .port();
-        listener
-            .set_nonblocking(true)
-            .map_err(|e| e.to_string())?;
+        let bound = listener.local_addr().map_err(|e| e.to_string())?.port();
+        listener.set_nonblocking(true).map_err(|e| e.to_string())?;
         let running = Arc::new(AtomicBool::new(true));
         let hit_count = Arc::new(std::sync::atomic::AtomicU64::new(0));
         let routes = Arc::new(Mutex::new(routes));
@@ -1966,7 +2006,6 @@ impl BackendEngine {
             executed: true,
         })
     }
-
 }
 
 /// Extract the path (no scheme/host/query) from a URL, defaulting to `/`.
@@ -1988,7 +2027,10 @@ fn webhook_sink_loop(listener: TcpListener, running: Arc<AtomicBool>) {
                     .as_deref()
                     .and_then(parse_http_request)
                 {
-                    AppState::global().features().backend().record_webhook(event);
+                    AppState::global()
+                        .features()
+                        .backend()
+                        .record_webhook(event);
                 }
                 let _ = stream.write_all(
                     b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok",
@@ -2139,9 +2181,9 @@ fn path_matches_template(template: &str, path: &str) -> bool {
     if t.len() != p.len() {
         return false;
     }
-    t.iter().zip(p.iter()).all(|(a, b)| {
-        a.starts_with('{') && a.ends_with('}') || *a == "*" || *a == *b
-    })
+    t.iter()
+        .zip(p.iter())
+        .all(|(a, b)| a.starts_with('{') && a.ends_with('}') || *a == "*" || *a == *b)
 }
 
 fn count_page_items(body: &str) -> usize {
@@ -2297,8 +2339,7 @@ fn json_type_name(v: &serde_json::Value) -> &'static str {
 fn last_ident(s: &str) -> String {
     let s = s.trim().trim_end_matches('(');
     s.split(|c: char| c.is_whitespace() || c == ':' || c == '(')
-        .filter(|t| !t.is_empty())
-        .next_back()
+        .rfind(|t| !t.is_empty())
         .unwrap_or("")
         .to_string()
 }
@@ -2799,7 +2840,11 @@ mod tests {
     #[test]
     fn test_openapi_diff_breaking() {
         let e = BackendEngine::new();
-        let before = vec![OpenApiPath { path: "/a".into(), method: "GET".into(), operation_id: Some("getA".into()) }];
+        let before = vec![OpenApiPath {
+            path: "/a".into(),
+            method: "GET".into(),
+            operation_id: Some("getA".into()),
+        }];
         let after = vec![];
         let d = e.openapi_diff_gate(&before, &after);
         assert!(d.breaking);
@@ -2817,9 +2862,12 @@ mod tests {
         assert!(!o.has_pkce);
         assert!(!o.issues.is_empty());
         let p = e.pagination_auditor(&[PageSlice {
-            page: 1, page_size: 10, items: 10, total: None, next_cursor: None,
+            page: 1,
+            page_size: 10,
+            items: 10,
+            total: None,
+            next_cursor: None,
         }]);
         assert!(!p.issues.is_empty());
     }
-
 }

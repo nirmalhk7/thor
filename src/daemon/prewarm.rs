@@ -32,7 +32,10 @@ impl PrewarmDaemon {
 
     /// Discover Chromium and launch a [`ChromiumRuntime`] with a warm page pool.
     pub fn warm_thor_chromium(&self, headful: bool) -> ChromiumResult<Arc<ChromiumRuntime>> {
-        let executable = discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf();
+        let executable = discover_chromium_path()
+            .ok_or(ChromiumError::NotFound)?
+            .executable_path()
+            .to_path_buf();
         let config = ChromiumRuntimeConfig {
             executable: Some(executable),
             headful,
@@ -55,11 +58,11 @@ impl PrewarmDaemon {
 
     /// Acquire a pre-warmed CDP tab when a runtime is available.
     pub fn acquire_tab(&self) -> ChromiumResult<TabSession> {
-        let runtime = self
-            .runtime
-            .lock()
-            .clone()
-            .ok_or_else(|| ChromiumError::Other(anyhow::anyhow!("prewarm runtime not started; call warm_thor_chromium first")))?;
+        let runtime = self.runtime.lock().clone().ok_or_else(|| {
+            ChromiumError::Other(anyhow::anyhow!(
+                "prewarm runtime not started; call warm_thor_chromium first"
+            ))
+        })?;
         runtime.acquire_tab_blocking()
     }
 
@@ -127,17 +130,13 @@ mod tests {
     #[test]
     fn test_prewarm_pool_exhaustion() {
         let d = PrewarmDaemon::new(2);
-        d.instances.lock().push(
-            Command::new("echo")
-                .spawn()
-                .expect("Failed to spawn echo")
-        );
-        d.instances.lock().push(
-            Command::new("echo")
-                .spawn()
-                .expect("Failed to spawn echo")
-        );
-        
+        d.instances
+            .lock()
+            .push(Command::new("echo").spawn().expect("Failed to spawn echo"));
+        d.instances
+            .lock()
+            .push(Command::new("echo").spawn().expect("Failed to spawn echo"));
+
         // We have 2 instances
         assert!(d.acquire_instance().is_some());
         assert!(d.acquire_instance().is_some());
@@ -148,31 +147,26 @@ mod tests {
     #[test]
     fn test_invalid_pids() {
         let d = PrewarmDaemon::new(2);
-        
-        let mut child = Command::new("echo")
-            .spawn()
-            .expect("Failed to spawn echo");
-            
+
+        let mut child = Command::new("echo").spawn().expect("Failed to spawn echo");
+
         let _ = child.wait(); // Wait for it to exit, so it's invalid.
-        
+
         d.instances.lock().push(child);
-        
+
         let len_before = d.instances.lock().len();
         assert_eq!(len_before, 1);
-        
+
         d.replenish_process_pool();
-        
+
         let mut instances = d.instances.lock();
-        
-        let contains_invalid = instances.iter_mut().any(|c| {
-            match c.try_wait() {
-                Ok(Some(_)) => true,
-                _ => false,
-            }
-        });
+
+        let contains_invalid = instances
+            .iter_mut()
+            .any(|c| matches!(c.try_wait(), Ok(Some(_))));
         assert!(!contains_invalid);
     }
-    
+
     #[test]
     fn test_acquire_tab_uninitialized() {
         let d = PrewarmDaemon::new(1);

@@ -38,10 +38,12 @@ impl CssOverlayEngine {
                     const badge = document.getElementById('thor-css-layout-overlay-hud');
                     if (badge) badge.remove();
                 })();
-            "#.to_string();
+            "#
+            .to_string();
         }
 
-        format!(r#"
+        format!(
+            r#"
             (function() {{
                 let style = document.getElementById('thor-css-layout-overlay-style');
                 if (!style) {{
@@ -68,8 +70,16 @@ impl CssOverlayEngine {
                 `;
             }})();
         "#,
-            if state.show_flexbox { "1px solid rgba(59, 130, 246, 0.4)" } else { "none" },
-            if state.show_grid { "0 0 0 1px rgba(168, 85, 247, 0.5) inset" } else { "none" }
+            if state.show_flexbox {
+                "1px solid rgba(59, 130, 246, 0.4)"
+            } else {
+                "none"
+            },
+            if state.show_grid {
+                "0 0 0 1px rgba(168, 85, 247, 0.5) inset"
+            } else {
+                "none"
+            }
         )
     }
 }
@@ -80,8 +90,10 @@ mod tests {
 
     #[test]
     fn test_css_overlay_injection_script() {
-        let mut state = CssOverlayState::default();
-        state.enabled = true;
+        let mut state = CssOverlayState {
+            enabled: true,
+            ..Default::default()
+        };
         let script = CssOverlayEngine::get_injection_script(&state);
         assert!(script.contains("thor-css-layout-overlay-style"));
         assert!(script.contains("1px dashed #3b82f6"));

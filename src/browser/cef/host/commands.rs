@@ -20,18 +20,13 @@ pub(super) fn start() {
         cmd_tx: sender,
         snapshot_rx,
     };
-    crate::AppState::global().set_engine_handle(handle.clone());
+    crate::AppState::global().set_engine_handle(handle);
     tokio::spawn(async move {
         while let Some(command) = receiver.recv().await {
             let mut task = CommandTask::new(Arc::new(Mutex::new(Some(command))));
             if post_task(ThreadId::UI, Some(&mut task)) != 1 {
                 crate::thor_warn!("thor::cef", "CEF rejected a browser command");
             }
-        }
-    });
-    tokio::spawn(async move {
-        if let Err(error) = crate::mcp::server::start_mcp_server(handle).await {
-            crate::thor_warn!("thor::mcp", "MCP unavailable: {error}");
         }
     });
 }
@@ -73,8 +68,13 @@ fn control(
 fn handle(command: EngineCommand) {
     match command {
         EngineCommand::Targeted { target, command } => {
-            let valid = with_host(|host| host.session.validate_target(target).is_ok()).unwrap_or(false);
-            if valid { handle(*command); } else { command.reject(EngineError::StaleTarget); }
+            let valid =
+                with_host(|host| host.session.validate_target(target).is_ok()).unwrap_or(false);
+            if valid {
+                handle(*command);
+            } else {
+                command.reject(EngineError::StaleTarget);
+            }
             return;
         }
         EngineCommand::CreateTab {

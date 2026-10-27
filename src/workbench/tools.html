@@ -1,0 +1,13 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Developer Control Center — Thor</title><link rel="stylesheet" href="/workspace.css"><script defer src="/tools.js"></script></head>
+<body>
+<header class="topline"><a class="wordmark" href="/">Thor</a><nav class="workspace-nav" aria-label="Workspace"><a href="/api">API</a><a href="/security">Security</a><a href="/tools" aria-current="page">Developer Control Center</a></nav></header>
+<main class="control-center">
+  <aside class="feature-list"><label for="feature-search">Find a feature</label><input id="feature-search" type="search" placeholder="Search name, domain, or slug"><p id="feature-count" role="status">Loading registry…</p><div id="features" aria-label="Registered features"></div></aside>
+  <section class="analyzer"><header><h1 id="feature-title">Developer Control Center</h1><p id="feature-description">Choose a registered feature to inspect captured evidence with Thor’s Rust engine.</p></header>
+    <form id="feature-form"><label for="feature-payload">Input JSON</label><textarea id="feature-payload" spellcheck="false" required>{}</textarea><p class="input-note">Supply the feature’s input fields. Missing fields return an engine error. Active-page evaluation is unavailable from this tool tab.</p><button class="analyze" id="feature-run" disabled>Run feature</button></form>
+    <section aria-labelledby="feature-result-title"><div class="result-head"><h2 id="feature-result-title">Result</h2><span id="feature-status" role="status" aria-live="polite">Choose a feature</span></div><pre id="feature-result" tabindex="0" aria-label="Feature result"></pre></section>
+  </section>
+</main>
+</body></html>

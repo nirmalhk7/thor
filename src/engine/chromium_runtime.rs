@@ -239,6 +239,7 @@ pub fn common_chromium_candidates() -> Vec<PathBuf> {
     out
 }
 
+#[cfg(debug_assertions)]
 fn path_lookup(name: &str) -> Option<PathBuf> {
     let path = std::env::var_os("PATH")?;
     for dir in std::env::split_paths(&path) {
@@ -253,7 +254,10 @@ fn path_lookup(name: &str) -> Option<PathBuf> {
 fn build_browser_config(cfg: &ChromiumRuntimeConfig) -> ChromiumResult<(BrowserConfig, PathBuf)> {
     let executable = match &cfg.executable {
         Some(p) => p.clone(),
-        None => discover_chromium_path().ok_or(ChromiumError::NotFound)?.executable_path().to_path_buf(),
+        None => discover_chromium_path()
+            .ok_or(ChromiumError::NotFound)?
+            .executable_path()
+            .to_path_buf(),
     };
 
     let mut builder: BrowserConfigBuilder = BrowserConfig::builder()
@@ -305,7 +309,11 @@ impl ChromiumRuntime {
         let handle = rt.handle().clone();
         let rt = Arc::new(rt);
         let rt_keep = Arc::clone(&rt);
-        handle.block_on(Self::launch_with_handle(config, handle.clone(), Some(rt_keep)))
+        handle.block_on(Self::launch_with_handle(
+            config,
+            handle.clone(),
+            Some(rt_keep),
+        ))
     }
 
     /// Connect to an already-running browser via HTTP or WebSocket debug URL.
@@ -411,11 +419,7 @@ impl ChromiumRuntime {
             let browser = self.browser.lock().await;
             browser.new_page(start).await?
         };
-        Ok(TabSession::from_page(
-            next_tab_id(),
-            page,
-            Arc::clone(self),
-        ))
+        Ok(TabSession::from_page(next_tab_id(), page, Arc::clone(self)))
     }
 
     /// Blocking [`Self::new_tab`].
@@ -557,10 +561,8 @@ mod tests {
 
     #[test]
     fn discovery_respects_env_override() {
-        let dir = std::env::temp_dir().join(format!(
-            "thor-chromium-discovery-{}",
-            std::process::id()
-        ));
+        let dir =
+            std::env::temp_dir().join(format!("thor-chromium-discovery-{}", std::process::id()));
         let _ = std::fs::create_dir_all(&dir);
         let fake = dir.join("fake-chromium");
         std::fs::write(&fake, b"#!/bin/sh\n").unwrap();
@@ -578,7 +580,10 @@ mod tests {
         let _ = std::fs::remove_file(&fake);
         let _ = std::fs::remove_dir(&dir);
 
-        assert_eq!(found.map(|s| s.executable_path().to_path_buf()).as_deref(), Some(fake.as_path()));
+        assert_eq!(
+            found.map(|s| s.executable_path().to_path_buf()).as_deref(),
+            Some(fake.as_path())
+        );
     }
 
     #[test]
@@ -600,7 +605,10 @@ mod tests {
     #[test]
     #[ignore = "requires a live Chrome/Chromium install"]
     fn live_launch_smoke() {
-        let path = discover_chromium_path().expect("Chrome not installed").executable_path().to_path_buf();
+        let path = discover_chromium_path()
+            .expect("Chrome not installed")
+            .executable_path()
+            .to_path_buf();
         let cfg = ChromiumRuntimeConfig {
             executable: Some(path),
             headful: false,
@@ -619,14 +627,16 @@ mod tests {
 
     #[test]
     fn test_concurrent_tab_id_generation() {
-        use std::thread;
         use std::sync::{Arc, Mutex};
-        
+        use std::thread;
+
         let thread_count = 10;
         let iters_per_thread = 100_000; // 1,000,000 total IDs
         let mut handles = vec![];
-        let results = Arc::new(Mutex::new(Vec::with_capacity(thread_count * iters_per_thread)));
-        
+        let results = Arc::new(Mutex::new(Vec::with_capacity(
+            thread_count * iters_per_thread,
+        )));
+
         for _ in 0..thread_count {
             let results_clone = Arc::clone(&results);
             handles.push(thread::spawn(move || {
@@ -637,15 +647,19 @@ mod tests {
                 results_clone.lock().unwrap().extend(local_ids);
             }));
         }
-        
+
         for h in handles {
             h.join().unwrap();
         }
-        
+
         let all_ids = results.lock().unwrap();
-        assert_eq!(all_ids.len(), thread_count * iters_per_thread, "Should generate 1,000,000 IDs");
-        
-        // Use a boolean array for fast unique check if IDs are sequential, 
+        assert_eq!(
+            all_ids.len(),
+            thread_count * iters_per_thread,
+            "Should generate 1,000,000 IDs"
+        );
+
+        // Use a boolean array for fast unique check if IDs are sequential,
         // or a HashSet since memory is fine (1M elements in HashSet is ~16MB).
         // A vec with sort and dedup is faster.
         let mut sorted_ids = all_ids.clone();
@@ -653,7 +667,12 @@ mod tests {
         let original_len = sorted_ids.len();
         sorted_ids.dedup();
         let dedup_len = sorted_ids.len();
-        
-        assert_eq!(original_len, dedup_len, "Found {} collisions in Tab ID generation!", original_len - dedup_len);
+
+        assert_eq!(
+            original_len,
+            dedup_len,
+            "Found {} collisions in Tab ID generation!",
+            original_len - dedup_len
+        );
     }
 }

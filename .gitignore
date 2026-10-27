@@ -9,3 +9,7 @@ __pycache__/
 .thor_chromium_src_path
 dist/Thor.app/Contents/Frameworks/
 *.app/Contents/Frameworks/Chromium.app/
+.impeccable/decision/
+.impeccable/questions/
+.impeccable/review/
+.impeccable/hook.cache.json

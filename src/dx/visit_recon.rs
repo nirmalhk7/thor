@@ -362,16 +362,27 @@ impl VisitReconEngine {
             findings.push(format!("storage:{} [{}] {}", s.store, s.severity, s.detail));
         }
         if !mixed_content.is_empty() {
-            findings.push(format!("mixed-content: {} http resources on https page", mixed_content.len()));
+            findings.push(format!(
+                "mixed-content: {} http resources on https page",
+                mixed_content.len()
+            ));
         }
         if forms.iter().any(|f| f.has_password && f.method == "get") {
             findings.push("form: password field submitted via GET".into());
         }
         if !service_workers.is_empty() {
-            findings.push(format!("service-worker: {} registration(s)", service_workers.len()));
+            findings.push(format!(
+                "service-worker: {} registration(s)",
+                service_workers.len()
+            ));
         }
 
-        let grade = composite_grade(headers.as_ref(), &cookie_rep.issues, &storage_findings, &mixed_content);
+        let grade = composite_grade(
+            headers.as_ref(),
+            &cookie_rep.issues,
+            &storage_findings,
+            &mixed_content,
+        );
 
         let dom_stats: Option<VisitDomStats> = raw
             .get("dom_stats")
@@ -400,7 +411,10 @@ impl VisitReconEngine {
             }
         }
 
-        let cors_mode = match header_map.get("access-control-allow-origin").map(|s| s.as_str()) {
+        let cors_mode = match header_map
+            .get("access-control-allow-origin")
+            .map(|s| s.as_str())
+        {
             Some("*") => "Wildcard (*) Unlimited".into(),
             Some(o) => format!("Specific ({o})"),
             None => "Restricted (Same-Origin)".into(),
@@ -412,14 +426,36 @@ impl VisitReconEngine {
                 .find(|p| p.trim().starts_with("max-age="))
                 .and_then(|p| p.trim()["max-age=".len()..].parse::<u64>().ok())
         });
-        let hsts_include_subdomains = hsts.is_some_and(|h| h.to_lowercase().contains("includesubdomains"));
-        let hsts_preload = hsts.map_or(false, |h| h.to_lowercase().contains("preload"));
+        let hsts_include_subdomains =
+            hsts.is_some_and(|h| h.to_lowercase().contains("includesubdomains"));
+        let hsts_preload = hsts.is_some_and(|h| h.to_lowercase().contains("preload"));
 
         let http_only_cookies = cookies.iter().filter(|c| c.http_only).count();
         let secure_cookies = cookies.iter().filter(|c| c.secure).count();
-        let same_site_strict_cookies = cookies.iter().filter(|c| c.same_site.as_deref().is_some_and(|s| s.eq_ignore_ascii_case("strict"))).count();
-        let same_site_lax_cookies = cookies.iter().filter(|c| c.same_site.as_deref().map_or(false, |s| s.eq_ignore_ascii_case("lax"))).count();
-        let same_site_none_cookies = cookies.iter().filter(|c| c.same_site.as_deref().map_or(false, |s| s.eq_ignore_ascii_case("none"))).count();
+        let same_site_strict_cookies = cookies
+            .iter()
+            .filter(|c| {
+                c.same_site
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("strict"))
+            })
+            .count();
+        let same_site_lax_cookies = cookies
+            .iter()
+            .filter(|c| {
+                c.same_site
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("lax"))
+            })
+            .count();
+        let same_site_none_cookies = cookies
+            .iter()
+            .filter(|c| {
+                c.same_site
+                    .as_deref()
+                    .is_some_and(|s| s.eq_ignore_ascii_case("none"))
+            })
+            .count();
 
         let security_details = Some(VisitSecurityHeadersDetail {
             csp_directives,
@@ -472,11 +508,7 @@ fn composite_grade(
 ) -> String {
     let mut score = headers.map(|h| h.score as i64).unwrap_or(70);
     score -= (cookie_issues.len() as i64) * 3;
-    score -= storage
-        .iter()
-        .filter(|s| s.severity == "high")
-        .count() as i64
-        * 5;
+    score -= storage.iter().filter(|s| s.severity == "high").count() as i64 * 5;
     if !mixed.is_empty() {
         score -= 15;
     }
@@ -525,7 +557,13 @@ mod tests {
         let report = VisitReconEngine::analyze_capture(&raw, "https://example.com/app");
         assert!(report.passive);
         assert_eq!(report.url, "https://example.com/app");
-        assert!(report.stack.as_ref().unwrap().badges.iter().any(|b| b.name.contains("Next")));
+        assert!(report
+            .stack
+            .as_ref()
+            .unwrap()
+            .badges
+            .iter()
+            .any(|b| b.name.contains("Next")));
         assert!(report.headers.is_some());
         assert!(!report.cookie_issues.is_empty()); // session missing HttpOnly
         assert!(!report.storage_findings.is_empty());

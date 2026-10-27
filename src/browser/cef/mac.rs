@@ -3,8 +3,39 @@ use std::cell::Cell;
 use ::cef::application_mac::{CefAppProtocol, CrAppControlProtocol, CrAppProtocol};
 use objc2::runtime::{AnyObject, Bool, NSObjectProtocol};
 use objc2::{define_class, msg_send, ClassType, DefinedClass, MainThreadMarker};
-use objc2_app_kit::{NSApp, NSApplication, NSEvent};
+use objc2_app_kit::{NSApp, NSApplication, NSEvent, NSEventModifierFlags, NSEventType};
 use objc2_cef as objc2;
+
+fn shortcut_action(key_code: u16, modifiers: NSEventModifierFlags) -> Option<super::host::Action> {
+    if !modifiers.contains(NSEventModifierFlags::Command) {
+        return None;
+    }
+    match key_code {
+        40 if modifiers.contains(NSEventModifierFlags::Shift) => Some(super::host::Action::Toolbox),
+        40 => Some(super::host::Action::Sites),
+        _ => None,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn command_k_opens_sites_and_command_shift_k_opens_toolbox() {
+        let command = NSEventModifierFlags::Command;
+        assert!(matches!(
+            shortcut_action(40, command),
+            Some(super::super::host::Action::Sites)
+        ));
+        assert!(matches!(
+            shortcut_action(40, command | NSEventModifierFlags::Shift),
+            Some(super::super::host::Action::Toolbox)
+        ));
+        assert!(shortcut_action(40, NSEventModifierFlags::Shift).is_none());
+        assert!(shortcut_action(39, command).is_none());
+    }
+}
 
 #[derive(Default)]
 pub struct ApplicationState {
@@ -19,6 +50,12 @@ define_class!(
     impl ThorApplication {
         #[unsafe(method(sendEvent:))]
         unsafe fn send_event(&self, event: &NSEvent) {
+            if event.r#type() == NSEventType::KeyDown && !event.isARepeat() {
+                if let Some(action) = shortcut_action(event.keyCode(), event.modifierFlags()) {
+                    super::host::queue_action(action);
+                    return;
+                }
+            }
             let previous = self.ivars().sending_event.replace(Bool::YES);
             let _: () = unsafe { msg_send![super(self), sendEvent: event] };
             self.ivars().sending_event.set(previous);

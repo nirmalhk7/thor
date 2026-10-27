@@ -343,7 +343,6 @@ impl Default for FrontendEngine {
     }
 }
 
-
 // ===========================================================================
 // Wave-2 frontend features (12)
 // ===========================================================================
@@ -791,9 +790,10 @@ impl FrontendEngine {
             let prop = d.property.to_lowercase();
             let val = d.value.trim().to_lowercase();
             if (prop.contains("color") || val.starts_with('#') || val.starts_with("rgb"))
-                && (val.starts_with('#') || val.starts_with("rgb")) {
-                    *colors.entry(val.clone()).or_default() += 1;
-                }
+                && (val.starts_with('#') || val.starts_with("rgb"))
+            {
+                *colors.entry(val.clone()).or_default() += 1;
+            }
             if prop == "font-size" {
                 *fonts.entry(val.clone()).or_default() += 1;
             }
@@ -1368,11 +1368,7 @@ impl FrontendEngine {
 
     /// Structural hydration diff: parse HTML fragments into [`DomNode`] trees and
     /// walk them. Paths look like `html>body>div[0]` (tag + sibling index).
-    pub fn hydration_diff_lens(
-        &self,
-        server_html: &str,
-        client_html: &str,
-    ) -> HydrationDiffReport {
+    pub fn hydration_diff_lens(&self, server_html: &str, client_html: &str) -> HydrationDiffReport {
         let server = parse_html_to_dom(server_html);
         let client = parse_html_to_dom(client_html);
         self.hydration_diff_dom(&server, &client)
@@ -1578,10 +1574,8 @@ impl FrontendEngine {
     }
 
     pub fn focus_order_overlay(&self, nodes: &[FocusableNode]) -> FocusOrderReport {
-        let mut eligible: Vec<&FocusableNode> = nodes
-            .iter()
-            .filter(|n| n.visible && !n.disabled)
-            .collect();
+        let mut eligible: Vec<&FocusableNode> =
+            nodes.iter().filter(|n| n.visible && !n.disabled).collect();
         // HTML: positive tabindex (ascending) first, then tabindex 0 in DOM order.
         eligible.sort_by(|a, b| {
             let a_pos = a.tab_index > 0;
@@ -1607,7 +1601,10 @@ impl FrontendEngine {
         }
         for n in nodes {
             if n.tab_index < -1 {
-                issues.push(format!("{} has invalid tabindex {}", n.selector, n.tab_index));
+                issues.push(format!(
+                    "{} has invalid tabindex {}",
+                    n.selector, n.tab_index
+                ));
             }
             if !n.visible && n.tab_index >= 0 {
                 issues.push(format!("{} is focusable but not visible", n.selector));
@@ -1650,7 +1647,11 @@ impl FrontendEngine {
         let mut used_count: BTreeMap<String, usize> = BTreeMap::new();
         let mut undefined_refs = Vec::new();
         for r in references {
-            let name = r.trim().trim_start_matches("var(").trim_end_matches(')').trim();
+            let name = r
+                .trim()
+                .trim_start_matches("var(")
+                .trim_end_matches(')')
+                .trim();
             let name = name.split(',').next().unwrap_or(name).trim();
             if !name.starts_with("--") {
                 continue;
@@ -1715,7 +1716,7 @@ impl FrontendEngine {
             }
         }
         let mut offending_selectors: Vec<(String, usize)> = offending.into_iter().collect();
-        offending_selectors.sort_by(|a, b| b.1.cmp(&a.1));
+        offending_selectors.sort_by_key(|item| std::cmp::Reverse(item.1));
         let offending_selectors: Vec<String> = offending_selectors
             .into_iter()
             .take(10)
@@ -1970,7 +1971,6 @@ impl FrontendEngine {
             digest_hex: format!("{hash:016x}"),
         }
     }
-
 }
 
 fn json_type(v: &serde_json::Value) -> &'static str {
@@ -1992,7 +1992,12 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-fn walk_hydration(server: &DomNode, client: &DomNode, path: &str, out: &mut Vec<HydrationMismatch>) {
+fn walk_hydration(
+    server: &DomNode,
+    client: &DomNode,
+    path: &str,
+    out: &mut Vec<HydrationMismatch>,
+) {
     if out.len() >= 50 {
         return;
     }
@@ -2017,8 +2022,16 @@ fn walk_hydration(server: &DomNode, client: &DomNode, path: &str, out: &mut Vec<
     all.sort();
     all.dedup();
     for k in all {
-        let sv = server.attributes.get(&k).map(|s| s.as_str()).unwrap_or("<missing>");
-        let cv = client.attributes.get(&k).map(|s| s.as_str()).unwrap_or("<missing>");
+        let sv = server
+            .attributes
+            .get(&k)
+            .map(|s| s.as_str())
+            .unwrap_or("<missing>");
+        let cv = client
+            .attributes
+            .get(&k)
+            .map(|s| s.as_str())
+            .unwrap_or("<missing>");
         if sv != cv {
             out.push(HydrationMismatch {
                 path: format!("{path}@{k}"),
@@ -2125,7 +2138,11 @@ fn parse_html_to_dom(html: &str) -> DomNode {
                 continue;
             }
             let start = i;
-            while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'>' && bytes[i] != b'/' {
+            while i < bytes.len()
+                && !bytes[i].is_ascii_whitespace()
+                && bytes[i] != b'>'
+                && bytes[i] != b'/'
+            {
                 i += 1;
             }
             let tag = html[start..i].to_lowercase();
@@ -2169,7 +2186,8 @@ fn parse_html_to_dom(html: &str) -> DomNode {
                         }
                     } else {
                         let vstart = i;
-                        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'>' {
+                        while i < bytes.len() && !bytes[i].is_ascii_whitespace() && bytes[i] != b'>'
+                        {
                             i += 1;
                         }
                         val = html[vstart..i].to_string();
@@ -2312,14 +2330,9 @@ fn parse_css_take_coverage_delta(json: &str) -> Vec<CssRuleCoverage> {
                 } else {
                     selector
                 };
-                let used = ranges.iter().any(|(rs, re, c)| {
-                    *c > 0 && *rs < end && *re > start && (*re).min(end).saturating_sub((*rs).max(start)) > 0
-                        && {
-                            // Prefer coverage of the selector/body interior, not a 1-byte bleed.
-                            let overlap = (*re).min(end).saturating_sub((*rs).max(start));
-                            overlap * 2 >= end.saturating_sub(start) || (*rs >= start && *rs < end)
-                        }
-                });
+                let used = ranges
+                    .iter()
+                    .any(|range| css_range_covers_rule(range, start, end));
                 rules.push(CssRuleCoverage {
                     selector: sel,
                     used,
@@ -2341,6 +2354,19 @@ fn parse_css_take_coverage_delta(json: &str) -> Vec<CssRuleCoverage> {
         }
     }
     rules
+}
+
+fn css_range_covers_rule(range: &(usize, usize, u64), start: usize, end: usize) -> bool {
+    let (range_start, range_end, count) = *range;
+    if count == 0 || range_start >= end || range_end <= start {
+        return false;
+    }
+    let overlap_start = range_start.max(start);
+    let overlap_end = range_end.min(end);
+    let overlap = overlap_end.saturating_sub(overlap_start);
+    // Prefer coverage of the selector/body interior, not a 1-byte bleed.
+    overlap.saturating_mul(2) >= end.saturating_sub(start)
+        || (range_start >= start && range_start < end)
 }
 
 #[cfg(test)]
@@ -2529,12 +2555,19 @@ mod tests {
         let cov = FrontendEngine::css_coverage_from_take_coverage_delta(delta);
         assert!(!cov.rules.is_empty());
         assert!(cov.rules.iter().any(|r| r.used));
-        assert!(cov.rules.iter().any(|r| !r.used), "expected unused rule from count:0 range");
+        assert!(
+            cov.rules.iter().any(|r| !r.used),
+            "expected unused rule from count:0 range"
+        );
         assert!(cov.unused_bytes > 0);
         assert!(cov.total_bytes > 0);
 
         let script = FrontendEngine::focus_order_probe_script();
-        assert!(script.contains("tab_index") || script.contains("tabIndex") || script.contains("FOCUSABLE"));
+        assert!(
+            script.contains("tab_index")
+                || script.contains("tabIndex")
+                || script.contains("FOCUSABLE")
+        );
         let probe = r##"[{"selector":"#a","tab_index":0,"visible":true,"disabled":false,"order_hint":0},{"selector":"#b","tab_index":1,"visible":true,"disabled":false,"order_hint":1}]"##;
         let nodes = FrontendEngine::parse_focus_order_probe(probe).expect("nodes");
         let fo = e.focus_order_overlay(&nodes);
@@ -2548,8 +2581,16 @@ mod tests {
         let r = e.hydration_diff_lens("<div>a</div>", "<div>b</div>");
         assert!(r.mismatch_count >= 1);
         let cov = e.css_coverage_map(&[
-            CssRuleCoverage { selector: ".a".into(), used: true, bytes: 40 },
-            CssRuleCoverage { selector: ".b".into(), used: false, bytes: 60 },
+            CssRuleCoverage {
+                selector: ".a".into(),
+                used: true,
+                bytes: 40,
+            },
+            CssRuleCoverage {
+                selector: ".b".into(),
+                used: false,
+                bytes: 60,
+            },
         ]);
         assert_eq!(cov.unused_bytes, 60);
         assert!((cov.used_pct - 50.0).abs() < 0.01);
@@ -2559,13 +2600,37 @@ mod tests {
     fn test_focus_order_and_listeners() {
         let e = FrontendEngine::new();
         let fo = e.focus_order_overlay(&[
-            FocusableNode { selector: "#a".into(), tab_index: 0, visible: true, disabled: false, order_hint: 1 },
-            FocusableNode { selector: "#b".into(), tab_index: 2, visible: true, disabled: false, order_hint: 0 },
+            FocusableNode {
+                selector: "#a".into(),
+                tab_index: 0,
+                visible: true,
+                disabled: false,
+                order_hint: 1,
+            },
+            FocusableNode {
+                selector: "#b".into(),
+                tab_index: 2,
+                visible: true,
+                disabled: false,
+                order_hint: 0,
+            },
         ]);
         assert_eq!(fo.sequence[0], "#b");
         let el = e.event_listener_map(&[
-            EventListenerEntry { selector: "win".into(), event_type: "scroll".into(), passive: false, once: false, capture: false },
-            EventListenerEntry { selector: "win".into(), event_type: "scroll".into(), passive: false, once: false, capture: false },
+            EventListenerEntry {
+                selector: "win".into(),
+                event_type: "scroll".into(),
+                passive: false,
+                once: false,
+                capture: false,
+            },
+            EventListenerEntry {
+                selector: "win".into(),
+                event_type: "scroll".into(),
+                passive: false,
+                once: false,
+                capture: false,
+            },
         ]);
         assert!(!el.non_passive_scroll.is_empty());
         assert!(!el.duplicate_bindings.is_empty());
@@ -2587,11 +2652,22 @@ mod tests {
         let bud = e.selector_specificity_budget(&["#a .b c".into(), "div".into()], [0, 2, 1]);
         assert!(!bud.selectors_over_budget.is_empty());
         let thr = e.layout_thrash_detector(&[
-            LayoutOp { kind: "measure".into(), selector: ".x".into(), timestamp_ms: 0.0 },
-            LayoutOp { kind: "mutate".into(), selector: ".x".into(), timestamp_ms: 1.0 },
-            LayoutOp { kind: "measure".into(), selector: ".x".into(), timestamp_ms: 2.0 },
+            LayoutOp {
+                kind: "measure".into(),
+                selector: ".x".into(),
+                timestamp_ms: 0.0,
+            },
+            LayoutOp {
+                kind: "mutate".into(),
+                selector: ".x".into(),
+                timestamp_ms: 1.0,
+            },
+            LayoutOp {
+                kind: "measure".into(),
+                selector: ".x".into(),
+                timestamp_ms: 2.0,
+            },
         ]);
         assert!(thr.thrash_windows >= 2);
     }
-
 }

@@ -1,7 +1,9 @@
-//! Product-mode launch: Thor-owned Chromium is the browser; Rust is Labs sidecar.
+//! Transitional launcher for Thor-owned Chromium experiments.
 //!
-//! System Google Chrome is never the product surface. Legacy dual-window remains
-//! behind `THOR_LEGACY_DUAL_WINDOW=1`.
+//! The product entry point is the embedded CEF shell in `browser::cef`. This
+//! launcher is retained only for legacy migration tooling and is not a product
+//! browser path. System Chrome discovery remains disabled unless explicitly
+//! enabled for development.
 
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -10,14 +12,14 @@ use std::time::Duration;
 use super::chromium_runtime::THOR_CHROMIUM_PATH_ENV;
 use crate::paths::{thor_bundled_chromium_path, thor_chromium_profile_dir, thor_data_dir};
 
-/// Env: require owned Chromium (do not fall back to legacy dual-window).
+/// Legacy env: require Thor-owned Chromium during migration checks.
 pub const THOR_REQUIRE_OWNED_CHROMIUM_ENV: &str = "THOR_REQUIRE_OWNED_CHROMIUM";
-/// Env: allow discovering system Chrome/Chromium (labs/CI only — not product).
+/// Legacy env: allow discovering system Chrome/Chromium in development only.
 pub const THOR_ALLOW_SYSTEM_CHROME_ENV: &str = "THOR_ALLOW_SYSTEM_CHROME";
 /// Env: remote debugging port for self-CDP (default 9222).
 pub const THOR_REMOTE_DEBUGGING_PORT_ENV: &str = "THOR_REMOTE_DEBUGGING_PORT";
 
-/// Resolve Thor-owned Chromium executable (never system Chrome for product mode).
+/// Resolve the legacy Thor-owned Chromium executable.
 pub fn discover_owned_chromium_path() -> Option<PathBuf> {
     if let Ok(path) = std::env::var(THOR_CHROMIUM_PATH_ENV) {
         let p = PathBuf::from(path);
@@ -26,19 +28,16 @@ pub fn discover_owned_chromium_path() -> Option<PathBuf> {
         }
     }
 
-    for candidate in owned_chromium_candidates() {
-        if executable_exists(&candidate) {
-            return Some(candidate);
-        }
-    }
-    None
+    owned_chromium_candidates()
+        .into_iter()
+        .find(|candidate| executable_exists(candidate))
 }
 
 fn executable_exists(p: &Path) -> bool {
     p.is_file()
 }
 
-/// Candidate paths for Thor-owned builds / snapshot cache / app Frameworks.
+/// Candidate paths for legacy Chromium migration builds and snapshots.
 pub fn owned_chromium_candidates() -> Vec<PathBuf> {
     let mut out = Vec::new();
 
@@ -104,11 +103,11 @@ fn debugging_port() -> u16 {
         .unwrap_or(9222)
 }
 
-/// Spawn Thor-owned Chromium as the product browser and attach Labs (MCP / engine).
+/// Spawn the legacy Chromium browser and attach Labs (MCP / engine).
 pub fn run_owned_chromium_browser(executable: PathBuf) -> anyhow::Result<()> {
     crate::thor_info!(
         "thor::product",
-        "Thor product mode — owned Chromium: {}",
+        "Legacy Thor-owned Chromium mode: {}",
         executable.display()
     );
 
@@ -168,10 +167,7 @@ fn wait_for_devtools(http_base: &str, timeout: Duration) -> anyhow::Result<()> {
         .build()?;
     while std::time::Instant::now() < deadline {
         let ok = rt.block_on(async {
-            match reqwest::get(&url).await {
-                Ok(resp) if resp.status().is_success() => true,
-                _ => false,
-            }
+            matches!(reqwest::get(&url).await, Ok(resp) if resp.status().is_success())
         });
         if ok {
             return Ok(());
@@ -226,7 +222,9 @@ mod tests {
     #[test]
     fn owned_candidates_include_cache_and_frameworks() {
         let c = owned_chromium_candidates();
-        assert!(c.iter().any(|p| p.to_string_lossy().contains("ChromiumCache")));
+        assert!(c
+            .iter()
+            .any(|p| p.to_string_lossy().contains("ChromiumCache")));
         assert!(c.iter().any(|p| p.to_string_lossy().contains("Frameworks")));
     }
 

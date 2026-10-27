@@ -8,12 +8,12 @@ use std::time::{Duration, Instant};
 
 use tokio::task::JoinHandle;
 
+use crate::app_state::AppState;
 use crate::engine::{
     discover_chromium_path, ChromiumResult, ChromiumRuntime, ChromiumRuntimeConfig,
     IdentityContext, TabLifecycle, TabSession,
 };
 use crate::shell::engine_status;
-use crate::app_state::AppState;
 
 use super::{sanitize_and_record, TabMeta};
 
@@ -30,11 +30,7 @@ pub struct ChromiumTabs {
 impl ChromiumTabs {
     pub fn launch(hotkey_script: &str) -> anyhow::Result<Self> {
         if discover_chromium_path().is_none() {
-            anyhow::bail!(
-                "No Thor-owned Chromium found. Run ./scripts/bootstrap_chromium_snapshot.sh \
-                 (or build_chromium.sh), set THOR_CHROMIUM_PATH, or for labs-only system Chrome \
-                 set THOR_ALLOW_SYSTEM_CHROME=1."
-            );
+            anyhow::bail!("No executable is configured for the legacy Chromium shell. Thor's product browser embeds CEF.");
         }
         let runtime = ChromiumRuntime::launch_blocking(ChromiumRuntimeConfig {
             headful: true,
@@ -111,7 +107,7 @@ impl ChromiumTabs {
             .iter()
             .map(|(id, m)| (id.as_str(), m.title.as_str(), m.url.as_str(), m.last_active))
             .collect();
-        rows.sort_by(|a, b| b.3.cmp(&a.3));
+        rows.sort_by_key(|row| std::cmp::Reverse(row.3));
         rows.into_iter()
             .map(|(id, title, url, _)| (id, title, url))
             .collect()
@@ -186,8 +182,6 @@ impl ChromiumTabs {
                 if elapsed >= Duration::from_secs(3600) {
                     let _ = session.discard_blocking();
                 } else if elapsed >= Duration::from_secs(900) {
-                    let _ = session.soft_freeze_blocking();
-                } else {
                     let _ = session.soft_freeze_blocking();
                 }
             }
@@ -295,7 +289,10 @@ impl ChromiumTabs {
         for id in ids {
             self.maybe_attach_fetch(&id);
         }
-        println!("⚡ [Thor Fetch] intercept ON ({} tabs)", self.fetch_handles.len());
+        println!(
+            "⚡ [Thor Fetch] intercept ON ({} tabs)",
+            self.fetch_handles.len()
+        );
     }
 
     pub fn switch_tab(&mut self, target_id: &str) -> Option<String> {
@@ -406,11 +403,10 @@ impl ChromiumTabs {
                     println!("⚡ [Thor 4-Stage Lifecycle] Discarding tab after 1h idle: {id}");
                     let _ = session.discard_blocking();
                 }
-            } else if elapsed >= fifteen_min
-                && session.lifecycle() == TabLifecycle::Active {
-                    println!("⚡ [Thor 4-Stage Lifecycle] Freezing tab after 15m idle: {id}");
-                    let _ = session.soft_freeze_blocking();
-                }
+            } else if elapsed >= fifteen_min && session.lifecycle() == TabLifecycle::Active {
+                println!("⚡ [Thor 4-Stage Lifecycle] Freezing tab after 15m idle: {id}");
+                let _ = session.soft_freeze_blocking();
+            }
         }
 
         for id in expired_victims {

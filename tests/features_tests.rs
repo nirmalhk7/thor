@@ -7,7 +7,7 @@
 //! without panicking on representative inputs. Dedicated tests then drill into
 //! the critical features called out for the Universal Evidence Engine.
 //!
-//! NOTE on the registry API: the shipped implementation models feature maturity
+//! The registry API models feature maturity
 //! as [`FeatureStatus::{Stable, Beta, Experimental}`] and exposes the canonical
 //! set via `FeatureRegistry::new().all()` (all are enabled/"implemented" by
 //! default in [`FeatureEngine`]). These tests therefore assert
@@ -123,8 +123,15 @@ fn sample_load_metrics() -> LoadMetrics {
 fn test_registry_has_all_features() {
     let engine = FeatureEngine::new();
     let n = FeatureId::ALL.len();
-    assert!(n >= 84, "expected at least wave-2 QA expansion (84+), got {n}");
-    assert_eq!(engine.registry().len(), n, "registry must hold all feature ids");
+    assert!(
+        n >= 84,
+        "expected at least wave-2 QA expansion (84+), got {n}"
+    );
+    assert_eq!(
+        engine.registry().len(),
+        n,
+        "registry must hold all feature ids"
+    );
 
     let registry = FeatureRegistry::new();
     assert_eq!(registry.all().len(), n);
@@ -150,7 +157,11 @@ fn test_all_features_registered_enabled_and_have_status() {
         assert!(engine.is_enabled(id), "{} enabled", id.slug());
         implemented += 1;
     }
-    assert_eq!(implemented, FeatureId::ALL.len(), "all features must be implemented + enabled");
+    assert_eq!(
+        implemented,
+        FeatureId::ALL.len(),
+        "all features must be implemented + enabled"
+    );
 }
 
 #[test]
@@ -182,7 +193,10 @@ fn test_category_counts_sum_to_registry() {
     assert!(perf >= 13);
     assert_eq!(qa, 24, "QA wave-1+2 must be 24");
     assert!(ai >= 12);
-    assert_eq!(frontend + backend + sec + perf + qa + ai, FeatureId::ALL.len());
+    assert_eq!(
+        frontend + backend + sec + perf + qa + ai,
+        FeatureId::ALL.len()
+    );
 }
 
 #[test]
@@ -220,10 +234,7 @@ fn test_app_state_global_exposes_feature_engine() {
     let engine = AppState::global().features();
     assert_eq!(engine.registry().len(), FeatureId::ALL.len());
     // Sub-engines are reachable via the shared engine.
-    assert!(engine
-        .registry()
-        .get(FeatureId::IdorMatrix)
-        .is_some());
+    assert!(engine.registry().get(FeatureId::IdorMatrix).is_some());
 }
 
 // ===========================================================================
@@ -291,12 +302,25 @@ fn test_frontend_group_registered_and_executes() {
         .contains("my-widget"));
     // 9. Network<->Component binding
     let _ = fe.bind_network_to_components(
-        &[frontend::RenderWindow { component: "Cmp".into(), start_ms: 0, end_ms: 100 }],
-        &[frontend::NetworkEvent { url: "/api".into(), start_ms: 50, initiator_component: None }],
+        &[frontend::RenderWindow {
+            component: "Cmp".into(),
+            start_ms: 0,
+            end_ms: 100,
+        }],
+        &[frontend::NetworkEvent {
+            url: "/api".into(),
+            start_ms: 50,
+            initiator_component: None,
+        }],
     );
     // 10. Font Auditor
     let _ = fe.audit_fonts(
-        &[frontend::FontFace { family: "Inter".into(), weight: 400, font_display: None, bytes: 1000 }],
+        &[frontend::FontFace {
+            family: "Inter".into(),
+            weight: 400,
+            font_display: None,
+            bytes: 1000,
+        }],
         &["Inter".to_string()],
     );
     // 11. Z-Index Visualizer
@@ -318,17 +342,28 @@ fn test_backend_group_registered_and_executes() {
     let mut vars = HashMap::new();
     vars.insert("id".to_string(), "42".to_string());
     let req = be.build_request(
-        backend::ApiRequest { method: "GET".into(), url: "/u/{{id}}".into(), ..Default::default() },
+        backend::ApiRequest {
+            method: "GET".into(),
+            url: "/u/{{id}}".into(),
+            ..Default::default()
+        },
         &vars,
     );
     assert_eq!(req.url, "/u/42");
     let _ = be.to_intercepted(&req, "r1");
     // 2. Auth Vault
-    be.store_auth("api", backend::AuthScheme::Bearer { token: "abc".into() });
+    be.store_auth(
+        "api",
+        backend::AuthScheme::Bearer {
+            token: "abc".into(),
+        },
+    );
     assert!(be.auth_header("api").is_some());
     // 3. Contract Validation
     let schema = serde_json::json!({"type": "object", "required": ["id"]});
-    assert!(be.validate_contract(&serde_json::json!({"id": 1}), &schema).is_empty());
+    assert!(be
+        .validate_contract(&serde_json::json!({"id": 1}), &schema)
+        .is_empty());
     // 4. Webhook Sink
     be.record_webhook(backend::WebhookEvent {
         method: "POST".into(),
@@ -352,18 +387,29 @@ fn test_backend_group_registered_and_executes() {
     // 6. Request Chaining
     let mut login = backend::ChainStep {
         name: "login".into(),
-        request: backend::ApiRequest { method: "POST".into(), url: "/login".into(), ..Default::default() },
+        request: backend::ApiRequest {
+            method: "POST".into(),
+            url: "/login".into(),
+            ..Default::default()
+        },
         captures: HashMap::new(),
     };
     login.captures.insert("token".into(), "data.token".into());
     let use_step = backend::ChainStep {
         name: "me".into(),
-        request: backend::ApiRequest { method: "GET".into(), url: "/me?t={{token}}".into(), ..Default::default() },
+        request: backend::ApiRequest {
+            method: "GET".into(),
+            url: "/me?t={{token}}".into(),
+            ..Default::default()
+        },
         captures: HashMap::new(),
     };
     assert!(be.resolve_chain(&[login, use_step]).is_ok());
     // 7. gRPC / GraphQL
-    assert_eq!(be.analyze_graphql("query Q { user { id } }").operation_type, "query");
+    assert_eq!(
+        be.analyze_graphql("query Q { user { id } }").operation_type,
+        "query"
+    );
     assert!(be.parse_grpc_path("/pkg.Svc/Method").is_some());
     // 8. Trace Adjacency
     let _ = be.build_trace_graph(&[backend::Span {
@@ -374,18 +420,40 @@ fn test_backend_group_registered_and_executes() {
         duration_ms: 10.0,
     }]);
     // 9. Mock / Stub
-    be.add_mock(backend::MockRoute { method: "GET".into(), path_pattern: "/u/:id".into(), status: 200, body: "{}".into() });
+    be.add_mock(backend::MockRoute {
+        method: "GET".into(),
+        path_pattern: "/u/:id".into(),
+        status: 200,
+        body: "{}".into(),
+    });
     assert!(be.match_mock("GET", "/u/1").is_some());
     // 10. Chaos Injection (deterministic)
-    be.add_chaos_rule(backend::ChaosRule { url_pattern: "api".into(), added_latency_ms: 10, error_rate: 1.0, error_status: 500 });
-    assert_eq!(be.apply_chaos("https://api.x", "r1").forced_status, Some(500));
+    be.add_chaos_rule(backend::ChaosRule {
+        url_pattern: "api".into(),
+        added_latency_ms: 10,
+        error_rate: 1.0,
+        error_status: 500,
+    });
+    assert_eq!(
+        be.apply_chaos("https://api.x", "r1").forced_status,
+        Some(500)
+    );
     // 11. Idempotency Auditor
     let _ = be.audit_idempotency(&[
-        backend::IdempotencyEvent { method: "POST".into(), url: "/pay".into(), idempotency_key: None },
-        backend::IdempotencyEvent { method: "POST".into(), url: "/pay".into(), idempotency_key: None },
+        backend::IdempotencyEvent {
+            method: "POST".into(),
+            url: "/pay".into(),
+            idempotency_key: None,
+        },
+        backend::IdempotencyEvent {
+            method: "POST".into(),
+            url: "/pay".into(),
+            idempotency_key: None,
+        },
     ]);
     // 12. DB Adjacency
-    let _ = be.analyze_db(&["SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string()]);
+    let _ = be
+        .analyze_db(&["SELECT * FROM users JOIN orders ON users.id = orders.user_id".to_string()]);
 }
 
 #[test]
@@ -403,22 +471,36 @@ fn test_security_group_registered_and_executes() {
     }]);
     // 2. Response Diff
     let _ = se.diff_responses(
-        &security::HttpSnapshot { status: 200, headers: BTreeMap::new(), body: "a".into() },
-        &security::HttpSnapshot { status: 403, headers: BTreeMap::new(), body: "b".into() },
+        &security::HttpSnapshot {
+            status: 200,
+            headers: BTreeMap::new(),
+            body: "a".into(),
+        },
+        &security::HttpSnapshot {
+            status: 403,
+            headers: BTreeMap::new(),
+            body: "b".into(),
+        },
     );
     // 3. Header Analyzer
     assert_eq!(se.analyze_headers(&BTreeMap::new()).grade, "F");
     // 4. JWT Deep
-    assert!(se.inspect_jwt("eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.x", 0).is_ok());
+    assert!(se
+        .inspect_jwt("eyJhbGciOiJub25lIn0.eyJzdWIiOiIxIn0.x", 0)
+        .is_ok());
     // 5. Promote to Finding
     assert!(se
-        .promote_to_finding("bug", "https://x", vec![NetworkTrace {
-            method: "GET".into(),
-            url: "https://x/y".into(),
-            headers: HashMap::new(),
-            body: None,
-            status: 500,
-        }])
+        .promote_to_finding(
+            "bug",
+            "https://x",
+            vec![NetworkTrace {
+                method: "GET".into(),
+                url: "https://x/y".into(),
+                headers: HashMap::new(),
+                body: None,
+                status: 500,
+            }]
+        )
         .contains("# Finding"));
     // 6. Surface Crawler
     assert!(!se
@@ -434,7 +516,9 @@ fn test_security_group_registered_and_executes() {
         same_site: None,
     }]);
     // 8. Fuzz Repeater
-    assert!(!se.build_fuzz_cases("/q?x=FUZZ", security::FuzzCategory::Xss).is_empty());
+    assert!(!se
+        .build_fuzz_cases("/q?x=FUZZ", security::FuzzCategory::Xss)
+        .is_empty());
     // 9. CSRF Analyzer
     let _ = se.analyze_csrf(&security::CsrfContext {
         method: "POST".into(),
@@ -475,7 +559,11 @@ fn test_performance_group_registered_and_executes() {
     let pe = engine.perf();
     let budgets = PerformanceBudgets::core_web_vitals();
     // 1. Perf Budgets
-    let _ = pe.check_budgets(&budgets, Some(&sample_vitals()), Some(&sample_load_metrics()));
+    let _ = pe.check_budgets(
+        &budgets,
+        Some(&sample_vitals()),
+        Some(&sample_load_metrics()),
+    );
     // 2. Trace Diff
     let mut before = BTreeMap::new();
     before.insert("lcp".to_string(), 1000.0);
@@ -496,11 +584,20 @@ fn test_performance_group_registered_and_executes() {
     let _ = pe.analyze_waterfall(&res);
     // 4. Memory Leak Hunter
     let samples: Vec<perf_features::HeapSample> = (0..10)
-        .map(|i| perf_features::HeapSample { timestamp_ms: i * 1000, used_bytes: 10_000_000 + i * 5_000_000 })
+        .map(|i| perf_features::HeapSample {
+            timestamp_ms: i * 1000,
+            used_bytes: 10_000_000 + i * 5_000_000,
+        })
         .collect();
     assert!(pe.detect_leak(&samples).leaking);
     // 5. Synthetic Monitor
-    pe.record_synthetic(perf_features::SyntheticCheck { target: "api".into(), success: true, latency_ms: 100.0, timestamp_ms: 1, synthetic: false });
+    pe.record_synthetic(perf_features::SyntheticCheck {
+        target: "api".into(),
+        success: true,
+        latency_ms: 100.0,
+        timestamp_ms: 1,
+        synthetic: false,
+    });
     assert_eq!(pe.synthetic_summary("api").checks, 1);
     // 6. RUM vs Lab
     let _ = pe.rum_vs_lab(&sample_vitals(), &sample_vitals());
@@ -522,7 +619,10 @@ fn test_performance_group_registered_and_executes() {
         x_cache: Some("HIT".into()),
     }]);
     // 10. Vitals Under Load
-    assert_eq!(pe.vitals_knee(&[(1, 1500.0), (50, 2600.0)], 2500.0), Some(50));
+    assert_eq!(
+        pe.vitals_knee(&[(1, 1500.0), (50, 2600.0)], 2500.0),
+        Some(50)
+    );
     // 11. Flame Graph
     assert_eq!(pe.build_flame_graph(&["main;a 10".to_string()]).value, 10);
     // 12. Third-Party Attribution
@@ -619,7 +719,11 @@ fn test_performance_group_registered_and_executes() {
     }]);
     // Performance SLA
     let sla_engine = engine.sla();
-    let report = sla_engine.check_run(&sla::SlaEngine::web_performance_sla(), None, Some(&sample_vitals()));
+    let report = sla_engine.check_run(
+        &sla::SlaEngine::web_performance_sla(),
+        None,
+        Some(&sample_vitals()),
+    );
     assert!(report.overall_met);
 }
 
@@ -631,25 +735,45 @@ fn test_qa_group_registered_and_executes() {
     let qe = engine.qa();
     // 1. Resilient Locators
     assert!(!qe
-        .rank_locators(&qa::ElementSignals { test_id: Some("submit".into()), ..Default::default() })
+        .rank_locators(&qa::ElementSignals {
+            test_id: Some("submit".into()),
+            ..Default::default()
+        })
         .is_empty());
     // 2. Flake Radar
-    assert_eq!(qe.flake_radar("t", &[true, false, true, false]).classification, "flaky");
+    assert_eq!(
+        qe.flake_radar("t", &[true, false, true, false])
+            .classification,
+        "flaky"
+    );
     // 3. Visual Regression
     let base = vec![10u8; 64];
     assert!(qe.visual_regression(&base, &base, 0.01).passed);
     // 4. Identity Fixtures
-    let mut fx = qa::IdentityFixture { name: "admin".into(), role: "admin".into(), ..Default::default() };
+    let mut fx = qa::IdentityFixture {
+        name: "admin".into(),
+        role: "admin".into(),
+        ..Default::default()
+    };
     fx.cookies.insert("session".into(), "abc".into());
     qe.add_fixture(fx);
     assert!(qe.fixture_setup_script("admin").is_some());
     // 5. Data-Driven Scenarios
     let mut row = HashMap::new();
     row.insert("user".to_string(), "alice".to_string());
-    assert_eq!(qe.expand_data_driven("as {{user}}", &[row]), vec!["as alice"]);
+    assert_eq!(
+        qe.expand_data_driven("as {{user}}", &[row]),
+        vec!["as alice"]
+    );
     // 6. Real Vitals Gates
-    let bad = BrowserMetrics { lcp_ms: 9000.0, ..Default::default() };
-    assert!(!qe.vitals_gate(&bad, &PerformanceBudgets::core_web_vitals()).passed);
+    let bad = BrowserMetrics {
+        lcp_ms: 9000.0,
+        ..Default::default()
+    };
+    assert!(
+        !qe.vitals_gate(&bad, &PerformanceBudgets::core_web_vitals())
+            .passed
+    );
     // 7. Contract Testing
     let interactions = vec![qa::ContractInteraction {
         description: "get".into(),
@@ -658,11 +782,22 @@ fn test_qa_group_registered_and_executes() {
         expected_status: 200,
         response_schema: None,
     }];
-    let actuals = vec![qa::ActualInteraction { method: "GET".into(), path: "/u/1".into(), status: 200, body: None }];
+    let actuals = vec![qa::ActualInteraction {
+        method: "GET".into(),
+        path: "/u/1".into(),
+        status: 200,
+        body: None,
+    }];
     assert!(qe.verify_contract(&interactions, &actuals).satisfied);
     // 8. Deflaked Export + 9. CI Bundle
     let mut session = RecordedSession::new("Flow", "https://x");
-    session.add_trace(NetworkTrace { method: "GET".into(), url: "https://x/a".into(), headers: HashMap::new(), body: None, status: 200 });
+    session.add_trace(NetworkTrace {
+        method: "GET".into(),
+        url: "https://x/a".into(),
+        headers: HashMap::new(),
+        body: None,
+        status: 200,
+    });
     assert!(!qe.export_deflaked(&session).contains("waitForTimeout"));
     assert!(qe.export_ci_bundle(&session).contains("playwright"));
     // 10. Time-Travel Trace
@@ -672,7 +807,9 @@ fn test_qa_group_registered_and_executes() {
     assert!(qe.determinism(&["a".into(), "a".into()]).deterministic);
     // 12. Authz Matrix Tests
     let cases = qe.generate_authz_tests(&[("admin".to_string(), "/admin".to_string(), true)]);
-    assert!(qe.authz_tests_to_playwright("https://x", &cases).contains("toBeLessThan(300)"));
+    assert!(qe
+        .authz_tests_to_playwright("https://x", &cases)
+        .contains("toBeLessThan(300)"));
 
     // Wave 2 smokes
     let radar = qe.flake_radar("t", &[true, false, true]);
@@ -753,8 +890,14 @@ fn test_ai_group_registered_and_executes() {
     assert_eq!(ae.inspect_request(&body).model, "gpt-4o");
     // 2. Streaming Waterfall
     let chunks = vec![
-        ai::StreamChunk { raw: "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n".into(), arrival_ms: 100 },
-        ai::StreamChunk { raw: "data: [DONE]\n\n".into(), arrival_ms: 150 },
+        ai::StreamChunk {
+            raw: "data: {\"choices\":[{\"delta\":{\"content\":\"Hi\"}}]}\n\n".into(),
+            arrival_ms: 100,
+        },
+        ai::StreamChunk {
+            raw: "data: [DONE]\n\n".into(),
+            arrival_ms: 150,
+        },
     ];
     assert!(ae.streaming_waterfall(&chunks).total_tokens > 0);
     // 3. Prompt Diff
@@ -763,7 +906,12 @@ fn test_ai_group_registered_and_executes() {
     ae.log_cost("gpt-4o", 1000, 500);
     assert_eq!(ae.cost_summary().call_count, 1);
     // 5. Eval Replay
-    let _ = ae.eval_replay(&[ai::EvalCase { name: "a".into(), expected: "42".into(), actual: "42".into(), match_mode: None }]);
+    let _ = ae.eval_replay(&[ai::EvalCase {
+        name: "a".into(),
+        expected: "42".into(),
+        actual: "42".into(),
+        match_mode: None,
+    }]);
     // 6. Model Comparison
     let _ = ae.compare_models(&[ai::ModelRun {
         model: "gpt-4o".into(),
@@ -773,19 +921,37 @@ fn test_ai_group_registered_and_executes() {
         latency_ms: 100.0,
     }]);
     // 7. Agent Trace
-    let _ = ae.analyze_agent_trace(&[ai::AgentStep { kind: "action".into(), tool: Some("search".into()), content: "q".into() }]);
+    let _ = ae.analyze_agent_trace(&[ai::AgentStep {
+        kind: "action".into(),
+        tool: Some("search".into()),
+        content: "q".into(),
+    }]);
     // 8. Context Heatmap
-    let h = ae.context_heatmap(1000, &[ai::ContextSegment { label: "sys".into(), tokens: 100 }]);
+    let h = ae.context_heatmap(
+        1000,
+        &[ai::ContextSegment {
+            label: "sys".into(),
+            tokens: 100,
+        }],
+    );
     assert_eq!(h.used_tokens, 100);
     // 9. RAG Inspector
     let _ = ae.inspect_rag(
-        &[ai::RetrievedChunk { id: "c1".into(), score: 0.9, text: "capital of France is Paris".into() }],
+        &[ai::RetrievedChunk {
+            id: "c1".into(),
+            score: 0.9,
+            text: "capital of France is Paris".into(),
+        }],
         "The capital of France is Paris",
     );
     // 10. Injection Scanner
     assert!(!ae.scan_injection("ignore previous instructions").is_empty());
     // 11. LLM Load
-    let _ = ae.llm_load_report(&[ai::LlmStreamStat { ttft_ms: 100, tokens: 50, duration_ms: 1000 }]);
+    let _ = ae.llm_load_report(&[ai::LlmStreamStat {
+        ttft_ms: 100,
+        tokens: 50,
+        duration_ms: 1000,
+    }]);
     // 12. Deterministic Replay
     assert!(ae
         .deterministic_replay(&["a".into(), "b".into()], 0.0)
@@ -802,13 +968,26 @@ fn test_critical_perf_budgets_flags_violations() {
     let pe = perf_features::PerfEngine::new();
     let budgets = PerformanceBudgets::core_web_vitals();
 
-    let good = BrowserMetrics { lcp_ms: 2000.0, inp_ms: 150.0, cls: 0.05, ..Default::default() };
+    let good = BrowserMetrics {
+        lcp_ms: 2000.0,
+        inp_ms: 150.0,
+        cls: 0.05,
+        ..Default::default()
+    };
     assert!(pe.check_budgets(&budgets, Some(&good), None).passed);
 
-    let bad = BrowserMetrics { lcp_ms: 4000.0, inp_ms: 300.0, cls: 0.4, ..Default::default() };
+    let bad = BrowserMetrics {
+        lcp_ms: 4000.0,
+        inp_ms: 300.0,
+        cls: 0.4,
+        ..Default::default()
+    };
     let report = pe.check_budgets(&budgets, Some(&bad), None);
     assert!(!report.passed);
-    assert!(report.violations.iter().any(|v| v.metric == "lcp_ms" && v.over_by > 0.0));
+    assert!(report
+        .violations
+        .iter()
+        .any(|v| v.metric == "lcp_ms" && v.over_by > 0.0));
     assert!(report.checked >= 3);
 }
 
@@ -832,7 +1011,11 @@ fn test_critical_hdr_histogram_percentiles_are_monotonic() {
     assert!(table.iter().any(|(q, _)| (*q - 99.9).abs() < f64::EPSILON));
     // Table quantile values are non-decreasing.
     for w in table.windows(2) {
-        assert!(w[1].1 >= w[0].1, "percentile table not monotonic: {:?}", table);
+        assert!(
+            w[1].1 >= w[0].1,
+            "percentile table not monotonic: {:?}",
+            table
+        );
     }
 }
 
@@ -847,12 +1030,20 @@ fn test_critical_deflaked_playwright_export_has_no_wait_for_timeout() {
     session.add_dom_step(DomStep::new("click", "[data-testid=\"submit\"]"));
 
     let ts = qe.export_deflaked(&session);
-    assert!(!ts.contains("waitForTimeout"), "deflaked export must not use waitForTimeout");
-    assert!(ts.contains("await expect("), "deflaked export must use web-first assertions");
+    assert!(
+        !ts.contains("waitForTimeout"),
+        "deflaked export must not use waitForTimeout"
+    );
+    assert!(
+        ts.contains("await expect("),
+        "deflaked export must use web-first assertions"
+    );
     assert!(ts.contains("networkidle") || ts.contains("toBeVisible"));
 
     // The brittle-pattern detector should flag a raw waitForTimeout source.
-    let brittle = qe.detect_brittle_patterns("await page.waitForTimeout(1000);\nawait page.locator('div:nth-child(3)').click();");
+    let brittle = qe.detect_brittle_patterns(
+        "await page.waitForTimeout(1000);\nawait page.locator('div:nth-child(3)').click();",
+    );
     assert!(brittle.iter().any(|i| i.contains("waitForTimeout")));
     assert!(brittle.iter().any(|i| i.contains("nth-child")));
 }
@@ -862,15 +1053,33 @@ fn test_critical_authz_matrix_detects_escalation_and_over_restriction() {
     let se = security::SecurityEngine::new();
     let report = se.build_authz_matrix(&[
         // Non-privileged role reaching a privileged endpoint => escalation.
-        security::AuthzProbe { role: "user".into(), endpoint: "/admin".into(), should_allow: false, status: 200 },
+        security::AuthzProbe {
+            role: "user".into(),
+            endpoint: "/admin".into(),
+            should_allow: false,
+            status: 200,
+        },
         // Legit admin denied => over-restriction.
-        security::AuthzProbe { role: "admin".into(), endpoint: "/admin".into(), should_allow: true, status: 403 },
+        security::AuthzProbe {
+            role: "admin".into(),
+            endpoint: "/admin".into(),
+            should_allow: true,
+            status: 403,
+        },
         // Correct: user allowed on their own resource.
-        security::AuthzProbe { role: "user".into(), endpoint: "/me".into(), should_allow: true, status: 200 },
+        security::AuthzProbe {
+            role: "user".into(),
+            endpoint: "/me".into(),
+            should_allow: true,
+            status: 200,
+        },
     ]);
     assert_eq!(report.escalations, 1);
     assert_eq!(report.over_restrictions, 1);
-    assert!(report.cells.iter().any(|c| c.verdict == "PRIVILEGE-ESCALATION"));
+    assert!(report
+        .cells
+        .iter()
+        .any(|c| c.verdict == "PRIVILEGE-ESCALATION"));
     assert!(report.cells.iter().any(|c| c.verdict == "OVER-RESTRICTED"));
     assert!(report.cells.iter().any(|c| c.verdict == "OK"));
 }
@@ -931,8 +1140,15 @@ fn test_critical_resilient_locators_prefer_test_id_and_role() {
     // The underlying LocatorCandidate emits Playwright role/test-id locators and
     // infers a test-id from a raw selector.
     let cand = LocatorCandidate::from_selector("[data-testid=\"login\"]");
-    assert_eq!(cand.to_playwright().as_deref(), Some("page.getByTestId('login')"));
-    let role_only = LocatorCandidate { role: Some("button".into()), name: Some("Save".into()), ..Default::default() };
+    assert_eq!(
+        cand.to_playwright().as_deref(),
+        Some("page.getByTestId('login')")
+    );
+    let role_only = LocatorCandidate {
+        role: Some("button".into()),
+        name: Some("Save".into()),
+        ..Default::default()
+    };
     assert_eq!(
         role_only.to_playwright().as_deref(),
         Some("page.getByRole('button', { name: 'Save' })")
@@ -948,15 +1164,30 @@ fn test_performance_sla_pass_fail_and_error_budget() {
     let engine = sla::SlaEngine::new();
     let sla = sla::SlaEngine::web_performance_sla();
 
-    let good = BrowserMetrics { lcp_ms: 2000.0, inp_ms: 150.0, cls: 0.05, ttfb_ms: 500.0, ..Default::default() };
+    let good = BrowserMetrics {
+        lcp_ms: 2000.0,
+        inp_ms: 150.0,
+        cls: 0.05,
+        ttfb_ms: 500.0,
+        ..Default::default()
+    };
     let report = engine.check_run(&sla, None, Some(&good));
     assert!(report.overall_met);
     assert_eq!(report.met_count, report.total);
 
-    let bad = BrowserMetrics { lcp_ms: 3200.0, inp_ms: 150.0, cls: 0.05, ttfb_ms: 500.0, ..Default::default() };
+    let bad = BrowserMetrics {
+        lcp_ms: 3200.0,
+        inp_ms: 150.0,
+        cls: 0.05,
+        ttfb_ms: 500.0,
+        ..Default::default()
+    };
     let report = engine.check_run(&sla, None, Some(&bad));
     assert!(!report.overall_met);
-    assert!(report.results.iter().any(|r| r.metric == "lcp_ms" && !r.met));
+    assert!(report
+        .results
+        .iter()
+        .any(|r| r.metric == "lcp_ms" && !r.met));
 
     // Error budget maths: 99.9% target, observed 99.95% -> ~half budget left.
     let remaining = sla::SlaEngine::error_budget_remaining(99.9, 99.95);
@@ -964,7 +1195,11 @@ fn test_performance_sla_pass_fail_and_error_budget() {
     assert!(sla::SlaEngine::error_budget_remaining(99.9, 99.0) < 0.0);
 
     // Reliability SLA derived from a real load run.
-    let reliability = engine.check_run(&sla::SlaEngine::reliability_sla(), Some(&sample_load_metrics()), None);
+    let reliability = engine.check_run(
+        &sla::SlaEngine::reliability_sla(),
+        Some(&sample_load_metrics()),
+        None,
+    );
     assert_eq!(reliability.total, 4);
 }
 
@@ -975,11 +1210,12 @@ fn test_performance_sla_pass_fail_and_error_budget() {
 #[test]
 fn test_promote_to_test_export_formats() {
     let mut session = RecordedSession::new("Checkout", "https://shop.example.com");
-    session.add_dom_step(
-        DomStep::new("fill", "#qty")
-            .with_value("2")
-            .with_locator(LocatorCandidate { test_id: Some("qty".into()), ..Default::default() }),
-    );
+    session.add_dom_step(DomStep::new("fill", "#qty").with_value("2").with_locator(
+        LocatorCandidate {
+            test_id: Some("qty".into()),
+            ..Default::default()
+        },
+    ));
     session.add_trace(NetworkTrace {
         method: "POST".into(),
         url: "https://shop.example.com/cart".into(),
@@ -993,10 +1229,19 @@ fn test_promote_to_test_export_formats() {
     assert!(pw.contains("page.getByTestId('qty')"));
     assert!(!pw.contains("waitForTimeout"));
 
-    assert!(TestGenerator::promote_to_test(&session, ExportFormat::K6Js).contains("http.request('POST'"));
-    assert!(TestGenerator::promote_to_test(&session, ExportFormat::Curl).contains("curl -i -X POST"));
-    assert!(TestGenerator::promote_to_test(&session, ExportFormat::EvalHarness).contains("expectStatus: 500"));
-    assert!(TestGenerator::promote_to_test(&session, ExportFormat::CiBundle).contains("playwright install"));
+    assert!(TestGenerator::promote_to_test(&session, ExportFormat::K6Js)
+        .contains("http.request('POST'"));
+    assert!(
+        TestGenerator::promote_to_test(&session, ExportFormat::Curl).contains("curl -i -X POST")
+    );
+    assert!(
+        TestGenerator::promote_to_test(&session, ExportFormat::EvalHarness)
+            .contains("expectStatus: 500")
+    );
+    assert!(
+        TestGenerator::promote_to_test(&session, ExportFormat::CiBundle)
+            .contains("playwright install")
+    );
 
     let finding = TestGenerator::promote_to_test(&session, ExportFormat::Finding);
     assert!(finding.contains("# Finding: Checkout"));

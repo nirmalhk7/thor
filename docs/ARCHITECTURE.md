@@ -1,104 +1,48 @@
-# Thor System Architecture & Operating Manual
+# Thor Architecture
 
-## Overview
+## Product runtime
 
-**Thor** is a high-performance, ephemeral developer browser designed for full-stack engineers, security specialists, performance auditors, AI/LLM developers, and Web3 builders. Thor prioritizes ultra-low weight, microsecond latency, and deep developer instrumentation over consumer feature bloat.
+Thor’s product is a native Rust shell with CEF embedded for page rendering. The executable dispatches CEF helper processes before initializing the main UI, then loads the bundled CEF framework and creates CEF browser views inside Thor’s window. Thor ships the pinned prebuilt CEF distribution; it does not fetch or build Chromium source.
 
-> **Core Positioning:**  
-> *"A high-performance, ephemeral developer browser where every tab is an isolated experiment and every interaction can become a test, trace, benchmark, finding, or reproducible artifact."*
-
----
-
-## Architectural Principles
-
-1. **Chromium Internals for Semantics**: Native Chromium tab target management via Chrome DevTools Protocol (CDP) for modern web compatibility and Web Vitals observation.
-2. **CDP for Developer Instrumentation**: Zero-friction network interception, DOM querying, layout vector rendering, and metrics collection.
-3. **Rust for Orchestration**: High-concurrency event indexing, lock-free metrics aggregation, polyglot test generation, and protocol load generation.
-4. **Zero Stub/Fake UI**: Every UI element in Thor is backed by real Rust state in `AppState::global()` — no simulated RNG or fake metrics. Offline-only Feature Suite tools are labeled **Analyzer (offline)**; live labs are consent-gated.
-5. **Engineer Feature Suite**: Process-wide `FeatureEngine` (144 IDs) + `FeatureOrchestrator` IPC from Developer Control Center (`Cmd+⇧K`).
-
----
-
-## 3-Level Isolation Hierarchy
-
-Thor enforces strict memory and state separation across three distinct isolation tiers:
-
-```mermaid
-graph TD
-    A[Level 1: Dev Profile] --> B1[Identity Context: Admin]
-    A --> B2[Identity Context: Standard User]
-    A --> B3[Identity Context: Ephemeral Anonymous]
-    B1 --> C1[Tab 1: Active]
-    B1 --> C2[Tab 2: Frozen]
-    B2 --> C3[Tab 3: Discarded]
-    B3 --> C4[Tab 4: Active Ephemeral]
+```text
+Thor.app
+├── Native window and browser toolbar
+├── CEF browser views and renderer/helper subprocesses
+├── BrowserSession: tabs and identity metadata
+├── CEF RequestContexts: identity storage boundaries
+└── Rust engines: API execution, FeatureEngine, evidence, security, load
 ```
 
-### Level 1: Profile Level
-- **Scope**: Global developer settings, bookmarks database (`~/.gemini/antigravity/thor/bookmarks.json`), root CA certificates (`Thor Dev CA`), and IDE bridge registration (`vscode://`, `cursor://`).
-- **Persistence**: Persistent across browser sessions. Zero global browsing history DB.
+`src/main.rs` enters `src/browser/cef`. `src/browser/cef/mod.rs` dispatches subprocesses, loads the CEF framework, sets the Thor cache root, and configures the dedicated macOS Keychain service `Thor Safe Storage` with account `Thor`. The legacy Chromium and Wry modules are migration code; they are not Thor’s product launch path.
 
-### Level 2: Identity Context Level
-- **Scope**: Isolated `cookies`, `localStorage`, `IndexedDB`, `ServiceWorkers`, and authentication tokens (`Admin`, `Standard User`, `Anonymous`).
-- **Isolation**: Prevents cross-context session contamination. Enables multi-role IDOR matrix testing across different identity contexts within the same browser session.
-- **Lifecycle**: Disposable tabs purge ephemeral identity context immediately on close.
+## Window and browser controls
 
-### Level 3: Tab Level
-- **Scope**: Tab-scoped history list, scroll position, trace buffer, CDP event targets, and layout overlays.
-- **Lifecycle**: Strictly tab-scoped. Wiped clean automatically on tab closure or 24-hour Garbage Collection.
+`src/browser/cef/host.rs` owns the native Thor window, toolbar, tab views, CEF request contexts, and browser session. The toolbar provides navigation, reload, workspace, address entry, and the Developer control. Cmd+K opens Sites; Cmd+Shift+K opens the Toolbox. Both routes resolve to native Thor actions.
 
----
+Each identity receives a CEF `RequestContext`. Persistent identities use a cache directory under `Thor/CEF/Identities/<identity-id>`; disposable identities use an empty cache path and do not persist session cookies. Tabs are created with their identity’s context.
 
-## 4-Stage Ephemeral Tab Lifecycle
+## Embedded developer workspaces
 
-To ensure Thor remains significantly lighter than Google Chrome and Firefox, tabs progress through four automated lifecycle stages:
+The API workspace, Security workspace, home surface, and Developer Control Center are served as `thor://workbench/...` resources by `src/browser/cef/host/workspace.rs`. The resource handler serves compiled-in assets; the browser does not call a separate localhost workbench server.
 
-```mermaid
-stateDiagram-v2
-    [*] --> Active: User opens tab
-    Active --> Frozen: 15m idle (CDP Page.stopLoading & Page.setWebLifecycleState)
-    Frozen --> Discarded: 1h idle (CDP target detach & RAM release)
-    Discarded --> Expired: 24h idle GC (TabSession close & history wipe)
-    Expired --> [*]
-    
-    Frozen --> Active: User switches to tab (0.0ms stall)
-    Discarded --> Active: User switches to tab (Restores URL)
+Workspace pages communicate with the Rust `Workbench` through CEF message routing. Rust validates the trusted scheme, host, main frame, command type, persistence flag, and request size before dispatch. API execution uses the shared `HttpService`; security and feature requests route to existing Rust engines through `AppState::global()`. The pages use a restrictive CSP and do not enable general network connections.
+
+## Data and trust boundaries
+
+- Browser profile data lives under `thor_data_dir()/CEF`.
+- Persistent identity storage is separated by CEF request context.
+- Disposable identity contexts are configured without a disk cache path and with session-cookie persistence disabled.
+- Workbench commands are accepted only from trusted top-level `thor://workbench` documents and only for the page’s allowed command set.
+- Privileged testing operations remain subject to Rust consent checks; UI visibility alone does not grant permission.
+
+## Build and verification
+
+The CEF crate resolves a pinned prebuilt CEF distribution. No Chromium source checkout or depot_tools are required. Legacy scripts named `fetch_chromium.sh`, `build_chromium.sh`, `run_thor_chromium.sh`, and `bootstrap_chromium_snapshot.sh` are disabled.
+
+```bash
+cargo check --locked --all-targets
+cargo clippy --locked --all-targets -- -D warnings
+cargo test --locked --lib
+cargo test --locked --test workbench_tests
+cargo test --locked --test integration_tests
 ```
-
-1. **Active (0 – 15m foreground)**:
-   - Full render loop and CDP observation active. RAM footprint ~42.5 MB.
-2. **Frozen (15m – 1h idle)**:
-   - CDP `Page.stopLoading` and `Page.setWebLifecycleState(Frozen)`.
-   - Halts JS timers and rendering while preserving DOM state. Zero process stall (0.0ms resume latency). RAM footprint reduced to ~8.2 MB.
-3. **Discarded (1h – 24h idle)**:
-   - CDP target detach and memory release. Preserves tab title, URL, and scroll position. RAM footprint < 0.5 MB.
-4. **Expired ($\ge$ 24h auto-close)**:
-   - Automatic close and complete wipe of tab-scoped history and trace buffers.
-
----
-
-## Process & Runtime Architecture
-
-Thor supports dual execution runtime models:
-
-1. **Headful Chromium Process Mode (`chromium_shell::run_chromium_shell`)**:
-   - Spawns single Chromium process for page content.
-   - AppKit/tao window loop renders Thor's native developer toolbar, command palette (`Cmd+K`), and specialist toolbox (`Cmd+Shift+K`).
-   - Managed via `shell/chromium_tabs.rs` and `engine/chromium_runtime.rs`.
-2. **Wry WebKit Shell Mode (`run_wry_shell`)**:
-   - Fallback mode enabled when `THOR_DUAL_WINDOW` environment variable is unset or set to `0`.
-
----
-
-## Subsystem Map
-
-- **`src/main.rs`**: Entry point (mimalloc allocator + Tokio multi-thread runtime + shell runner).
-- **`src/lib.rs`**: Library crate `thor`.
-- **`src/app_state.rs`**: Global thread-safe singleton state (`AppState::global()`), including `FeatureEngine` + `EngineHandle`.
-- **`src/engine/`**: Chromium runtime launcher, CDP tab session manager, prewarm pool, lifecycle freezer (Instant-timed freeze samples), and `TabEvalHandle` for DevCC `from_active_tab`.
-- **`src/shell/`**: Native AppKit toolbar, chrome UI HTML/JS renderer (`gui.rs` Developer Control Center), and IPC dispatch (`feature_list` / `feature_invoke` / `lens_payload`).
-- **`src/features/`**: Engineer Feature Suite — **144** `FeatureId`s across Frontend / Backend / Security / Performance / QA / AI; `FeatureOrchestrator`, CDP bridge, and feature-path SLAs.
-- **`src/dx/`**: Command palette (`Cmd+K`), CSS layout overlay, LLM studio, clean context builder (`Cmd+Shift+C`), Web3 inspector, polyglot test generator (Promote to Test + CI compose), and IDE bridge.
-- **`src/net/`**: Security shield, IDOR matrix scanner, traffic tamper engine, SSL CA generator, Locust load testing proxy, and lab consent / abuse-target gates.
-- **`src/mcp/`**: Model Context Protocol (MCP) server (`server.rs`) and 8 browser automation tools (`tools.rs`).
-- **`src/load/`**: Thor load engine, scenario compiler, lock-free atomic metrics (SoftNav + transfer bytes), browser Web Vitals runner, and Rust protocol scale runner.

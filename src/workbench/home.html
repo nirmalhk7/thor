@@ -1,0 +1,22 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Workspace — Thor</title><link rel="stylesheet" href="/workspace.css"><script defer src="/workspace.js"></script></head>
+<body>
+<header class="topline"><a class="wordmark" href="/" aria-label="Thor workspace"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 6h14M12 6v14M8 3h8"/></svg>Thor</a><span class="muted">Your browser. Your workspace.</span></header>
+<main class="start">
+  <h1>What are you working on?</h1>
+  <p class="start-intro">Open a site, work with an API, or investigate a response.</p>
+  <form class="destination" id="destination-form">
+    <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="8"/><path d="M4 12h16M12 4c4 4 4 12 0 16M12 4c-4 4-4 12 0 16"/></svg>
+    <label class="sr-only" for="destination">Website address</label><input id="destination" placeholder="Enter a URL or localhost address" autocomplete="off" spellcheck="false" aria-describedby="address-error">
+    <button type="submit" aria-label="Open website"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></button>
+  </form>
+  <p id="address-error" role="status"></p>
+  <nav class="workflow-list" aria-label="Developer workspaces">
+    <a class="workflow" href="/api"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m8 5-6 7 6 7m8-14 6 7-6 7m-3-16-2 18"/></svg><div><h2>API workspace</h2><p class="description">Compose requests, inspect responses, and keep your work in projects.</p></div><svg class="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a>
+    <a class="workflow" href="/security"><svg viewBox="0 0 24 24" aria-hidden="true"><path d="m12 3 8 3v6c0 5-8 9-8 9s-8-4-8-9V6l8-3Z"/><path d="m8 12 3 3 5-6"/></svg><div><h2>Security workspace</h2><p class="description">Analyze security headers, inspect JWTs, and compare responses locally.</p></div><svg class="arrow" viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h14m-5-5 5 5-5 5"/></svg></a>
+  </nav>
+  <p class="footnote">Saved API requests stay with your projects. Unsaved browsing history ends when its tab closes.</p>
+  <div class="shortcuts"><span><kbd id="shortcut-sites">⌘ K</kbd> Sites</span><span><kbd id="shortcut-tools">⌘ ⇧ K</kbd> Toolbox</span><span><kbd id="shortcut-address">⌘ L</kbd> Address</span><span><kbd id="shortcut-tab">⌘ T</kbd> New tab</span><span><kbd id="shortcut-close">⌘ W</kbd> Close tab</span></div>
+</main>
+</body></html>

@@ -2,11 +2,13 @@
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>API — Thor</title><link rel="stylesheet" href="/workbench.css"><script defer src="/workbench.js"></script></head>
 <body>
 <aside aria-label="Saved API requests">
-  <h1>API</h1>
+  <a class="workspace-home" href="/">Thor <span>Workspace</span></a>
+  <h1>API workspace</h1>
   <label for="project">Project</label><select id="project"><option value="">Select a project</option></select>
   <form id="project-form"><label class="sr-only" for="project-name">New project name</label><input id="project-name" placeholder="New project name" required maxlength="120"><button type="submit">Create</button></form>
   <div class="section-label">Saved requests</div><nav id="requests" aria-label="Requests"><p class="muted">Create a project to keep requests.</p></nav>
   <button id="new-request" class="quiet">New request</button>
+  <a class="workspace-security" href="/security">Security analyzers</a>
   <p class="aside-note">Requests persist. Browsing history stays separate.</p>
 </aside>
 <main>

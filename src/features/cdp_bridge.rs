@@ -263,7 +263,7 @@ fn parse_cdp_timing(
     connection_reused: bool,
 ) -> (f64, f64, f64, f64, f64) {
     let Some(t) = timing else {
-        return (0.0, if connection_reused { 0.0 } else { 0.0 }, 0.0, 0.0, 0.0);
+        return (0.0, 0.0, 0.0, 0.0, 0.0);
     };
     let f = |key: &str| t.get(key).and_then(|v| v.as_f64()).unwrap_or(-1.0);
     let request_time = f("requestTime");
@@ -477,23 +477,21 @@ impl CdpBridge {
             None => return Vec::new(),
         };
         arr.into_iter()
-            .filter_map(|v| {
-                Some(crate::load::SoftNavRecord {
-                    navigation_id: v
-                        .get("navigation_id")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("1")
-                        .to_string(),
-                    url: v
-                        .get("url")
-                        .and_then(|x| x.as_str())
-                        .unwrap_or("")
-                        .to_string(),
-                    lcp_ms: v.get("lcp_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                    inp_ms: v.get("inp_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                    cls: v.get("cls").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                    ttfb_ms: v.get("ttfb_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
-                })
+            .map(|v| crate::load::SoftNavRecord {
+                navigation_id: v
+                    .get("navigation_id")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("1")
+                    .to_string(),
+                url: v
+                    .get("url")
+                    .and_then(|x| x.as_str())
+                    .unwrap_or("")
+                    .to_string(),
+                lcp_ms: v.get("lcp_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                inp_ms: v.get("inp_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                cls: v.get("cls").and_then(|x| x.as_f64()).unwrap_or(0.0),
+                ttfb_ms: v.get("ttfb_ms").and_then(|x| x.as_f64()).unwrap_or(0.0),
             })
             .collect()
     }
@@ -559,9 +557,9 @@ impl CdpBridge {
                 start_ms: req.timestamp as f64,
                 ttfb_ms: download_ms,
                 bytes,
-                from_cache: response_headers
-                    .iter()
-                    .any(|(k, v)| k.eq_ignore_ascii_case("x-cache") && v.to_lowercase().contains("hit")),
+                from_cache: response_headers.iter().any(|(k, v)| {
+                    k.eq_ignore_ascii_case("x-cache") && v.to_lowercase().contains("hit")
+                }),
                 request_headers: req.headers.clone(),
                 response_headers,
                 ..Default::default()
@@ -882,7 +880,6 @@ impl CdpBridge {
             })
             .collect()
     }
-
 }
 
 fn host_of(url: &str) -> Option<String> {
@@ -1152,7 +1149,10 @@ mod tests {
         assert_eq!(pool.len(), 2);
         assert_eq!(pool[0].connection_id, "42");
         assert_eq!(pool[1].connection_id, "42");
-        assert!(pool[1].reused, "second request on same connectionId must be reused");
+        assert!(
+            pool[1].reused,
+            "second request on same connectionId must be reused"
+        );
         assert_eq!(pool[0].protocol.as_deref(), Some("h3"));
 
         let h3 = b.http3_path_samples();

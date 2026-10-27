@@ -249,7 +249,6 @@ impl Default for SecurityEngine {
     }
 }
 
-
 // ===========================================================================
 // Wave-2 security features (12)
 // ===========================================================================
@@ -642,7 +641,8 @@ impl SecurityEngine {
                     header: "content-security-policy".into(),
                     present: true,
                     severity: "low".into(),
-                    recommendation: "CSP uses a wildcard (*) source — tighten allowed origins".into(),
+                    recommendation: "CSP uses a wildcard (*) source — tighten allowed origins"
+                        .into(),
                 });
             }
         }
@@ -1359,14 +1359,13 @@ impl SecurityEngine {
         if cfg.response_types_supported.iter().any(|r| r == "token") {
             issues.push("implicit flow (response_type=token) enabled".into());
         }
-        if cfg
-            .grant_types_supported
-            .iter()
-            .any(|g| g == "password")
-        {
+        if cfg.grant_types_supported.iter().any(|g| g == "password") {
             issues.push("resource-owner password credentials grant enabled".into());
         }
-        let severity = if issues.iter().any(|i| i.contains("not HTTPS") || i.contains("password")) {
+        let severity = if issues
+            .iter()
+            .any(|i| i.contains("not HTTPS") || i.contains("password"))
+        {
             "high"
         } else if issues.is_empty() {
             "none"
@@ -1415,7 +1414,10 @@ impl SecurityEngine {
 
     /// Consent-aware: only flags fixation when login succeeds; always requires
     /// `target_url` and gates via `require_lab_consent` before analysis.
-    pub fn session_fixation_lab(&self, probe: &SessionFixationProbe) -> Result<SessionFixationReport, String> {
+    pub fn session_fixation_lab(
+        &self,
+        probe: &SessionFixationProbe,
+    ) -> Result<SessionFixationReport, String> {
         if probe.target_url.trim().is_empty() {
             return Err("session-fixation-lab requires target_url".into());
         }
@@ -1426,8 +1428,8 @@ impl SecurityEngine {
                 detail: format!("login did not succeed (status {})", probe.login_status),
             });
         }
-        let vulnerable = !probe.pre_auth_session.is_empty()
-            && probe.pre_auth_session == probe.post_auth_session;
+        let vulnerable =
+            !probe.pre_auth_session.is_empty() && probe.pre_auth_session == probe.post_auth_session;
         Ok(SessionFixationReport {
             vulnerable,
             detail: if vulnerable {
@@ -1452,10 +1454,7 @@ impl SecurityEngine {
                 (true, true) => "OK-ALLOW",
                 (false, false) => "OK-DENY",
             };
-            cells.push(format!(
-                "{} {} {}: {verdict}",
-                p.role, p.operation, p.field
-            ));
+            cells.push(format!("{} {} {}: {verdict}", p.role, p.operation, p.field));
         }
         GraphqlAuthzReport { escalations, cells }
     }
@@ -1464,10 +1463,7 @@ impl SecurityEngine {
         let sent: std::collections::HashSet<_> = diff.sent_fields.iter().collect();
         let accepted: std::collections::HashSet<_> = diff.accepted_fields.iter().collect();
         let privileged: std::collections::HashSet<_> = diff.privileged_fields.iter().collect();
-        let unexpected: Vec<String> = accepted
-            .difference(&sent)
-            .map(|s| (*s).clone())
-            .collect();
+        let unexpected: Vec<String> = accepted.difference(&sent).map(|s| (*s).clone()).collect();
         let privileged_accepted: Vec<String> = accepted
             .intersection(&privileged)
             .map(|s| (*s).clone())
@@ -1491,9 +1487,7 @@ impl SecurityEngine {
         let mut min_start = u64::MAX;
         let mut max_end = 0u64;
         for a in attempts {
-            *outcomes
-                .entry((a.status, a.body_hash.clone()))
-                .or_default() += 1;
+            *outcomes.entry((a.status, a.body_hash.clone())).or_default() += 1;
             min_start = min_start.min(a.start_ms);
             max_end = max_end.max(a.end_ms);
         }
@@ -1637,10 +1631,11 @@ impl SecurityEngine {
                 None => missing_integrity.push(s.src.clone()),
                 Some(integ) => {
                     let lower = integ.to_lowercase();
-                    if lower.starts_with("sha256-") || lower.starts_with("sha384-") || lower.starts_with("sha512-") {
+                    if lower.starts_with("sha256-")
+                        || lower.starts_with("sha384-")
+                        || lower.starts_with("sha512-")
+                    {
                         // ok
-                    } else if lower.starts_with("sha1-") || lower.starts_with("md5-") {
-                        weak_algo.push(s.src.clone());
                     } else {
                         weak_algo.push(s.src.clone());
                     }
@@ -1669,10 +1664,9 @@ impl SecurityEngine {
                         p.role, p.url
                     ));
                 }
-                (true, false) => findings.push(format!(
-                    "{} denied from {} unexpectedly",
-                    p.role, p.url
-                )),
+                (true, false) => {
+                    findings.push(format!("{} denied from {} unexpectedly", p.role, p.url))
+                }
                 _ => {}
             }
         }
@@ -1681,7 +1675,6 @@ impl SecurityEngine {
             findings,
         }
     }
-
 }
 
 fn templatize_path(path: &str) -> String {
@@ -1962,7 +1955,11 @@ fn oob_token_from_request(raw: &str) -> (String, String) {
         .nth(1)
         .unwrap_or("/")
         .to_string();
-    let first_seg = path.trim_start_matches('/').split(['/', '?']).next().unwrap_or("");
+    let first_seg = path
+        .trim_start_matches('/')
+        .split(['/', '?'])
+        .next()
+        .unwrap_or("");
     if !first_seg.is_empty() {
         return (first_seg.to_string(), path);
     }
@@ -2321,5 +2318,4 @@ mod tests {
         }]);
         assert_eq!(g.escalations, 1);
     }
-
 }

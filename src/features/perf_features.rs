@@ -585,7 +585,6 @@ impl Default for PerfEngine {
     }
 }
 
-
 impl PerfEngine {
     pub fn new() -> Self {
         Self {
@@ -604,11 +603,7 @@ impl PerfEngine {
 
     /// Complete a freeze/unfreeze pair and push a [`FreezeTimingSample`].
     pub fn note_soft_unfreeze(&self, tab_id: &str, soft_unfreeze_ms: f64) {
-        let freeze_ms = self
-            .freeze_pending
-            .lock()
-            .remove(tab_id)
-            .unwrap_or(0.0);
+        let freeze_ms = self.freeze_pending.lock().remove(tab_id).unwrap_or(0.0);
         self.record_freeze_sample(FreezeTimingSample {
             tab_id: tab_id.to_string(),
             soft_freeze_ms: freeze_ms,
@@ -1218,14 +1213,17 @@ impl PerfEngine {
             }
         }
         let mut out: Vec<ThirdPartyEntry> = map.into_values().collect();
-        out.sort_by(|a, b| b.bytes.cmp(&a.bytes));
+        out.sort_by_key(|item| std::cmp::Reverse(item.bytes));
         out
     }
 
     // 13. LCP Element Forensics ---------------------------------------------
     pub fn lcp_element_forensics(&self, payload: &LcpElementPayload) -> LcpElementReport {
         let mut url = payload.url.clone().unwrap_or_default();
-        let mut element_type = payload.element_type.clone().unwrap_or_else(|| "unknown".into());
+        let mut element_type = payload
+            .element_type
+            .clone()
+            .unwrap_or_else(|| "unknown".into());
         let mut size_bytes = payload.size_bytes.unwrap_or(0);
         let mut discover_ms = payload.discover_ms.unwrap_or(0.0);
         let mut load_ms = payload.load_ms.unwrap_or(0.0);
@@ -1272,8 +1270,7 @@ impl PerfEngine {
                         .unwrap_or(0.0);
                 }
                 if load_ms <= 0.0 {
-                    load_ms =
-                        num(&["lcpLoad", "/lcpElement/loadTime", "load_ms"]).unwrap_or(0.0);
+                    load_ms = num(&["lcpLoad", "/lcpElement/loadTime", "load_ms"]).unwrap_or(0.0);
                 }
                 if render_ms <= 0.0 {
                     render_ms = num(&[
@@ -1373,7 +1370,11 @@ impl PerfEngine {
         let mk = |name: &str, dur: f64| MainThreadBucket {
             bucket: name.to_string(),
             duration_ms: dur,
-            pct: if total > 0.0 { dur / total * 100.0 } else { 0.0 },
+            pct: if total > 0.0 {
+                dur / total * 100.0
+            } else {
+                0.0
+            },
         };
         let mut buckets = vec![
             mk("script", script),
@@ -1532,10 +1533,7 @@ impl PerfEngine {
         }
         let n = records.len() as f64;
         let avg_lcp_ms = records.iter().map(|r| r.lcp_ms).sum::<f64>() / n;
-        let worst_lcp_ms = records
-            .iter()
-            .map(|r| r.lcp_ms)
-            .fold(0.0_f64, f64::max);
+        let worst_lcp_ms = records.iter().map(|r| r.lcp_ms).fold(0.0_f64, f64::max);
         let avg_inp_ms = records.iter().map(|r| r.inp_ms).sum::<f64>() / n;
         let total_cls = records.iter().map(|r| r.cls).sum::<f64>();
         Ok(SoftNavVitalsReport {
@@ -1584,12 +1582,20 @@ impl PerfEngine {
         let avg_prerender_savings_ms = if prerenders.is_empty() {
             0.0
         } else {
-            prerenders.iter().map(|(c, p)| (c - p).max(0.0)).sum::<f64>() / prerenders.len() as f64
+            prerenders
+                .iter()
+                .map(|(c, p)| (c - p).max(0.0))
+                .sum::<f64>()
+                / prerenders.len() as f64
         };
         let avg_prefetch_savings_ms = if prefetches.is_empty() {
             0.0
         } else {
-            prefetches.iter().map(|(c, p)| (c - p).max(0.0)).sum::<f64>() / prefetches.len() as f64
+            prefetches
+                .iter()
+                .map(|(c, p)| (c - p).max(0.0))
+                .sum::<f64>()
+                / prefetches.len() as f64
         };
         let best_url = trials
             .iter()
@@ -1855,10 +1861,7 @@ impl PerfEngine {
             *folded_map.entry(key).or_default() += s.weight.max(1);
             total_weight += s.weight.max(1);
         }
-        let folded: Vec<String> = folded_map
-            .iter()
-            .map(|(k, v)| format!("{k} {v}"))
-            .collect();
+        let folded: Vec<String> = folded_map.iter().map(|(k, v)| format!("{k} {v}")).collect();
         let flame = self.build_flame_graph(&folded);
         let speedscope = self.promote_to_profile(&folded, "thor-continuous-profile");
         ContinuousProfileReport {
@@ -1869,7 +1872,6 @@ impl PerfEngine {
             speedscope,
         }
     }
-
 }
 
 fn percentile_of(samples: &[f64], q: f64) -> f64 {
@@ -2283,7 +2285,10 @@ mod tests {
         let r = e.main_thread_block_map(&slices);
         assert!((r.total_ms - 1000.0).abs() < 1e-6);
         assert!(r.dominant == "idle" || r.dominant == "script");
-        assert!(r.buckets.iter().any(|b| b.bucket == "script" && (b.pct - 40.0).abs() < 1e-6));
+        assert!(r
+            .buckets
+            .iter()
+            .any(|b| b.bucket == "script" && (b.pct - 40.0).abs() < 1e-6));
     }
 
     #[test]

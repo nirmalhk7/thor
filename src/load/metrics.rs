@@ -347,9 +347,9 @@ impl MetricsCollector {
         let mut weighted_sum = 0.0f64;
         let mut counts = [0usize; HISTOGRAM_BUCKETS];
 
-        for i in 0..HISTOGRAM_BUCKETS {
+        for (i, count_slot) in counts.iter_mut().enumerate() {
             let count = self.buckets[i].load(Ordering::Relaxed);
-            counts[i] = count;
+            *count_slot = count;
             if count > 0 {
                 let lat = bucket_to_latency(i);
                 if lat < min {
@@ -379,8 +379,8 @@ impl MetricsCollector {
             }
             let target_count = ((total_samples as f64) * target_pct).round() as usize;
             let mut accum = 0usize;
-            for i in 0..HISTOGRAM_BUCKETS {
-                accum += counts[i];
+            for (i, count) in counts.iter().enumerate() {
+                accum += count;
                 if accum >= target_count {
                     return bucket_to_latency(i);
                 }
@@ -393,7 +393,11 @@ impl MetricsCollector {
         let p95 = calc_p(0.95);
         let p99 = calc_p(0.99);
 
-        let status_codes = self.status_codes.lock().map(|c| c.clone()).unwrap_or_default();
+        let status_codes = self
+            .status_codes
+            .lock()
+            .map(|c| c.clone())
+            .unwrap_or_default();
         let browser_vitals = self.browser_vitals.lock().ok().and_then(|b| b.clone());
 
         LoadMetrics {
@@ -445,9 +449,9 @@ impl LockFreeHistogram {
     pub fn calculate_p50_p90_p95_p99(&self) -> (f64, f64, f64, f64) {
         let mut total_samples = 0u64;
         let mut counts = [0u64; 200];
-        for i in 0..200 {
+        for (i, count_slot) in counts.iter_mut().enumerate() {
             let count = self.buckets[i].load(Ordering::Relaxed);
-            counts[i] = count;
+            *count_slot = count;
             total_samples += count;
         }
 
@@ -457,8 +461,8 @@ impl LockFreeHistogram {
             }
             let target_count = ((total_samples as f64) * target_pct).round() as u64;
             let mut accum = 0u64;
-            for i in 0..200 {
-                accum += counts[i];
+            for (i, count) in counts.iter().enumerate() {
+                accum += count;
                 if accum >= target_count {
                     return bucket_to_latency(i);
                 }

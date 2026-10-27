@@ -839,13 +839,13 @@ fn create_content_tab(
                 }
                 "toggle_devtools" => {
                     let tabs = tabs_for_ipc.borrow();
-                    if let Some(wv) = tabs.webviews.get(&id_for_ipc) {
+                    if let Some(_wv) = tabs.webviews.get(&id_for_ipc) {
                         #[cfg(any(debug_assertions, feature = "devtools"))]
                         {
-                            if wv.is_devtools_open() {
-                                wv.close_devtools();
+                            if _wv.is_devtools_open() {
+                                _wv.close_devtools();
                             } else {
-                                wv.open_devtools();
+                                _wv.open_devtools();
                             }
                         }
                     }
@@ -977,13 +977,13 @@ fn create_palette_webview(
                 }
                 "toggle_devtools" => {
                     let tabs_slot = tabs_for_ipc.borrow();
-                    if let Some(wv) = tabs_slot.webviews.get(&tabs_slot.active) {
+                    if let Some(_wv) = tabs_slot.webviews.get(&tabs_slot.active) {
                         #[cfg(any(debug_assertions, feature = "devtools"))]
                         {
-                            if wv.is_devtools_open() {
-                                wv.close_devtools();
+                            if _wv.is_devtools_open() {
+                                _wv.close_devtools();
                             } else {
-                                wv.open_devtools();
+                                _wv.open_devtools();
                             }
                         }
                     }
@@ -1244,14 +1244,14 @@ fn open_tool_in_omnibar(
     };
     // DevTools: toggle immediately — no intermediate omnibar confirm.
     if mode == native_toolbar::ChromeToolMode::DevTools {
-        if let Some(wv) = tabs.webviews.get(&tabs.active) {
+        if let Some(_wv) = tabs.webviews.get(&tabs.active) {
             #[cfg(any(debug_assertions, feature = "devtools"))]
             {
-                if wv.is_devtools_open() {
-                    wv.close_devtools();
+                if _wv.is_devtools_open() {
+                    _wv.close_devtools();
                     println!("⚡ [Thor] DevTools closed");
                 } else {
-                    wv.open_devtools();
+                    _wv.open_devtools();
                     println!("⚡ [Thor] DevTools opened");
                 }
             }
@@ -1290,10 +1290,10 @@ fn open_tool_in_omnibar(
                 let open = tabs
                     .webviews
                     .get(&tabs.active)
-                    .map(|wv| {
+                    .map(|_wv| {
                         #[cfg(any(debug_assertions, feature = "devtools"))]
                         {
-                            wv.is_devtools_open()
+                            _wv.is_devtools_open()
                         }
                         #[cfg(not(any(debug_assertions, feature = "devtools")))]
                         {
@@ -1374,14 +1374,14 @@ fn run_omnibar_tool_go(
             start_locust_from_bar(tabs, &params)
         }
         native_toolbar::ChromeToolMode::DevTools => {
-            if let Some(wv) = tabs.webviews.get(&tabs.active) {
+            if let Some(_wv) = tabs.webviews.get(&tabs.active) {
                 #[cfg(any(debug_assertions, feature = "devtools"))]
                 {
-                    if wv.is_devtools_open() {
-                        wv.close_devtools();
+                    if _wv.is_devtools_open() {
+                        _wv.close_devtools();
                         tb.set_status("Inspector: closed");
                     } else {
-                        wv.open_devtools();
+                        _wv.open_devtools();
                         tb.set_status("Inspector: OPEN");
                     }
                 }

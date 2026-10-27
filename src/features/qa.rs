@@ -793,20 +793,11 @@ impl QaEngine {
                 }
                 pending_reason.clear();
                 pending_action = None;
-                pending_test = Some(
-                    rest.trim()
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .to_string(),
-                );
+                pending_test = Some(rest.trim().trim_matches('"').trim_matches('\'').to_string());
             } else if let Some(rest) = trimmed.strip_prefix("action:") {
                 pending_action = Some(rest.trim().to_string());
             } else if let Some(rest) = trimmed.strip_prefix("reason:") {
-                pending_reason = rest
-                    .trim()
-                    .trim_matches('"')
-                    .trim_matches('\'')
-                    .to_string();
+                pending_reason = rest.trim().trim_matches('"').trim_matches('\'').to_string();
             }
         }
         if let (Some(test), Some(action)) = (pending_test, pending_action) {
@@ -913,7 +904,7 @@ impl QaEngine {
             "css",
             20,
         );
-        ranked.sort_by(|a, b| b.resilience_score.cmp(&a.resilience_score));
+        ranked.sort_by_key(|item| std::cmp::Reverse(item.resilience_score));
         ranked
     }
 
@@ -1233,8 +1224,7 @@ impl QaEngine {
             }
         };
         if playwright_ts.trim().is_empty() {
-            playwright_ts =
-                TestGenerator::promote_to_test(session, ExportFormat::PlaywrightTs);
+            playwright_ts = TestGenerator::promote_to_test(session, ExportFormat::PlaywrightTs);
         }
         if playwright_ts.trim().is_empty() {
             playwright_ts = String::from(
@@ -1258,8 +1248,7 @@ impl QaEngine {
                 "// Thor hermetic fixture stub\nimport { test } from '@playwright/test';\ntest.describe('hermetic stub', () => {});\n",
             );
         }
-        let a11y_scaffold =
-            TestGenerator::a11y_spec_scaffold(&session.name, &[]);
+        let a11y_scaffold = TestGenerator::a11y_spec_scaffold(&session.name, &[]);
         let mut quarantine_filter = self.ci_quarantine_filter();
         if quarantine_filter.trim().is_empty() {
             quarantine_filter = TestGenerator::ci_quarantine_filter(&[]);
@@ -1318,9 +1307,7 @@ impl QaEngine {
             .chars()
             .map(|c| if c.is_ascii_alphanumeric() { c } else { '_' })
             .collect();
-        let dir = crate::paths::thor_data_dir()
-            .join("traces")
-            .join(&safe);
+        let dir = crate::paths::thor_data_dir().join("traces").join(&safe);
         std::fs::create_dir_all(&dir).map_err(|e| format!("mkdir {}: {e}", dir.display()))?;
         let mut frame_paths = Vec::new();
         for frame in &frames {
@@ -1487,7 +1474,10 @@ impl QaEngine {
         let mut candidates = vec![
             ("timing-race", vectors.timing_cv + vectors.race_score),
             ("locator-instability", vectors.locator_churn),
-            ("network-jitter", (vectors.network_jitter_ms / 250.0).min(1.0)),
+            (
+                "network-jitter",
+                (vectors.network_jitter_ms / 250.0).min(1.0),
+            ),
             ("animation-layout", vectors.animation_score),
         ];
         if radar.classification == "consistently-failing" {
@@ -1496,10 +1486,7 @@ impl QaEngine {
             candidates.push(("no-flake", 1.0));
         }
         candidates.sort_by(|a, b| b.1.partial_cmp(&a.1).unwrap_or(std::cmp::Ordering::Equal));
-        let (root_cause, raw) = candidates
-            .first()
-            .copied()
-            .unwrap_or(("unknown", 0.0));
+        let (root_cause, raw) = candidates.first().copied().unwrap_or(("unknown", 0.0));
         let confidence = raw.clamp(0.0, 1.0);
 
         let mut evidence = Vec::new();
@@ -1617,8 +1604,7 @@ impl QaEngine {
     pub fn persist_quarantine(&self) -> Result<std::path::PathBuf, String> {
         let path = Self::quarantine_path();
         if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("create quarantine dir: {e}"))?;
+            std::fs::create_dir_all(parent).map_err(|e| format!("create quarantine dir: {e}"))?;
         }
         let mut entries: std::collections::BTreeMap<String, (String, String)> =
             std::collections::BTreeMap::new();
@@ -1647,28 +1633,15 @@ impl QaEngine {
                         &pending_reason,
                     );
                     pending_reason.clear();
-                    pending_test = Some(
-                        rest.trim()
-                            .trim_matches('"')
-                            .trim_matches('\'')
-                            .to_string(),
-                    );
+                    pending_test =
+                        Some(rest.trim().trim_matches('"').trim_matches('\'').to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("action:") {
                     pending_action = Some(rest.trim().to_string());
                 } else if let Some(rest) = trimmed.strip_prefix("reason:") {
-                    pending_reason = rest
-                        .trim()
-                        .trim_matches('"')
-                        .trim_matches('\'')
-                        .to_string();
+                    pending_reason = rest.trim().trim_matches('"').trim_matches('\'').to_string();
                 }
             }
-            flush(
-                &mut entries,
-                pending_test,
-                pending_action,
-                &pending_reason,
-            );
+            flush(&mut entries, pending_test, pending_action, &pending_reason);
         }
         {
             let map = self.quarantine.lock();
@@ -1747,10 +1720,7 @@ impl QaEngine {
                         changes.push(ContractDriftChange {
                             path: format!("{} {}", expected.method, expected.path),
                             kind: "status-changed".into(),
-                            detail: format!(
-                                "{} → {}",
-                                expected.expected_status, actual.status
-                            ),
+                            detail: format!("{} → {}", expected.expected_status, actual.status),
                             breaking: true,
                         });
                     }
@@ -1770,9 +1740,9 @@ impl QaEngine {
             }
         }
         for actual in live {
-            let known = baseline.iter().any(|b| {
-                b.method.eq_ignore_ascii_case(&actual.method) && b.path == actual.path
-            });
+            let known = baseline
+                .iter()
+                .any(|b| b.method.eq_ignore_ascii_case(&actual.method) && b.path == actual.path);
             if !known {
                 changes.push(ContractDriftChange {
                     path: format!("{} {}", actual.method, actual.path),
@@ -1953,10 +1923,7 @@ impl QaEngine {
         // Group by identity so affinity stays within a shard when possible.
         let mut by_identity: HashMap<String, Vec<&ShardScenario>> = HashMap::new();
         for s in scenarios {
-            by_identity
-                .entry(s.identity.clone())
-                .or_default()
-                .push(s);
+            by_identity.entry(s.identity.clone()).or_default().push(s);
         }
         let mut groups: Vec<_> = by_identity.into_iter().collect();
         groups.sort_by(|a, b| {
@@ -2066,11 +2033,7 @@ impl QaEngine {
     }
 
     /// Re-rank locators from live heal signals and emit a heal-patch artifact.
-    pub fn runtime_self_heal(
-        &self,
-        signals: &ElementSignals,
-        live: &[HealSignal],
-    ) -> HealPatch {
+    pub fn runtime_self_heal(&self, signals: &ElementSignals, live: &[HealSignal]) -> HealPatch {
         let mut ranked = self.rank_locators(signals);
         for loc in &mut ranked {
             if let Some(sig) = live.iter().find(|s| s.strategy == loc.strategy) {
@@ -2082,10 +2045,13 @@ impl QaEngine {
                 };
                 let boost = (success_rate * 40.0) as u32;
                 let penalty = if sig.failures > sig.successes { 25 } else { 0 };
-                loc.resilience_score = loc.resilience_score.saturating_add(boost).saturating_sub(penalty);
+                loc.resilience_score = loc
+                    .resilience_score
+                    .saturating_add(boost)
+                    .saturating_sub(penalty);
             }
         }
-        ranked.sort_by(|a, b| b.resilience_score.cmp(&a.resilience_score));
+        ranked.sort_by_key(|item| std::cmp::Reverse(item.resilience_score));
         let preferred = ranked.first().cloned().unwrap_or(RankedLocator {
             expression: signals
                 .css
@@ -2294,7 +2260,9 @@ mod tests {
         let exp = e.export_playwright_trace("live").expect("export");
         assert_eq!(exp.frame_count, 2);
         assert!(std::path::Path::new(&exp.meta_path).exists());
-        assert!(std::path::Path::new(&exp.dir).join("frame-0000.html").exists());
+        assert!(std::path::Path::new(&exp.dir)
+            .join("frame-0000.html")
+            .exists());
         let _ = std::fs::remove_dir_all(&tmp);
     }
 
@@ -2577,10 +2545,18 @@ mod tests {
         });
         assert_eq!(d.action, "quarantine");
         assert!(d.quarantine_yaml.contains("quarantine"));
-        assert!(d.persist_ok, "evaluate_quarantine must persist yaml: {:?}", d.persist_err);
+        assert!(
+            d.persist_ok,
+            "evaluate_quarantine must persist yaml: {:?}",
+            d.persist_err
+        );
         assert!(d.persist_err.is_none());
         let path = QaEngine::quarantine_path();
-        assert!(path.exists(), "expected yaml after evaluate at {}", path.display());
+        assert!(
+            path.exists(),
+            "expected yaml after evaluate at {}",
+            path.display()
+        );
         let yaml = QaEngine::load_quarantine_yaml().unwrap();
         assert!(yaml.contains("flaky"));
         let filter = e.ci_quarantine_filter();
@@ -2606,7 +2582,11 @@ mod tests {
             currently_quarantined: true,
         });
         assert_eq!(readmit.action, "readmit");
-        assert!(readmit.persist_ok, "readmit persist: {:?}", readmit.persist_err);
+        assert!(
+            readmit.persist_ok,
+            "readmit persist: {:?}",
+            readmit.persist_err
+        );
 
         std::env::remove_var("THOR_DATA_DIR");
         let _ = std::fs::remove_dir_all(&tmp);
@@ -2665,7 +2645,11 @@ mod tests {
         assert!(pw.contains("storageState"), "{pw}");
         let state: serde_json::Value =
             serde_json::from_str(&pack.storage_state_json()).expect("storageState JSON");
-        assert!(state["cookies"].as_array().unwrap().iter().any(|c| c["name"] == "sid"));
+        assert!(state["cookies"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .any(|c| c["name"] == "sid"));
         assert!(state["origins"].as_array().unwrap().iter().any(|o| {
             o["origin"] == "https://app"
                 && o["localStorage"]
@@ -2836,7 +2820,8 @@ mod tests {
             }),
             ..Default::default()
         };
-        obs.headers.insert("content-type".into(), "application/json".into());
+        obs.headers
+            .insert("content-type".into(), "application/json".into());
         obs.storage.insert("token".into(), "t".into());
         let oracles = e.synthesize_oracles(&obs);
         assert!(oracles.iter().any(|o| o.kind == "dom"));

@@ -2,43 +2,28 @@
 
 > **A high-performance, ephemeral developer browser where every tab is an isolated experiment and every interaction can become a test, trace, benchmark, finding, or reproducible artifact.**
 
-**Thor** is a **Chromium downstream** developer browser (same product model as Chrome / Brave / Edge): one GN/Ninja-built browser owns window chrome + Blink/V8. Rust is the **Labs sidecar** (FeatureEngine, load, consent, MCP) attached via self-CDP — not a host that launches system Google Chrome. See [docs/CHROMIUM_DOWNSTREAM.md](docs/CHROMIUM_DOWNSTREAM.md).
+**Thor** is a native Rust browser shell with the Chromium Embedded Framework (CEF) embedded for web content. Thor bundles the pinned prebuilt CEF distribution; it does not fetch or build the full Chromium source tree and does not use system Chrome as its product browser.
 
-Legacy dual-window (AppKit + separate Chromium via CDP) remains behind `THOR_LEGACY_DUAL_WINDOW=1` only.
+API development, security testing, and the Engineer Feature Suite open inside Thor from the Developer control in the browser toolbar or **Cmd+Shift+K**. The workbenches are served by Thor's in-process CEF resource handler and call Rust engines directly; they do not start a separate web server.
 
 ---
 
 ## Architecture & Ephemeral Lifecycles
 
 ```
-+-------------------------------------------------------------------------------------------------------------------+
-|                              Thor = Chromium downstream (product) + Rust Labs                                     |
-+-------------------------------------------------------------------------------------------------------------------+
-| THOR CHROMIUM BROWSER PROCESS (branded chrome/ + content Blink/V8)                                                 |
-| - Single window: tab strip, omnibar, WebContents                                                                  |
-| - 3-Level Isolation (Profile → StoragePartition → WebContents)                                                    |
-| - 4-Stage Tab Lifecycle (Active → Frozen → Discarded → Expired)                                                   |
-| - Self-CDP --remote-debugging-port for instrumentation                                                            |
-+---------------------------------------------------------+---------------------------------------------------------+
-                                                          | self-CDP / native messaging
-                                                          v
-+-------------------------------------------------------------------------------------------------------------------+
-| RUST LABS SIDECAR (crate thor / bin thor-labs)                                                                    |
-| - FeatureEngine (144), Load Engine, Locust, CA, consent, Promote to Test, MCP                                     |
-+-------------------------------------------------------------------------------------------------------------------+
+┌────────────────────────── Thor.app ──────────────────────────┐
+│ Native window: macOS controls, tabs, address bar, actions     │
+│ ┌──────────────────────────────────────────────────────────┐ │
+│ │ Embedded CEF browser                                     │ │
+│ │ Web pages · API workspace · Security workspace · DevCC   │ │
+│ └──────────────────────────────┬───────────────────────────┘ │
+│ Rust shell, IPC, API engine, FeatureEngine, evidence, tools  │
+└─────────────────────────────────────────────────────────────┘
+                     │
+                     └── CEF renderer/helper subprocesses
 ```
 
-### 1. Three-Level Isolation Hierarchy
-- **Level 1: Thor Profile**: Durable configuration (bookmarks, extensions, trusted certificates, settings, IDE integration). No permanent global history DB.
-- **Level 2: Identity Context**: Owns cookies, `localStorage`, `IndexedDB`, `ServiceWorkers`, cache partition, and auth tokens. Runs `Admin`, `Standard User`, `Staging User`, `Wallet A`, and `Anonymous` sessions side-by-side.
-  - **Disposable Isolated Tab**: Option to spawn a tab with its own ephemeral Identity Context, completely purged when the tab is closed.
-- **Level 3: Tab**: Owns navigation history list, scroll state, trace buffer, and lifecycle deadlines.
-
-### 2. Four-Stage Ephemeral Tab Lifecycle
-1. **Active**: Live CDP target session in foreground / active use.
-2. **Frozen**: Soft-suspended after 15m idle via CDP page lifecycle (`CdpPageFreezer`), pausing JS timers without releasing memory (0 OS `SIGSTOP` process stalls).
-3. **Discarded**: After 1 hour of inactivity or memory pressure, the CDP target is detached and memory released, preserving URL, scroll position, and tab-scoped history for seamless instant reload on click.
-4. **Expired**: Inactive tabs remaining dormant for $\ge$24 hours are automatically closed, purging all state and wiping tab-scoped history clean.
+Thor stores browser data under its application data directory and configures CEF with the Keychain service **Thor Safe Storage** and account **Thor**. Existing cookies encrypted with the former shared Chromium Safe Storage key require a fresh sign-in. CEF request contexts are the boundary for identity storage; tab lifecycle actions must report success only after the corresponding CEF operation completes.
 
 ---
 
@@ -76,8 +61,8 @@ Registry source of truth: `FeatureId::ALL` in `src/features/mod.rs` (`AppState::
 ## Standard Browser Parity ("Normal Browser Features")
 
 - **Bookmark Saving (`Cmd+D` & Star Button `★`)**: Persistent bookmarking to `~/Library/Application Support/Thor/bookmarks.json` with active golden star state indicator and `Cmd+K` palette integration.
-- **Find in Page (`Cmd+F`)**: Floating glass search bar overlay with match count (`X of Y`), next/prev navigation (`Enter` / `Shift+Enter`), and Chromium native `WebContents::Find` wrapper.
-- **Page Zoom & Scale (`Cmd++`, `Cmd+-`, `Cmd+0`)**: Chromium `HostZoomMap` wrapper for per-origin page zoom (100%, 110%, 125%) with status percentage display.
+- **Find in Page (`Cmd+F`)**: Search the active CEF page with match count and next/previous navigation.
+- **Page Zoom & Scale (`Cmd++`, `Cmd+-`, `Cmd+0`)**: Adjust the active CEF browser’s page zoom.
 - **Downloads Manager**: Browser-owned `DownloadManager` bridge tracking active downloads across tab expiry.
 - **Favicon Resolution**: Cached Favicon service resolving icons with fallback to manifest -> DOM `<link>` -> `/favicon.ico` -> monogram.
 - **CORS Management & Cost Tracking**: 3-mode CORS switcher (`Strict`, `Permissive`, `Disabled`) and two-tier network instrumentation cost badge (`Lightweight` ~0.1ms vs `Deep` ~2.5ms).
@@ -105,12 +90,16 @@ Registry source of truth: `FeatureId::ALL` in `src/features/mod.rs` (`AppState::
 ## Requirements & Build
 
 - Rust stable (edition 2021)
-- Google Chrome / Chromium installed (or set `THOR_CHROMIUM_PATH`)
 - macOS (primary target; Linux/Windows partially supported)
+- The pinned prebuilt CEF distribution is resolved by the `cef` Rust package. No full Chromium checkout is needed.
 
 ```bash
-# Build & Run
-cargo run --bin Thor
+# Build Thor, Labs, and the CEF app packager
+cargo build --locked --release --features cef-bundle --bin Thor --bin thor-labs --bin thor-package
+
+# Stage a macOS app bundle, then launch it
+cargo run --locked --release --features cef-bundle --bin thor-package -- dist/cef
+open dist/cef/Thor.app
 
 # Quality & Test Verification
 cargo check
@@ -124,4 +113,4 @@ cargo test --test features_wave4_tests
 cargo test --test features_wave5_tests
 ```
 
-Docs: [ARCHITECTURE](docs/ARCHITECTURE.md) · [FEATURES](docs/FEATURES.md) · [TESTING_GUIDE](docs/TESTING_GUIDE.md) · [AGENTS.md](AGENTS.md) (coding agents).
+The old Chromium downstream design is archived in [CHROMIUM_DOWNSTREAM.md](docs/CHROMIUM_DOWNSTREAM.md); its fetch, snapshot, branding, build, and run scripts are disabled. Current architecture: [ARCHITECTURE](docs/ARCHITECTURE.md) · [FEATURES](docs/FEATURES.md) · [TESTING_GUIDE](docs/TESTING_GUIDE.md) · [AGENTS.md](AGENTS.md) (coding agents).

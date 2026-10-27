@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Security — Thor</title><link rel="stylesheet" href="/workspace.css"><script defer src="/security.js"></script></head>
+<body>
+<header class="topline"><a class="wordmark" href="/">Thor</a><nav class="workspace-nav" aria-label="Workspace"><a href="/api">API</a><a href="/security" aria-current="page">Security</a></nav></header>
+<main class="security">
+  <nav class="tool-list" role="tablist" aria-label="Security analyzers"><button id="tool-headers" role="tab" aria-selected="true" aria-controls="analyzer" data-tool="headers">Security headers</button><button id="tool-jwt" role="tab" aria-selected="false" aria-controls="analyzer" data-tool="jwt" tabindex="-1">JWT inspector</button><button id="tool-diff" role="tab" aria-selected="false" aria-controls="analyzer" data-tool="diff" tabindex="-1">Response diff</button><p>Local analysis.<br>No target requests sent.</p></nav>
+  <section class="analyzer" id="analyzer" role="tabpanel" aria-labelledby="tool-headers">
+    <header><h1 id="tool-title">Security headers</h1><p id="tool-description">Review response headers for missing browser protections and configuration issues.</p></header>
+    <form id="analysis-form"><label id="input-label" for="analysis-input">Response headers</label><textarea id="analysis-input" spellcheck="false" required placeholder="Paste response headers, one Name: value per line."></textarea><div id="second-input" hidden><label for="comparison-input">Second response (JSON)</label><textarea id="comparison-input" spellcheck="false"></textarea></div><button class="analyze" id="analyze" type="submit">Analyze headers</button></form>
+    <section aria-labelledby="result-title"><div class="result-head"><h2 id="result-title">Analysis</h2><span id="status" role="status" aria-live="polite">Ready</span></div><pre id="result" tabindex="0" aria-label="Analysis result"></pre></section>
+  </section>
+</main>
+</body></html>

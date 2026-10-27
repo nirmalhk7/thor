@@ -1,8 +1,8 @@
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::cell::UnsafeCell;
-use std::mem::MaybeUninit;
-use std::sync::Arc;
 use std::marker::PhantomData;
+use std::mem::MaybeUninit;
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::Arc;
 
 pub const CACHE_LINE_SIZE: usize = 64;
 
@@ -23,15 +23,28 @@ unsafe impl<T: Send, const N: usize> Send for SpscRingBuffer<T, N> {}
 unsafe impl<T: Send, const N: usize> Sync for SpscRingBuffer<T, N> {}
 
 impl<T, const N: usize> SpscRingBuffer<T, N> {
-    pub fn new() -> (Producer<T, N>, Consumer<T, N>) {
+    pub fn split() -> (Producer<T, N>, Consumer<T, N>) {
         assert!(N.is_power_of_two(), "Capacity must be a power of two");
         let rb = Arc::new(Self {
-            head: CachePadded { value: AtomicUsize::new(0) },
-            tail: CachePadded { value: AtomicUsize::new(0) },
+            head: CachePadded {
+                value: AtomicUsize::new(0),
+            },
+            tail: CachePadded {
+                value: AtomicUsize::new(0),
+            },
             buffer: UnsafeCell::new([const { MaybeUninit::uninit() }; N]),
         });
-        
-        (Producer { rb: rb.clone(), _marker: PhantomData }, Consumer { rb, _marker: PhantomData })
+
+        (
+            Producer {
+                rb: rb.clone(),
+                _marker: PhantomData,
+            },
+            Consumer {
+                rb,
+                _marker: PhantomData,
+            },
+        )
     }
 }
 
@@ -47,7 +60,7 @@ impl<T, const N: usize> Producer<T, N> {
     pub fn push(&mut self, value: T) -> Result<(), T> {
         let head = self.rb.head.value.load(Ordering::Relaxed);
         let tail = self.rb.tail.value.load(Ordering::Acquire);
-        
+
         if head.wrapping_sub(tail) == N {
             return Err(value); // Full
         }
@@ -57,7 +70,10 @@ impl<T, const N: usize> Producer<T, N> {
             (*buf.add(head & (N - 1))).write(value);
         }
 
-        self.rb.head.value.store(head.wrapping_add(1), Ordering::Release);
+        self.rb
+            .head
+            .value
+            .store(head.wrapping_add(1), Ordering::Release);
         Ok(())
     }
 }
@@ -84,7 +100,10 @@ impl<T, const N: usize> Consumer<T, N> {
             (*buf.add(tail & (N - 1))).assume_init_read()
         };
 
-        self.rb.tail.value.store(tail.wrapping_add(1), Ordering::Release);
+        self.rb
+            .tail
+            .value
+            .store(tail.wrapping_add(1), Ordering::Release);
         Some(value)
     }
 }
@@ -110,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_push_pop() {
-        let (mut prod, mut cons) = SpscRingBuffer::<i32, 16>::new();
+        let (mut prod, mut cons) = SpscRingBuffer::<i32, 16>::split();
         assert_eq!(prod.push(1), Ok(()));
         assert_eq!(prod.push(2), Ok(()));
         assert_eq!(cons.pop(), Some(1));
@@ -120,16 +139,16 @@ mod tests {
 
     #[test]
     fn test_performance() {
-        let (mut prod, mut cons) = SpscRingBuffer::<i32, 1024>::new();
+        let (mut prod, mut cons) = SpscRingBuffer::<i32, 1024>::split();
         let start = Instant::now();
-        
+
         for i in 0..1024 {
             let _ = prod.push(i);
         }
         for _ in 0..1024 {
             let _ = cons.pop();
         }
-        
+
         let duration = start.elapsed();
         // Sub-microsecond validation for typical IPC usage
         assert!(duration.as_micros() < 1000);
