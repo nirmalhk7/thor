@@ -9,7 +9,10 @@ pub struct Header {
 
 impl Header {
     pub fn new(name: impl Into<String>, value: impl Into<String>) -> Self {
-        Self { name: name.into(), value: value.into() }
+        Self {
+            name: name.into(),
+            value: value.into(),
+        }
     }
 }
 
@@ -18,10 +21,20 @@ impl Header {
 pub enum RequestBody {
     #[default]
     Empty,
-    Text { text: String, content_type: String },
-    Json { value: serde_json::Value },
-    Form { entries: Vec<Header> },
-    Binary { data: String, content_type: String },
+    Text {
+        text: String,
+        content_type: String,
+    },
+    Json {
+        value: serde_json::Value,
+    },
+    Form {
+        entries: Vec<Header>,
+    },
+    Binary {
+        data: String,
+        content_type: String,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -33,7 +46,10 @@ pub struct RequestOptions {
 
 impl Default for RequestOptions {
     fn default() -> Self {
-        Self { timeout_ms: 30_000, response_limit_bytes: 8 * 1024 * 1024 }
+        Self {
+            timeout_ms: 30_000,
+            response_limit_bytes: 8 * 1024 * 1024,
+        }
     }
 }
 
@@ -57,8 +73,13 @@ pub struct RequestSpec {
 impl RequestSpec {
     pub fn new(method: impl Into<String>, url: impl Into<String>) -> Self {
         Self {
-            method: method.into(), url: url.into(), auth: super::Authentication::None, headers: Vec::new(), query: Vec::new(),
-            body: RequestBody::Empty, options: RequestOptions::default(),
+            method: method.into(),
+            url: url.into(),
+            auth: super::Authentication::None,
+            headers: Vec::new(),
+            query: Vec::new(),
+            body: RequestBody::Empty,
+            options: RequestOptions::default(),
         }
     }
 }
@@ -84,7 +105,9 @@ pub struct ApiResponse {
 impl std::fmt::Debug for ApiResponse {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.debug_struct("ApiResponse")
-            .field("status", &self.status).field("body_bytes", &self.body_bytes)
-            .field("total_ms", &self.total_ms).finish_non_exhaustive()
+            .field("status", &self.status)
+            .field("body_bytes", &self.body_bytes)
+            .field("total_ms", &self.total_ms)
+            .finish_non_exhaustive()
     }
 }

@@ -147,7 +147,9 @@ impl BitwardenVault {
         let raw = run_bw_with_stdin(&["unlock", "--raw"], password, None)?;
         let session = raw.trim().to_string();
         if session.is_empty() {
-            return Err(VaultError::AuthFailed("empty session from bw unlock".into()));
+            return Err(VaultError::AuthFailed(
+                "empty session from bw unlock".into(),
+            ));
         }
         *self.session.lock() = Some(session);
         Ok(())
@@ -217,10 +219,7 @@ impl BitwardenVault {
     }
 
     fn require_session(&self) -> Result<String, VaultError> {
-        self.session
-            .lock()
-            .clone()
-            .ok_or(VaultError::NoSession)
+        self.session.lock().clone().ok_or(VaultError::NoSession)
     }
 }
 
@@ -268,7 +267,11 @@ fn run_bw(args: &[&str], session: Option<&str>) -> Result<String, VaultError> {
     Ok(stdout)
 }
 
-fn run_bw_with_stdin(args: &[&str], stdin_data: &str, session: Option<&str>) -> Result<String, VaultError> {
+fn run_bw_with_stdin(
+    args: &[&str],
+    stdin_data: &str,
+    session: Option<&str>,
+) -> Result<String, VaultError> {
     use std::io::Write;
     let mut cmd = Command::new("bw");
     cmd.args(args);
@@ -377,8 +380,8 @@ pub fn parse_status_json(raw: &str, has_local_session: bool) -> VaultStatus {
 }
 
 pub fn parse_item_summaries(raw: &str) -> Result<Vec<VaultItemSummary>, VaultError> {
-    let items: Vec<Value> = serde_json::from_str(raw)
-        .map_err(|e| VaultError::Parse(format!("list items: {e}")))?;
+    let items: Vec<Value> =
+        serde_json::from_str(raw).map_err(|e| VaultError::Parse(format!("list items: {e}")))?;
     let mut out = Vec::with_capacity(items.len());
     for item in items {
         // Login type == 1 in Bitwarden.
@@ -518,12 +521,11 @@ pub fn vault_palette_items(
                     format!("bw_item_{}", m.id),
                     format!("Fill: {}", m.name),
                     PaletteItemType::Setting,
-                    m.uris.first().cloned().unwrap_or_else(|| "Thor://vault/item".into()),
-                    Some(if sub.is_empty() {
-                        "Vault".into()
-                    } else {
-                        sub
-                    }),
+                    m.uris
+                        .first()
+                        .cloned()
+                        .unwrap_or_else(|| "Thor://vault/item".into()),
+                    Some(if sub.is_empty() { "Vault".into() } else { sub }),
                     Some("🔑".into()),
                     "Vault",
                     Some(format!("bitwarden_autofill_{}", m.id)),
@@ -568,7 +570,8 @@ mod tests {
       }
     }"#;
 
-    const STATUS_LOCKED: &str = r#"{"status":"locked","userEmail":"u@ex.com","serverUrl":"https://vault.bitwarden.com"}"#;
+    const STATUS_LOCKED: &str =
+        r#"{"status":"locked","userEmail":"u@ex.com","serverUrl":"https://vault.bitwarden.com"}"#;
     const STATUS_UNLOCKED: &str = r#"{"status":"unlocked","userEmail":"u@ex.com"}"#;
 
     #[test]
@@ -645,7 +648,9 @@ mod tests {
             uris: vec!["https://github.com".into()],
         }];
         let items = vault_palette_items(&unlocked, &matches);
-        assert!(items.iter().any(|i| i.action_key.as_deref() == Some("bitwarden_lock")));
+        assert!(items
+            .iter()
+            .any(|i| i.action_key.as_deref() == Some("bitwarden_lock")));
         assert!(items
             .iter()
             .any(|i| i.action_key.as_deref() == Some("bitwarden_autofill_id1")));

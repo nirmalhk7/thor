@@ -6,7 +6,7 @@ use thor::net::tamper::{InterceptedRequest, TamperRule, TrafficTamperEngine};
 #[test]
 fn test_overlapping_rules() {
     let engine = TrafficTamperEngine::new();
-    
+
     // Add two rules that match the same URL but different conditions or same header
     engine.add_rule(TamperRule {
         id: "rule_1".to_string(),

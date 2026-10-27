@@ -11,7 +11,10 @@ pub struct EvidenceEnvelope<T> {
 impl<T> EvidenceEnvelope<T> {
     pub fn new(data: T, tab_id: Option<u64>) -> Self {
         Self {
-            timestamp_ms: SystemTime::now().duration_since(UNIX_EPOCH).unwrap().as_millis(),
+            timestamp_ms: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_millis(),
             tab_id,
             data,
         }
@@ -31,14 +34,25 @@ impl Default for ResourceBudgetController {
 
 impl ResourceBudgetController {
     pub fn new() -> Self {
-        Self { dropped_count: 0, truncated_count: 0 }
+        Self {
+            dropped_count: 0,
+            truncated_count: 0,
+        }
     }
-    
-    pub fn report_drop(&mut self) { self.dropped_count += 1; }
-    pub fn report_truncate(&mut self) { self.truncated_count += 1; }
-    
-    pub fn get_dropped(&self) -> usize { self.dropped_count }
-    pub fn get_truncated(&self) -> usize { self.truncated_count }
+
+    pub fn report_drop(&mut self) {
+        self.dropped_count += 1;
+    }
+    pub fn report_truncate(&mut self) {
+        self.truncated_count += 1;
+    }
+
+    pub fn get_dropped(&self) -> usize {
+        self.dropped_count
+    }
+    pub fn get_truncated(&self) -> usize {
+        self.truncated_count
+    }
 }
 
 pub struct EvidenceStore {
@@ -74,7 +88,12 @@ impl EvidenceStore {
         }
     }
 
-    fn push_bounded<T>(queue: &mut VecDeque<EvidenceEnvelope<T>>, limit: usize, item: EvidenceEnvelope<T>, budget: &mut ResourceBudgetController) {
+    fn push_bounded<T>(
+        queue: &mut VecDeque<EvidenceEnvelope<T>>,
+        limit: usize,
+        item: EvidenceEnvelope<T>,
+        budget: &mut ResourceBudgetController,
+    ) {
         if queue.len() >= limit {
             queue.pop_front();
             budget.report_drop();

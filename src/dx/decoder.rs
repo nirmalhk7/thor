@@ -98,7 +98,10 @@ impl DecoderStudio {
     }
 
     /// Helper parser for streaming LLM SSE frame
-    pub fn decode_llm_stream(input: &str, start_ms: u64) -> crate::dx::llm_studio::SseStreamMetrics {
+    pub fn decode_llm_stream(
+        input: &str,
+        start_ms: u64,
+    ) -> crate::dx::llm_studio::SseStreamMetrics {
         let mut parser = crate::dx::llm_studio::SseStreamParser::new(start_ms);
         parser.feed_chunk(input, start_ms + 100)
     }
@@ -116,7 +119,8 @@ impl DecoderStudio {
         if s.is_empty() || !s.len().is_multiple_of(4) {
             return false;
         }
-        s.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
+        s.bytes()
+            .all(|b| b.is_ascii_alphanumeric() || b == b'+' || b == b'/' || b == b'=')
     }
 
     /// Helper URL-safe base64 decoder (zero dynamic map allocation)
@@ -148,9 +152,21 @@ impl DecoderStudio {
         let mut i = 0;
         while i < clean_bytes.len() {
             let b0 = b64_val(clean_bytes[i])?;
-            let b1 = if i + 1 < clean_bytes.len() { b64_val(clean_bytes[i + 1])? } else { 0 };
-            let b2 = if i + 2 < clean_bytes.len() { b64_val(clean_bytes[i + 2])? } else { 0 };
-            let b3 = if i + 3 < clean_bytes.len() { b64_val(clean_bytes[i + 3])? } else { 0 };
+            let b1 = if i + 1 < clean_bytes.len() {
+                b64_val(clean_bytes[i + 1])?
+            } else {
+                0
+            };
+            let b2 = if i + 2 < clean_bytes.len() {
+                b64_val(clean_bytes[i + 2])?
+            } else {
+                0
+            };
+            let b3 = if i + 3 < clean_bytes.len() {
+                b64_val(clean_bytes[i + 3])?
+            } else {
+                0
+            };
 
             let triple = (b0 << 18) | (b1 << 12) | (b2 << 6) | b3;
 

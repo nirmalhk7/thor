@@ -1,5 +1,5 @@
-use std::collections::BTreeMap;
 use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
 
 use super::ApiError;
 
@@ -23,9 +23,16 @@ impl Variables {
             let template = &remaining[start + 2..];
             let end = template.find("}}").ok_or(ApiError::InvalidTemplate)?;
             let name = template[..end].trim();
-            let value = [&self.overrides, &self.request, &self.collection, &self.environment, &self.project]
-                .iter().find_map(|scope| scope.get(name))
-                .ok_or_else(|| ApiError::MissingVariable(name.into()))?;
+            let value = [
+                &self.overrides,
+                &self.request,
+                &self.collection,
+                &self.environment,
+                &self.project,
+            ]
+            .iter()
+            .find_map(|scope| scope.get(name))
+            .ok_or_else(|| ApiError::MissingVariable(name.into()))?;
             output.push_str(value);
             remaining = &template[end + 2..];
         }

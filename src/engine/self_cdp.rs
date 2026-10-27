@@ -14,8 +14,7 @@ pub fn connect_runtime_blocking(
     debug_url: impl Into<String>,
 ) -> ChromiumResult<Arc<ChromiumRuntime>> {
     let url = debug_url.into();
-    let rt = tokio::runtime::Runtime::new().map_err(|e| {
-        super::chromium_runtime::ChromiumError::Other(anyhow::anyhow!(e))
-    })?;
+    let rt = tokio::runtime::Runtime::new()
+        .map_err(|e| super::chromium_runtime::ChromiumError::Other(anyhow::anyhow!(e)))?;
     rt.block_on(connect_runtime(url))
 }

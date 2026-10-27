@@ -359,9 +359,12 @@ mod tests {
     fn test_derive_vitals_from_latencies() {
         let nav = vec![40.0, 80.0, 60.0];
         let interactions = vec![20.0, 120.0, 45.0];
-        let vitals = BrowserRunner::derive_vitals(&nav, &interactions, Some(60.0))
-            .expect("estimate ok");
-        assert!(vitals.synthetic, "HTTP-derived vitals must be marked synthetic");
+        let vitals =
+            BrowserRunner::derive_vitals(&nav, &interactions, Some(60.0)).expect("estimate ok");
+        assert!(
+            vitals.synthetic,
+            "HTTP-derived vitals must be marked synthetic"
+        );
         assert!(vitals.ttfb_ms > 0.0);
         assert!(vitals.lcp_ms >= vitals.fcp_ms);
         assert!(vitals.inp_ms >= vitals.fid_ms);

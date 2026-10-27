@@ -67,7 +67,10 @@ impl ProfileManager {
     }
 
     pub fn get_profile(&self) -> ProfileConfig {
-        self.active_profile.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.active_profile
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     pub fn set_mode(&self, mode: ProfileMode) {

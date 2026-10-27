@@ -25,7 +25,10 @@ fn registry_len() -> usize {
 fn test_wave2_registry_includes_qa24() {
     let engine = FeatureEngine::new();
     let n = registry_len();
-    assert!(n >= 84, "wave-2 QA expands registry to at least 84, got {n}");
+    assert!(
+        n >= 84,
+        "wave-2 QA expands registry to at least 84, got {n}"
+    );
     assert_eq!(engine.registry().len(), n);
     assert_eq!(engine.registry().by_category(FeatureCategory::Qa).len(), 24);
 
@@ -231,8 +234,7 @@ fn test_qa_wave2_engine_methods() {
         }),
         ..Default::default()
     };
-    obs.headers
-        .insert("x-request-id".into(), "abc".into());
+    obs.headers.insert("x-request-id".into(), "abc".into());
     obs.storage.insert("orderId".into(), "42".into());
     let oracles = qe.synthesize_oracles(&obs);
     assert!(oracles.len() >= 5);
@@ -376,7 +378,11 @@ fn test_orchestrator_invokes_qa_wave2_slugs() {
         }),
     )
     .expect("miner");
-    assert!(mined["result"].as_array().unwrap().iter().any(|c| c["kind"] == "idempotency"));
+    assert!(mined["result"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .any(|c| c["kind"] == "idempotency"));
 
     let heal = FeatureOrchestrator::invoke(
         "runtime-self-heal",
@@ -392,7 +398,10 @@ fn test_orchestrator_invokes_qa_wave2_slugs() {
         }),
     )
     .expect("heal");
-    assert!(heal["result"]["patch_json"].as_str().unwrap().contains("preferred"));
+    assert!(heal["result"]["patch_json"]
+        .as_str()
+        .unwrap()
+        .contains("preferred"));
 
     let oracles = FeatureOrchestrator::invoke(
         "oracle-synthesizer",
@@ -611,10 +620,8 @@ fn test_qa_a11y_and_oracle_composition() {
         }],
     );
     // Shares scaffold DNA with TestGenerator::a11y_spec_scaffold.
-    let scaffold = thor::dx::test_generator::TestGenerator::a11y_spec_scaffold(
-        "home",
-        &["label".into()],
-    );
+    let scaffold =
+        thor::dx::test_generator::TestGenerator::a11y_spec_scaffold("home", &["label".into()]);
     assert!(a11y.playwright_ts.contains("AxeBuilder"));
     assert!(scaffold.contains("AxeBuilder"));
     assert!(a11y.playwright_ts.contains("input#email"));
@@ -853,8 +860,10 @@ fn test_wave2_frontend_invokes() {
         }),
     )
     .expect("image-delivery-auditor");
-    assert!(img["result"]["oversized_count"].as_u64().unwrap() >= 1
-        || !img["result"]["findings"].as_array().unwrap().is_empty());
+    assert!(
+        img["result"]["oversized_count"].as_u64().unwrap() >= 1
+            || !img["result"]["findings"].as_array().unwrap().is_empty()
+    );
 }
 
 #[test]
@@ -958,4 +967,3 @@ fn test_wave2_registry_still_144() {
     assert_eq!(FeatureId::ALL.len(), 144);
     assert_eq!(FeatureEngine::new().registry().len(), 144);
 }
-

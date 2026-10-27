@@ -22,8 +22,7 @@ pub struct BudgetEvaluation {
 }
 
 /// Runner execution engine target
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[derive(Default)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
 pub enum RunnerType {
     /// Chromium Web Vitals and DOM behavior test runner
     Browser,
@@ -33,7 +32,6 @@ pub enum RunnerType {
     /// Dual hybrid runner combining browser UI probes with protocol scale
     Hybrid,
 }
-
 
 /// Individual step within a load scenario
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -191,9 +189,11 @@ impl PerformanceBudgets {
         if let (Some(transfer), Some(max)) = (transfer_bytes, self.max_transfer_bytes) {
             gate("transfer_bytes", transfer as f64, max as f64, true);
         }
-        if let (Some(transfer), Some(decoded), Some(max_ratio)) =
-            (transfer_bytes, decoded_bytes, self.max_decoded_inflation_ratio)
-        {
+        if let (Some(transfer), Some(decoded), Some(max_ratio)) = (
+            transfer_bytes,
+            decoded_bytes,
+            self.max_decoded_inflation_ratio,
+        ) {
             if transfer > 0 {
                 let ratio = decoded as f64 / transfer as f64;
                 gate("decoded_inflation_ratio", ratio, max_ratio, true);
@@ -220,10 +220,7 @@ impl PerformanceBudgets {
     /// (max with hard-nav values) so SPA route changes participate in gates.
     pub fn check(&self, metrics: &LoadMetrics) -> Vec<String> {
         // Drop synthetic browser vitals before folding — they must not gate budgets.
-        let mut folded = metrics
-            .browser_vitals
-            .clone()
-            .filter(|v| !v.synthetic);
+        let mut folded = metrics.browser_vitals.clone().filter(|v| !v.synthetic);
         if let Some(soft) = metrics.soft_nav.as_ref() {
             if soft.navigations > 0 {
                 let base = folded.get_or_insert_with(BrowserMetrics::default);
@@ -256,10 +253,9 @@ impl PerformanceBudgets {
                     "p99 latency {:.2}ms exceeds budget {:.2}ms",
                     v.actual, v.budget
                 ),
-                "error_rate" => format!(
-                    "error rate {:.4} exceeds budget {:.4}",
-                    v.actual, v.budget
-                ),
+                "error_rate" => {
+                    format!("error rate {:.4} exceeds budget {:.4}", v.actual, v.budget)
+                }
                 "rps" => format!(
                     "throughput {:.2} rps below budget {:.2} rps",
                     v.actual, v.budget

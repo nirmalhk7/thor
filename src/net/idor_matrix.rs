@@ -146,10 +146,7 @@ impl IdorMatrixEngine {
                     original = original.with_cookie(v.clone());
                 }
             }
-            vec![
-                original,
-                IdorRoleConfig::new("Anonymous"),
-            ]
+            vec![original, IdorRoleConfig::new("Anonymous")]
         } else {
             roles
         };
@@ -247,7 +244,10 @@ impl IdorMatrixEngine {
 
     /// Get last calculated IDOR matrix result
     pub fn get_last_matrix(&self) -> Option<IdorMatrixResult> {
-        self.last_matrix.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.last_matrix
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 }
 

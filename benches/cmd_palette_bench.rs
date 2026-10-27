@@ -1,6 +1,6 @@
 use std::time::Instant;
-use thor::dx::stack_detector::TechStackDetector;
 use thor::dx::cmd_palette::{CmdPalette, CmdPaletteMode, PaletteItem, PaletteItemType};
+use thor::dx::stack_detector::TechStackDetector;
 use thor::net::locust::{LocustMetricScorer, RequestMetric};
 use thor::net::security_shield::SecurityShield;
 
@@ -37,7 +37,9 @@ fn generate_10k_palette_items() -> Vec<PaletteItem> {
         };
 
         let url = match i % 4 {
-            0 => format!("https://github.com/thor-browser/repo-{i}?utm_source=github&gclid=abc_{i}"),
+            0 => {
+                format!("https://github.com/thor-browser/repo-{i}?utm_source=github&gclid=abc_{i}")
+            }
             1 => format!("https://google.com/search?q=item_{i}&utm_medium=cpc&fbclid=xyz_{i}"),
             2 => format!("Thor://settings/node_{i}?ref_=thor_app&msclkid=123_{i}"),
             _ => format!("http://localhost:{i}?utm_campaign=dev_test&igshid=456_{i}"),
@@ -143,7 +145,16 @@ fn bench_cmd_palette_search(items: &[PaletteItem]) {
     let mut palette = CmdPalette::new(CmdPaletteMode::BookmarksAndTabHistory);
     palette.set_items(items.to_vec());
 
-    let test_queries = ["git", "google", "dev", "thor", "resource", "localhost", "123", "code"];
+    let test_queries = [
+        "git",
+        "google",
+        "dev",
+        "thor",
+        "resource",
+        "localhost",
+        "123",
+        "code",
+    ];
 
     // Warmup CPU cache
     for q in &test_queries {

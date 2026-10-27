@@ -14,7 +14,12 @@ pub struct RequestMetric {
 }
 
 impl RequestMetric {
-    pub fn new(response_time_us: u64, status_code: u16, is_success: bool, bytes_received: usize) -> Self {
+    pub fn new(
+        response_time_us: u64,
+        status_code: u16,
+        is_success: bool,
+        bytes_received: usize,
+    ) -> Self {
         Self {
             response_time_us,
             status_code,
@@ -79,10 +84,22 @@ impl LocustMetricScorer {
         let p95_idx = (total_requests as f64 * 0.95) as usize;
         let p99_idx = (total_requests as f64 * 0.99) as usize;
 
-        let p50 = latencies.get(p50_idx.min(total_requests - 1)).copied().unwrap_or(0);
-        let p90 = latencies.get(p90_idx.min(total_requests - 1)).copied().unwrap_or(0);
-        let p95 = latencies.get(p95_idx.min(total_requests - 1)).copied().unwrap_or(0);
-        let p99 = latencies.get(p99_idx.min(total_requests - 1)).copied().unwrap_or(0);
+        let p50 = latencies
+            .get(p50_idx.min(total_requests - 1))
+            .copied()
+            .unwrap_or(0);
+        let p90 = latencies
+            .get(p90_idx.min(total_requests - 1))
+            .copied()
+            .unwrap_or(0);
+        let p95 = latencies
+            .get(p95_idx.min(total_requests - 1))
+            .copied()
+            .unwrap_or(0);
+        let p99 = latencies
+            .get(p99_idx.min(total_requests - 1))
+            .copied()
+            .unwrap_or(0);
 
         let rps = if duration_secs > 0.0 {
             total_requests as f64 / duration_secs
@@ -103,7 +120,11 @@ impl LocustMetricScorer {
             failed_requests,
             rps,
             error_rate,
-            min_latency_us: if min_latency == u64::MAX { 0 } else { min_latency },
+            min_latency_us: if min_latency == u64::MAX {
+                0
+            } else {
+                min_latency
+            },
             max_latency_us: max_latency,
             avg_latency_us: avg_latency,
             p50_latency_us: p50,
@@ -125,7 +146,12 @@ pub struct LocustConfig {
 }
 
 impl LocustConfig {
-    pub fn new(target_url: impl Into<String>, users: u32, ramp_up_secs: u32, runtime_secs: u64) -> Self {
+    pub fn new(
+        target_url: impl Into<String>,
+        users: u32,
+        ramp_up_secs: u32,
+        runtime_secs: u64,
+    ) -> Self {
         Self {
             target_url: target_url.into(),
             users: users.max(1),
@@ -255,9 +281,7 @@ async fn run_swarm(config: LocustConfig, shared: Arc<LocustShared>) {
 
     for i in 0..config.users {
         let ramp_delay = if config.users > 1 && config.ramp_up_secs > 0 {
-            Duration::from_secs_f64(
-                (i as f64 / config.users as f64) * config.ramp_up_secs as f64,
-            )
+            Duration::from_secs_f64((i as f64 / config.users as f64) * config.ramp_up_secs as f64)
         } else {
             Duration::ZERO
         };
@@ -370,8 +394,7 @@ mod tests {
             }
         });
 
-        let handle = LocustHandle::start(LocustConfig::new(&url, 4, 0, 2))
-            .expect("locust start");
+        let handle = LocustHandle::start(LocustConfig::new(&url, 4, 0, 2)).expect("locust start");
 
         // Let workers fire real requests.
         std::thread::sleep(Duration::from_millis(800));

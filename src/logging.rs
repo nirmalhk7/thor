@@ -42,10 +42,10 @@ impl LogLevel {
 
     pub fn ansi_color(&self) -> &'static str {
         match self {
-            LogLevel::Trace => "\x1b[90m", // Dim Gray
-            LogLevel::Debug => "\x1b[35m", // Magenta
-            LogLevel::Info => "\x1b[36m",  // Cyan
-            LogLevel::Warn => "\x1b[33m",  // Yellow
+            LogLevel::Trace => "\x1b[90m",   // Dim Gray
+            LogLevel::Debug => "\x1b[35m",   // Magenta
+            LogLevel::Info => "\x1b[36m",    // Cyan
+            LogLevel::Warn => "\x1b[33m",    // Yellow
             LogLevel::Error => "\x1b[31;1m", // Bold Red
         }
     }
@@ -553,9 +553,27 @@ mod tests {
     #[test]
     fn test_log_buffer_filtering() {
         let buffer = LogBuffer::new(10);
-        buffer.push(LogRecord::new(LogLevel::Debug, "thor::cdp", "debug cdp", None, None));
-        buffer.push(LogRecord::new(LogLevel::Info, "thor::shell", "info shell", None, None));
-        buffer.push(LogRecord::new(LogLevel::Error, "thor::net", "error net", None, None));
+        buffer.push(LogRecord::new(
+            LogLevel::Debug,
+            "thor::cdp",
+            "debug cdp",
+            None,
+            None,
+        ));
+        buffer.push(LogRecord::new(
+            LogLevel::Info,
+            "thor::shell",
+            "info shell",
+            None,
+            None,
+        ));
+        buffer.push(LogRecord::new(
+            LogLevel::Error,
+            "thor::net",
+            "error net",
+            None,
+            None,
+        ));
 
         let errors = buffer.query(Some(LogLevel::Error), None, 10);
         assert_eq!(errors.len(), 1);
@@ -568,7 +586,13 @@ mod tests {
 
     #[test]
     fn test_log_record_formatting() {
-        let record = LogRecord::new(LogLevel::Info, "thor::shell", "Booting...", Some("main.rs"), Some(42));
+        let record = LogRecord::new(
+            LogLevel::Info,
+            "thor::shell",
+            "Booting...",
+            Some("main.rs"),
+            Some(42),
+        );
         let formatted = record.format_console(false);
         assert!(formatted.contains("INFO"));
         assert!(formatted.contains("[thor::shell]"));

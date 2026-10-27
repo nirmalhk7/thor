@@ -488,7 +488,7 @@ impl FeatureId {
             FeatureId::InjectionScanner => "injection-scanner",
             FeatureId::LlmLoad => "llm-load",
             FeatureId::DeterministicReplay => "deterministic-replay",
-FeatureId::HydrationDiffLens => "hydration-diff-lens",
+            FeatureId::HydrationDiffLens => "hydration-diff-lens",
             FeatureId::CssCoverageMap => "css-coverage-map",
             FeatureId::FocusOrderOverlay => "focus-order-overlay",
             FeatureId::EventListenerMap => "event-listener-map",
@@ -638,7 +638,7 @@ FeatureId::HydrationDiffLens => "hydration-diff-lens",
             FeatureId::InjectionScanner => "Prompt Injection Scanner",
             FeatureId::LlmLoad => "LLM Load",
             FeatureId::DeterministicReplay => "Deterministic Replay",
-FeatureId::HydrationDiffLens => "Hydration Diff Lens",
+            FeatureId::HydrationDiffLens => "Hydration Diff Lens",
             FeatureId::CssCoverageMap => "CSS Coverage Map",
             FeatureId::FocusOrderOverlay => "Focus Order Overlay",
             FeatureId::EventListenerMap => "Event Listener Map",
@@ -690,7 +690,7 @@ FeatureId::HydrationDiffLens => "Hydration Diff Lens",
     }
 
     /// Domain the feature belongs to.
-pub fn category(&self) -> FeatureCategory {
+    pub fn category(&self) -> FeatureCategory {
         use FeatureId::*;
         match self {
             ComponentTreeLens
@@ -789,54 +789,20 @@ pub fn category(&self) -> FeatureCategory {
             | CompressionBudget
             | MediaWeightGate
             | ContinuousProfiler => FeatureCategory::Performance,
-            ResilientLocators
-            | FlakeRadar
-            | VisualRegression
-            | IdentityFixtures
-            | DataDrivenScenarios
-            | RealVitalsGates
-            | ContractTesting
-            | DeflakedExport
-            | CiBundle
-            | TimeTravelTrace
-            | DeterminismHarness
-            | AuthzMatrixTests
-            | FlakeTriager
-            | QuarantinePolicy
-            | ContractDriftGate
-            | HermeticFixturePack
-            | A11yTestGen
-            | SnapshotStrategyPack
-            | CoverageAdjacencyMap
-            | ParallelShardPlanner
-            | TracePropertyMiner
-            | RuntimeSelfHeal
-            | OracleSynthesizer
-            | MutationHookBridge => FeatureCategory::Qa,
-            LlmInspector
-            | StreamingWaterfall
-            | PromptDiff
-            | CostDashboard
-            | EvalReplay
-            | ModelComparison
-            | AgentTrace
-            | ContextHeatmap
-            | RagInspector
-            | InjectionScanner
-            | LlmLoad
-            | DeterministicReplay
-            | ToolCallForensics
-            | JsonSchemaGuard
-            | CacheHitLedger
-            | TokenWasteAuditor
-            | StreamingSloGates
-            | RouterDecisionTrace
-            | McpTrafficLens
-            | EvalDatasetMiner
-            | HallucinationOracle
-            | EmbeddingRagBench
-            | ProtocolQuirkDiff
-            | LocalCloudParity => FeatureCategory::Ai,
+            ResilientLocators | FlakeRadar | VisualRegression | IdentityFixtures
+            | DataDrivenScenarios | RealVitalsGates | ContractTesting | DeflakedExport
+            | CiBundle | TimeTravelTrace | DeterminismHarness | AuthzMatrixTests | FlakeTriager
+            | QuarantinePolicy | ContractDriftGate | HermeticFixturePack | A11yTestGen
+            | SnapshotStrategyPack | CoverageAdjacencyMap | ParallelShardPlanner
+            | TracePropertyMiner | RuntimeSelfHeal | OracleSynthesizer | MutationHookBridge => {
+                FeatureCategory::Qa
+            }
+            LlmInspector | StreamingWaterfall | PromptDiff | CostDashboard | EvalReplay
+            | ModelComparison | AgentTrace | ContextHeatmap | RagInspector | InjectionScanner
+            | LlmLoad | DeterministicReplay | ToolCallForensics | JsonSchemaGuard
+            | CacheHitLedger | TokenWasteAuditor | StreamingSloGates | RouterDecisionTrace
+            | McpTrafficLens | EvalDatasetMiner | HallucinationOracle | EmbeddingRagBench
+            | ProtocolQuirkDiff | LocalCloudParity => FeatureCategory::Ai,
         }
     }
 
@@ -845,25 +811,11 @@ pub fn category(&self) -> FeatureCategory {
         use FeatureId::*;
         match self {
             // Experimental: live Chromium / network / mutating lab surfaces.
-            OobListener
-            | ChaosInjection
-            | AgentTrace
-            | FlameGraph
-            | RuntimeSelfHeal
-            | DomSnapshotCapture
-            | SseWsServerLab
-            | GrpcStreamWorkbench
-            | LiveStubServer
-            | SessionFixationLab
-            | RaceWindowRepeater
-            | SsrfLabHarness
-            | FreezeResumeBench
-            | SpeculationLab
-            | ContinuousProfiler
-            | MutationHookBridge
-            | SoftNavVitals
-            | MultipartWorkbench
-            | McpTrafficLens => FeatureStatus::Experimental,
+            OobListener | ChaosInjection | AgentTrace | FlameGraph | RuntimeSelfHeal
+            | DomSnapshotCapture | SseWsServerLab | GrpcStreamWorkbench | LiveStubServer
+            | SessionFixationLab | RaceWindowRepeater | SsrfLabHarness | FreezeResumeBench
+            | SpeculationLab | ContinuousProfiler | MutationHookBridge | SoftNavVitals
+            | MultipartWorkbench | McpTrafficLens => FeatureStatus::Experimental,
             // Beta: newer analyzers still stabilizing heuristics.
             SinkPollution
             | RagInspector

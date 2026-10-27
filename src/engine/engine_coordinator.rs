@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 use std::sync::Arc;
 use std::time::Duration;
-use tokio::sync::{mpsc, watch, oneshot};
+use tokio::sync::{mpsc, oneshot, watch};
 use tokio::time::timeout;
 
 use super::chromium_runtime::ChromiumRuntime;
@@ -9,35 +9,51 @@ use super::tab_session::TabId;
 
 #[derive(Debug, thiserror::Error)]
 pub enum EngineError {
-    #[error("Tab not found")] TabNotFound,
-    #[error("Identity not found")] IdentityNotFound,
-    #[error("Stale target")] StaleTarget,
-    #[error("Context disposed")] ContextDisposed,
-    #[error("Busy")] Busy,
-    #[error("Timeout")] Timeout,
-    #[error("Navigation superseded")] NavigationSuperseded,
-    #[error("Unsupported operation")] UnsupportedOperation,
-    #[error("CDP rejected")] CdpRejected,
-    #[error("Runtime unavailable")] RuntimeUnavailable,
+    #[error("Tab not found")]
+    TabNotFound,
+    #[error("Identity not found")]
+    IdentityNotFound,
+    #[error("Stale target")]
+    StaleTarget,
+    #[error("Context disposed")]
+    ContextDisposed,
+    #[error("Busy")]
+    Busy,
+    #[error("Timeout")]
+    Timeout,
+    #[error("Navigation superseded")]
+    NavigationSuperseded,
+    #[error("Unsupported operation")]
+    UnsupportedOperation,
+    #[error("CDP rejected")]
+    CdpRejected,
+    #[error("Runtime unavailable")]
+    RuntimeUnavailable,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct IdentityContextId(pub u64);
 
 impl From<u64> for IdentityContextId {
-    fn from(val: u64) -> Self { Self(val) }
+    fn from(val: u64) -> Self {
+        Self(val)
+    }
 }
 
 #[derive(Debug, Clone)]
 pub struct IdentityRecord {
-    pub id: IdentityContextId, pub browser_context_id: Option<String>,
+    pub id: IdentityContextId,
+    pub browser_context_id: Option<String>,
 }
 
 #[derive(Debug, Default)]
 pub struct EvidenceStore {}
 
 pub struct TabRecord {
-    pub command_tx: mpsc::Sender<TabCommand>, pub last_user_interaction: Option<std::time::Instant>, pub generation: u64, pub restore: Option<crate::engine::freezing::RestoreSnapshot>,
+    pub command_tx: mpsc::Sender<TabCommand>,
+    pub last_user_interaction: Option<std::time::Instant>,
+    pub generation: u64,
+    pub restore: Option<crate::engine::freezing::RestoreSnapshot>,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -53,34 +69,94 @@ pub struct BrowserSnapshot {
 }
 
 pub enum EngineCommand {
-    Targeted { target: crate::browser::session::TabRef, command: Box<EngineCommand> },
-    CreateTab { identity_id: IdentityContextId, url: String, reply: oneshot::Sender<Result<TabId, EngineError>> },
-    CloseTab { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    ActivateTab { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Navigate { tab_id: TabId, url: String, reply: oneshot::Sender<Result<(), EngineError>> },
-    Back { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Forward { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Reload { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Evaluate { tab_id: TabId, generation: u64, script: String, reply: oneshot::Sender<Result<String, EngineError>> },
-    CaptureScreenshot { tab_id: TabId, options: ScreenshotOptions, reply: oneshot::Sender<Result<Vec<u8>, EngineError>> },
-    Freeze { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Discard { tab_id: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    MergeTabs { source: TabId, destination: TabId, reply: oneshot::Sender<Result<(), EngineError>> },
-    Shutdown { reply: oneshot::Sender<Result<(), EngineError>> },
+    Targeted {
+        target: crate::browser::session::TabRef,
+        command: Box<EngineCommand>,
+    },
+    CreateTab {
+        identity_id: IdentityContextId,
+        url: String,
+        reply: oneshot::Sender<Result<TabId, EngineError>>,
+    },
+    CloseTab {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    ActivateTab {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Navigate {
+        tab_id: TabId,
+        url: String,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Back {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Forward {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Reload {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Evaluate {
+        tab_id: TabId,
+        generation: u64,
+        script: String,
+        reply: oneshot::Sender<Result<String, EngineError>>,
+    },
+    CaptureScreenshot {
+        tab_id: TabId,
+        options: ScreenshotOptions,
+        reply: oneshot::Sender<Result<Vec<u8>, EngineError>>,
+    },
+    Freeze {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Discard {
+        tab_id: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    MergeTabs {
+        source: TabId,
+        destination: TabId,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Shutdown {
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
 }
 
 impl EngineCommand {
     pub fn reject(self, error: EngineError) {
         match self {
             Self::Targeted { command, .. } => command.reject(error),
-            Self::CreateTab { reply, .. } => { let _ = reply.send(Err(error)); }
-            Self::Evaluate { reply, .. } => { let _ = reply.send(Err(error)); }
-            Self::CaptureScreenshot { reply, .. } => { let _ = reply.send(Err(error)); }
-            Self::CloseTab { reply, .. } | Self::ActivateTab { reply, .. }
-            | Self::Navigate { reply, .. } | Self::Back { reply, .. }
-            | Self::Forward { reply, .. } | Self::Reload { reply, .. }
-            | Self::Freeze { reply, .. } | Self::Discard { reply, .. }
-            | Self::MergeTabs { reply, .. } | Self::Shutdown { reply } => { let _ = reply.send(Err(error)); }
+            Self::CreateTab { reply, .. } => {
+                let _ = reply.send(Err(error));
+            }
+            Self::Evaluate { reply, .. } => {
+                let _ = reply.send(Err(error));
+            }
+            Self::CaptureScreenshot { reply, .. } => {
+                let _ = reply.send(Err(error));
+            }
+            Self::CloseTab { reply, .. }
+            | Self::ActivateTab { reply, .. }
+            | Self::Navigate { reply, .. }
+            | Self::Back { reply, .. }
+            | Self::Forward { reply, .. }
+            | Self::Reload { reply, .. }
+            | Self::Freeze { reply, .. }
+            | Self::Discard { reply, .. }
+            | Self::MergeTabs { reply, .. }
+            | Self::Shutdown { reply } => {
+                let _ = reply.send(Err(error));
+            }
         }
     }
 }
@@ -99,13 +175,31 @@ pub enum EngineEvent {
 }
 
 pub enum TabCommand {
-    Navigate { url: String, reply: oneshot::Sender<Result<(), EngineError>> },
-    Close { reply: oneshot::Sender<Result<(), EngineError>> },
-    Evaluate { script: String, reply: oneshot::Sender<Result<String, EngineError>> },
-    CaptureScreenshot { options: ScreenshotOptions, reply: oneshot::Sender<Result<Vec<u8>, EngineError>> },
-    GetHistory { reply: oneshot::Sender<Vec<crate::engine::tab_session::HistoryEntry>> },
-    MergeHistory { source_history: Vec<crate::engine::tab_session::HistoryEntry>, reply: oneshot::Sender<()> },
-    TickLifecycle { reply: oneshot::Sender<()> },
+    Navigate {
+        url: String,
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Close {
+        reply: oneshot::Sender<Result<(), EngineError>>,
+    },
+    Evaluate {
+        script: String,
+        reply: oneshot::Sender<Result<String, EngineError>>,
+    },
+    CaptureScreenshot {
+        options: ScreenshotOptions,
+        reply: oneshot::Sender<Result<Vec<u8>, EngineError>>,
+    },
+    GetHistory {
+        reply: oneshot::Sender<Vec<crate::engine::tab_session::HistoryEntry>>,
+    },
+    MergeHistory {
+        source_history: Vec<crate::engine::tab_session::HistoryEntry>,
+        reply: oneshot::Sender<()>,
+    },
+    TickLifecycle {
+        reply: oneshot::Sender<()>,
+    },
 }
 
 const DEADLINE_STATE: Duration = Duration::from_secs(5);
@@ -148,21 +242,24 @@ impl BrowserEngine {
             snapshot_tx,
             cmd_rx,
         };
-        let handle = EngineHandle { cmd_tx, snapshot_rx };
+        let handle = EngineHandle {
+            cmd_tx,
+            snapshot_rx,
+        };
         (engine, handle)
     }
 
     pub async fn run(mut self) {
         let mut tick = tokio::time::interval(Duration::from_secs(30));
-        
+
         loop {
             tokio::select! {
                 Some(cmd) = self.cmd_rx.recv() => {
                     self.handle_command(cmd).await;
-                    
+
                     let tabs: Vec<TabId> = self.tabs.keys().copied().collect();
                     let identities: Vec<IdentityContextId> = self.identities.keys().cloned().collect();
-                    
+
                     let _ = self.snapshot_tx.send(BrowserSnapshot {
                         active_target: None,
                         tab_details: Vec::new(),
@@ -188,21 +285,28 @@ impl BrowserEngine {
 
     async fn handle_command(&mut self, cmd: EngineCommand) {
         match cmd {
-            EngineCommand::Targeted { command, .. } => command.reject(EngineError::UnsupportedOperation),
-            EngineCommand::CreateTab { identity_id: _, url, reply } => {
+            EngineCommand::Targeted { command, .. } => {
+                command.reject(EngineError::UnsupportedOperation)
+            }
+            EngineCommand::CreateTab {
+                identity_id: _,
+                url,
+                reply,
+            } => {
                 let runtime = Arc::clone(&self.runtime);
                 match timeout(DEADLINE_LAUNCH_SHUTDOWN, runtime.new_tab(Some(&url))).await {
                     Ok(Ok(session)) => {
                         let tab_id = session.id();
                         let (tab_cmd_tx, mut tab_cmd_rx) = mpsc::channel(64);
-                        
+
                         let mut session_opt = Some(session);
                         tokio::spawn(async move {
                             while let Some(tab_cmd) = tab_cmd_rx.recv().await {
                                 match tab_cmd {
                                     TabCommand::Navigate { url, reply } => {
                                         if let Some(session) = &session_opt {
-                                            let res = timeout(DEADLINE_NAV, session.navigate(&url)).await;
+                                            let res =
+                                                timeout(DEADLINE_NAV, session.navigate(&url)).await;
                                             let out = match res {
                                                 Ok(Ok(_)) => Ok(()),
                                                 Ok(Err(_)) => Err(EngineError::CdpRejected),
@@ -215,7 +319,9 @@ impl BrowserEngine {
                                     }
                                     TabCommand::Close { reply } => {
                                         if let Some(session) = session_opt.take() {
-                                            let res = timeout(DEADLINE_LAUNCH_SHUTDOWN, session.close()).await;
+                                            let res =
+                                                timeout(DEADLINE_LAUNCH_SHUTDOWN, session.close())
+                                                    .await;
                                             let out = match res {
                                                 Ok(Ok(_)) => Ok(()),
                                                 Ok(Err(_)) => Err(EngineError::CdpRejected),
@@ -229,7 +335,11 @@ impl BrowserEngine {
                                     }
                                     TabCommand::Evaluate { script, reply } => {
                                         if let Some(session) = &session_opt {
-                                            let res = timeout(DEADLINE_STATE, session.evaluate_js(&script)).await;
+                                            let res = timeout(
+                                                DEADLINE_STATE,
+                                                session.evaluate_js(&script),
+                                            )
+                                            .await;
                                             let out = match res {
                                                 Ok(Ok(val)) => Ok(val.to_string()),
                                                 Ok(Err(_)) => Err(EngineError::CdpRejected),
@@ -259,10 +369,17 @@ impl BrowserEngine {
                                         }
                                     }
                                     TabCommand::GetHistory { reply } => {
-                                        let h = if let Some(s) = &session_opt { s.nav_history() } else { vec![] };
+                                        let h = if let Some(s) = &session_opt {
+                                            s.nav_history()
+                                        } else {
+                                            vec![]
+                                        };
                                         let _ = reply.send(h);
                                     }
-                                    TabCommand::MergeHistory { source_history, reply } => {
+                                    TabCommand::MergeHistory {
+                                        source_history,
+                                        reply,
+                                    } => {
                                         if let Some(s) = &session_opt {
                                             s.append_history(source_history);
                                         }
@@ -273,11 +390,18 @@ impl BrowserEngine {
                                             use crate::engine::tab_session::TabLifecycle;
                                             let idle = session.last_active().elapsed();
                                             let current = session.lifecycle();
-                                            if idle > Duration::from_secs(24 * 3600) && current != TabLifecycle::Expired {
+                                            if idle > Duration::from_secs(24 * 3600)
+                                                && current != TabLifecycle::Expired
+                                            {
                                                 // Expired after 24h
-                                            } else if idle > Duration::from_secs(3600) && current != TabLifecycle::Discarded && current != TabLifecycle::Expired {
+                                            } else if idle > Duration::from_secs(3600)
+                                                && current != TabLifecycle::Discarded
+                                                && current != TabLifecycle::Expired
+                                            {
                                                 let _ = session.discard_blocking();
-                                            } else if idle > Duration::from_secs(15 * 60) && current == TabLifecycle::Active {
+                                            } else if idle > Duration::from_secs(15 * 60)
+                                                && current == TabLifecycle::Active
+                                            {
                                                 let _ = session.freeze_blocking(false);
                                             }
                                         }
@@ -287,7 +411,15 @@ impl BrowserEngine {
                             }
                         });
 
-                        self.tabs.insert(tab_id, TabRecord { command_tx: tab_cmd_tx, last_user_interaction: Some(std::time::Instant::now()), generation: 1, restore: None });
+                        self.tabs.insert(
+                            tab_id,
+                            TabRecord {
+                                command_tx: tab_cmd_tx,
+                                last_user_interaction: Some(std::time::Instant::now()),
+                                generation: 1,
+                                restore: None,
+                            },
+                        );
                         let _ = reply.send(Ok(tab_id));
                     }
                     Ok(Err(_)) => {
@@ -305,51 +437,96 @@ impl BrowserEngine {
                     let _ = reply.send(Err(EngineError::TabNotFound));
                 }
             }
-            EngineCommand::ActivateTab { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
+            EngineCommand::ActivateTab { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
             EngineCommand::Navigate { tab_id, url, reply } => {
                 if let Some(record) = self.tabs.get(&tab_id) {
-                    let _ = record.command_tx.send(TabCommand::Navigate { url, reply }).await;
+                    let _ = record
+                        .command_tx
+                        .send(TabCommand::Navigate { url, reply })
+                        .await;
                 } else {
                     let _ = reply.send(Err(EngineError::TabNotFound));
                 }
             }
-            EngineCommand::Back { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
-            EngineCommand::Forward { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
-            EngineCommand::Reload { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
-            EngineCommand::Evaluate { tab_id, script, reply, .. } => {
+            EngineCommand::Back { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
+            EngineCommand::Forward { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
+            EngineCommand::Reload { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
+            EngineCommand::Evaluate {
+                tab_id,
+                script,
+                reply,
+                ..
+            } => {
                 if let Some(record) = self.tabs.get(&tab_id) {
-                    let _ = record.command_tx.send(TabCommand::Evaluate { script, reply }).await;
+                    let _ = record
+                        .command_tx
+                        .send(TabCommand::Evaluate { script, reply })
+                        .await;
                 } else {
                     let _ = reply.send(Err(EngineError::TabNotFound));
                 }
             }
-            EngineCommand::CaptureScreenshot { tab_id, options, reply } => {
+            EngineCommand::CaptureScreenshot {
+                tab_id,
+                options,
+                reply,
+            } => {
                 if let Some(record) = self.tabs.get(&tab_id) {
-                    let _ = record.command_tx.send(TabCommand::CaptureScreenshot { options, reply }).await;
+                    let _ = record
+                        .command_tx
+                        .send(TabCommand::CaptureScreenshot { options, reply })
+                        .await;
                 } else {
                     let _ = reply.send(Err(EngineError::TabNotFound));
                 }
             }
-            EngineCommand::Freeze { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
-            EngineCommand::Discard { tab_id: _, reply } => { let _ = reply.send(Ok(())); }
-            EngineCommand::MergeTabs { source, destination, reply } => { 
+            EngineCommand::Freeze { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
+            EngineCommand::Discard { tab_id: _, reply } => {
+                let _ = reply.send(Ok(()));
+            }
+            EngineCommand::MergeTabs {
+                source,
+                destination,
+                reply,
+            } => {
                 let source_tx = self.tabs.get(&source).map(|r| r.command_tx.clone());
                 let dest_tx = self.tabs.get(&destination).map(|r| r.command_tx.clone());
-                
+
                 if let (Some(s_tx), Some(d_tx)) = (source_tx, dest_tx) {
                     let (hist_tx, hist_rx) = oneshot::channel();
-                    if s_tx.send(TabCommand::GetHistory { reply: hist_tx }).await.is_ok() {
+                    if s_tx
+                        .send(TabCommand::GetHistory { reply: hist_tx })
+                        .await
+                        .is_ok()
+                    {
                         if let Ok(history) = hist_rx.await {
                             let (merge_tx, merge_rx) = oneshot::channel();
-                            if d_tx.send(TabCommand::MergeHistory { source_history: history, reply: merge_tx }).await.is_ok() {
+                            if d_tx
+                                .send(TabCommand::MergeHistory {
+                                    source_history: history,
+                                    reply: merge_tx,
+                                })
+                                .await
+                                .is_ok()
+                            {
                                 let _ = merge_rx.await;
-                                
+
                                 // Close source tab safely
                                 let (close_tx, close_rx) = oneshot::channel();
                                 let _ = s_tx.send(TabCommand::Close { reply: close_tx }).await;
                                 let _ = close_rx.await;
                                 self.tabs.remove(&source);
-                                
+
                                 let _ = reply.send(Ok(()));
                                 return;
                             }
@@ -361,9 +538,15 @@ impl BrowserEngine {
             EngineCommand::Shutdown { reply } => {
                 let runtime = Arc::clone(&self.runtime);
                 match timeout(DEADLINE_LAUNCH_SHUTDOWN, runtime.shutdown()).await {
-                    Ok(Ok(_)) => { let _ = reply.send(Ok(())); }
-                    Ok(Err(_)) => { let _ = reply.send(Err(EngineError::CdpRejected)); }
-                    Err(_) => { let _ = reply.send(Err(EngineError::Timeout)); }
+                    Ok(Ok(_)) => {
+                        let _ = reply.send(Ok(()));
+                    }
+                    Ok(Err(_)) => {
+                        let _ = reply.send(Err(EngineError::CdpRejected));
+                    }
+                    Err(_) => {
+                        let _ = reply.send(Err(EngineError::Timeout));
+                    }
                 }
             }
         }
@@ -378,33 +561,44 @@ mod tests {
     #[tokio::test]
     #[ignore = "requires a live Chrome/Chromium install"]
     async fn test_coordinator_create_close_tab() {
-        let config = ChromiumRuntimeConfig { headful: false, ..Default::default() };
+        let config = ChromiumRuntimeConfig {
+            headful: false,
+            ..Default::default()
+        };
         let rt = ChromiumRuntime::launch(config).await.unwrap();
         let (engine, handle) = BrowserEngine::new(rt);
-        
+
         tokio::spawn(async move {
             engine.run().await;
         });
 
         let (reply_tx, reply_rx) = oneshot::channel();
-        handle.cmd_tx.send(EngineCommand::CreateTab {
-            identity_id: IdentityContextId(0),
-            url: "about:blank".into(),
-            reply: reply_tx,
-        }).await.unwrap();
+        handle
+            .cmd_tx
+            .send(EngineCommand::CreateTab {
+                identity_id: IdentityContextId(0),
+                url: "about:blank".into(),
+                reply: reply_tx,
+            })
+            .await
+            .unwrap();
 
         let tab_id = reply_rx.await.unwrap().unwrap();
-        
+
         // Wait for snapshot
         let mut rx = handle.snapshot_rx.clone();
         rx.changed().await.unwrap();
         assert_eq!(rx.borrow().active_tabs, 1);
 
         let (close_tx, close_rx) = oneshot::channel();
-        handle.cmd_tx.send(EngineCommand::CloseTab {
-            tab_id,
-            reply: close_tx,
-        }).await.unwrap();
+        handle
+            .cmd_tx
+            .send(EngineCommand::CloseTab {
+                tab_id,
+                reply: close_tx,
+            })
+            .await
+            .unwrap();
         close_rx.await.unwrap().unwrap();
 
         rx.changed().await.unwrap();

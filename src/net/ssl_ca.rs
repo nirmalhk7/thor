@@ -1,6 +1,6 @@
 use rcgen::{
-    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair,
-    KeyUsagePurpose, PKCS_ECDSA_P256_SHA256,
+    BasicConstraints, CertificateParams, DistinguishedName, DnType, IsCa, KeyPair, KeyUsagePurpose,
+    PKCS_ECDSA_P256_SHA256,
 };
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -39,15 +39,17 @@ impl SslManager {
         Self::generate_ca_and_leaf_to(None)
     }
 
-    pub fn generate_ca_and_leaf_to(output_dir: Option<&Path>) -> Result<GeneratedCertPaths, String> {
+    pub fn generate_ca_and_leaf_to(
+        output_dir: Option<&Path>,
+    ) -> Result<GeneratedCertPaths, String> {
         let dir = output_dir
             .map(Path::to_path_buf)
             .unwrap_or_else(Self::certs_dir);
         fs::create_dir_all(&dir).map_err(|e| format!("create certs dir: {e}"))?;
 
         // --- CA (ECDSA P-256) ---
-        let mut ca_params = CertificateParams::new(Vec::<String>::new())
-            .map_err(|e| format!("CA params: {e}"))?;
+        let mut ca_params =
+            CertificateParams::new(Vec::<String>::new()).map_err(|e| format!("CA params: {e}"))?;
         ca_params.is_ca = IsCa::Ca(BasicConstraints::Unconstrained);
         ca_params.key_usages = vec![
             KeyUsagePurpose::KeyCertSign,
@@ -68,8 +70,7 @@ impl SslManager {
         let ca_cert_pem = dir.join("Thor-dev-ca.pem");
         let ca_key_pem = dir.join("Thor-dev-ca.key.pem");
         fs::write(&ca_cert_pem, ca_cert.pem()).map_err(|e| format!("write CA cert: {e}"))?;
-        fs::write(&ca_key_pem, ca_key.serialize_pem())
-            .map_err(|e| format!("write CA key: {e}"))?;
+        fs::write(&ca_key_pem, ca_key.serialize_pem()).map_err(|e| format!("write CA key: {e}"))?;
 
         // --- Leaf for *.localhost ---
         let mut leaf_params = CertificateParams::new(vec![
@@ -98,8 +99,7 @@ impl SslManager {
 
         let leaf_cert_pem = dir.join("Thor-localhost.pem");
         let leaf_key_pem = dir.join("Thor-localhost.key.pem");
-        fs::write(&leaf_cert_pem, leaf_cert.pem())
-            .map_err(|e| format!("write leaf cert: {e}"))?;
+        fs::write(&leaf_cert_pem, leaf_cert.pem()).map_err(|e| format!("write leaf cert: {e}"))?;
         fs::write(&leaf_key_pem, leaf_key.serialize_pem())
             .map_err(|e| format!("write leaf key: {e}"))?;
 

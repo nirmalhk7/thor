@@ -8,8 +8,7 @@ pub struct TechBadge {
     pub icon: String,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-#[derive(Default)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
 pub enum RenderingMode {
     Ssr,
     Csr,
@@ -17,7 +16,6 @@ pub enum RenderingMode {
     #[default]
     Unknown,
 }
-
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct DevComponentLocation {
@@ -71,7 +69,9 @@ impl TechStackDetector {
         if html_lower.contains("__next_data__")
             || html_lower.contains("_next/static")
             || url_lower.contains("nextjs.org")
-            || x_powered_by.as_deref().is_some_and(|s| s.to_lowercase().contains("next.js"))
+            || x_powered_by
+                .as_deref()
+                .is_some_and(|s| s.to_lowercase().contains("next.js"))
         {
             badges.push(TechBadge {
                 name: "Next.js".into(),
@@ -112,7 +112,10 @@ impl TechStackDetector {
         }
 
         // 3. Svelte & SvelteKit
-        if html_lower.contains("__svelte") || html_lower.contains(".svelte") || html_lower.contains("sveltekit") {
+        if html_lower.contains("__svelte")
+            || html_lower.contains(".svelte")
+            || html_lower.contains("sveltekit")
+        {
             badges.push(TechBadge {
                 name: "SvelteKit / Svelte".into(),
                 category: "Framework".into(),
@@ -121,7 +124,10 @@ impl TechStackDetector {
         }
 
         // 4. Angular
-        if html_lower.contains("ng-version") || html_lower.contains("ng-app") || html_lower.contains("angular") {
+        if html_lower.contains("ng-version")
+            || html_lower.contains("ng-app")
+            || html_lower.contains("angular")
+        {
             badges.push(TechBadge {
                 name: "Angular".into(),
                 category: "Framework".into(),
@@ -197,7 +203,10 @@ impl TechStackDetector {
             });
         }
 
-        if html_lower.contains("htmx") || html_lower.contains("hx-get") || html_lower.contains("hx-post") {
+        if html_lower.contains("htmx")
+            || html_lower.contains("hx-get")
+            || html_lower.contains("hx-post")
+        {
             badges.push(TechBadge {
                 name: "htmx".into(),
                 category: "Library".into(),
@@ -366,7 +375,10 @@ impl TechStackDetector {
                 });
             }
 
-            if srv_lower.contains("gunicorn") || srv_lower.contains("uvicorn") || srv_lower.contains("django") {
+            if srv_lower.contains("gunicorn")
+                || srv_lower.contains("uvicorn")
+                || srv_lower.contains("django")
+            {
                 badges.push(TechBadge {
                     name: "Python (Django)".into(),
                     category: "Backend".into(),
@@ -378,7 +390,10 @@ impl TechStackDetector {
                     category: "Backend".into(),
                     icon: "💎".into(),
                 });
-            } else if srv_lower.contains("express") || srv_lower.contains("node") || srv_lower.contains("vercel") {
+            } else if srv_lower.contains("express")
+                || srv_lower.contains("node")
+                || srv_lower.contains("vercel")
+            {
                 badges.push(TechBadge {
                     name: "Node.js / Vercel".into(),
                     category: "Runtime".into(),
@@ -510,11 +525,11 @@ mod tests {
 
     #[test]
     fn test_detect_with_headers_and_meta() {
-        let html = r#"<meta name="generator" content="WordPress 6.2"><div class="wp-content"></div>"#;
+        let html =
+            r#"<meta name="generator" content="WordPress 6.2"><div class="wp-content"></div>"#;
         let mut headers = HashMap::new();
         headers.insert("x-powered-by".to_string(), "PHP/8.1".to_string());
         let stack = TechStackDetector::detect_with_headers("https://example.com", html, &headers);
         assert!(stack.badges.iter().any(|b| b.name.contains("WordPress")));
     }
 }
-

@@ -57,10 +57,7 @@ fn test_session_fixation_requires_target_url() {
         }),
     );
     let orch_err = orch.expect_err("orch missing target_url");
-    assert!(
-        orch_err.contains("target_url"),
-        "orch err={orch_err}"
-    );
+    assert!(orch_err.contains("target_url"), "orch err={orch_err}");
 
     let ok = e
         .session_fixation_lab(&SessionFixationProbe {
@@ -170,10 +167,7 @@ data: [DONE]
     let only = AiEngine::tool_call_events_from_sse(call_only);
     assert_eq!(only.len(), 1);
     assert_eq!(only[0].name, "lookup");
-    assert!(
-        !only[0].success,
-        "call-only must not report success"
-    );
+    assert!(!only[0].success, "call-only must not report success");
 
     let call_and_result = r#"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"call_1","function":{"name":"lookup","arguments":"{}"}}]}}],"created_ms":1000}
 data: {"type":"tool_result","tool_call_id":"call_1","content":"ok","created_ms":1080}
@@ -184,11 +178,8 @@ data: [DONE]
     assert!(merged[0].success, "call+tool_result must succeed");
     assert_eq!(merged[0].latency_ms, 80);
 
-    let orch = FeatureOrchestrator::invoke(
-        "tool-call-forensics",
-        &json!({ "sse": call_only }),
-    )
-    .expect("tool-call-forensics call-only");
+    let orch = FeatureOrchestrator::invoke("tool-call-forensics", &json!({ "sse": call_only }))
+        .expect("tool-call-forensics call-only");
     assert_eq!(orch["result"]["failures"], 1);
 }
 
@@ -236,7 +227,10 @@ fn test_header_fuzz_execute_optional_when_wired() {
         .header_contract_fuzzer_gated(&base, &contract, Some(&url), true, false)
         .expect("local execute");
     assert!(live.executed);
-    assert!(live.cases.iter().any(|c| c.status.is_some() || c.error.is_some()));
+    assert!(live
+        .cases
+        .iter()
+        .any(|c| c.status.is_some() || c.error.is_some()));
 
     let orch = FeatureOrchestrator::invoke(
         "header-contract-fuzzer",
@@ -264,10 +258,8 @@ fn test_from_active_tab_errs_without_chromium() {
         "err={err}"
     );
 
-    let orch = FeatureOrchestrator::invoke(
-        "dom-snapshot-capture",
-        &json!({ "from_active_tab": true }),
-    );
+    let orch =
+        FeatureOrchestrator::invoke("dom-snapshot-capture", &json!({ "from_active_tab": true }));
     let orch_err = orch.expect_err("from_active_tab without runtime");
     assert!(
         orch_err.contains("Chromium")

@@ -8,11 +8,11 @@ fn test_perf_benchmarks_local_fixture() {
         let _ = vec![0; 100];
     }
     let elapsed = start.elapsed();
-    
+
     // Target performance budget: < 50ms
     assert!(
         elapsed < Duration::from_millis(50),
-        "Performance benchmark failed: expected < 50ms, got {:?}", 
+        "Performance benchmark failed: expected < 50ms, got {:?}",
         elapsed
     );
 }

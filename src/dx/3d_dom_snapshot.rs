@@ -43,7 +43,9 @@ impl DomSnapshot3D {
     /// Extract 3D layout layers from raw DOM tree JSON or snapshot
     pub fn parse_dom_layers(&mut self, html_content: &str) -> usize {
         let mut layers = Vec::new();
-        let tags = ["div", "section", "article", "header", "main", "footer", "button", "input", "a", "p"];
+        let tags = [
+            "div", "section", "article", "header", "main", "footer", "button", "input", "a", "p",
+        ];
 
         let mut depth_counter: f32 = 0.0;
         for token in html_content.split('<') {
@@ -55,7 +57,11 @@ impl DomSnapshot3D {
                 depth_counter = (depth_counter - 1.0).max(0.0);
             } else {
                 depth_counter += 1.0;
-                let tag_name = trimmed.split_whitespace().next().unwrap_or("").trim_end_matches('>');
+                let tag_name = trimmed
+                    .split_whitespace()
+                    .next()
+                    .unwrap_or("")
+                    .trim_end_matches('>');
                 let clean_tag = tag_name.to_lowercase();
                 for tag in &tags {
                     if clean_tag == *tag || clean_tag.starts_with(&format!("{}>", tag)) {
@@ -81,8 +87,7 @@ impl DomSnapshot3D {
 
     /// Renders the 3D layout tree frame
     pub fn render_frame(&self) {
-        if !self.is_active {
-        }
+        if !self.is_active {}
         // wgpu render pass executes over self.layers
     }
 }

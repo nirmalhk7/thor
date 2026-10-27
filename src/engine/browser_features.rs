@@ -103,12 +103,19 @@ impl FindInPage {
 
         let eval_val = session.evaluate_js_blocking(&js_script).unwrap_or_default();
         let count = eval_val.get("count").and_then(|v| v.as_u64()).unwrap_or(0) as u32;
-        let found = eval_val.get("found").and_then(|v| v.as_bool()).unwrap_or(false);
+        let found = eval_val
+            .get("found")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
 
         let mut curr_active = *self.active_match.lock();
         if found {
             if options.find_next {
-                curr_active = if curr_active >= count || curr_active == 0 { 1 } else { curr_active + 1 };
+                curr_active = if curr_active >= count || curr_active == 0 {
+                    1
+                } else {
+                    curr_active + 1
+                };
             } else {
                 curr_active = 1;
             }
@@ -573,7 +580,8 @@ impl NetworkCostTracker {
             }
         };
 
-        self.total_overhead_us.fetch_add(overhead_us, Ordering::Relaxed);
+        self.total_overhead_us
+            .fetch_add(overhead_us, Ordering::Relaxed);
     }
 
     pub fn get_metrics(&self) -> NetworkCostMetrics {
@@ -661,7 +669,9 @@ mod tests {
 
         favicon_svc.cache_favicon("https://rust-lang.org", "https://rust-lang.org/favicon.png");
         assert_eq!(
-            favicon_svc.get_cached_favicon("https://rust-lang.org").as_deref(),
+            favicon_svc
+                .get_cached_favicon("https://rust-lang.org")
+                .as_deref(),
             Some("https://rust-lang.org/favicon.png")
         );
     }

@@ -129,7 +129,8 @@ impl SseStreamParser {
 
             if let Ok(val) = serde_json::from_str::<serde_json::Value>(payload_str) {
                 // OpenAI / generic delta content
-                let mut text_delta = val["choices"][0]["delta"]["content"].as_str()
+                let mut text_delta = val["choices"][0]["delta"]["content"]
+                    .as_str()
                     .or_else(|| val["choices"][0]["text"].as_str())
                     .or_else(|| val["delta"]["text"].as_str())
                     .or_else(|| val["content"].as_str());
@@ -178,8 +179,10 @@ impl SseStreamParser {
                 if let Some(err) = val["error"]["message"].as_str() {
                     self.error = Some(err.to_string());
                 }
-
-            } else if !payload_str.is_empty() && payload_str != "[DONE]" && payload_str.starts_with("data:") {
+            } else if !payload_str.is_empty()
+                && payload_str != "[DONE]"
+                && payload_str.starts_with("data:")
+            {
                 // Raw string payload
                 if self.first_token_time_ms.is_none() {
                     self.first_token_time_ms = Some(current_time_ms);
@@ -283,13 +286,18 @@ impl LlmStudio {
         let pricing = KNOWN_MODELS
             .iter()
             .find(|m| name_lower == m.model_name)
-            .or_else(|| KNOWN_MODELS.iter().find(|m| name_lower.contains(m.model_name)))
+            .or_else(|| {
+                KNOWN_MODELS
+                    .iter()
+                    .find(|m| name_lower.contains(m.model_name))
+            })
             .unwrap_or(&KNOWN_MODELS[0]);
 
         let uncached_prompt = prompt_tokens.saturating_sub(cached_prompt_tokens);
         let input_cost_usd = ((uncached_prompt as f64 / 1_000_000.0) * pricing.input_price_per_1m)
             + ((cached_prompt_tokens as f64 / 1_000_000.0) * pricing.cache_read_price_per_1m);
-        let output_cost_usd = (completion_tokens as f64 / 1_000_000.0) * pricing.output_price_per_1m;
+        let output_cost_usd =
+            (completion_tokens as f64 / 1_000_000.0) * pricing.output_price_per_1m;
         let total_cost_usd = input_cost_usd + output_cost_usd;
 
         LlmCostEstimate {
@@ -381,7 +389,8 @@ mod tests {
         assert_eq!(metrics1.ttft_ms, Some(50));
         assert_eq!(metrics1.accumulated_text, "Hello ");
 
-        let chunk2 = "data: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}]}\n\ndata: [DONE]\n\n";
+        let chunk2 =
+            "data: {\"choices\":[{\"delta\":{\"content\":\"world!\"}}]}\n\ndata: [DONE]\n\n";
         let metrics2 = parser.feed_chunk(chunk2, 1150);
 
         assert_eq!(metrics2.accumulated_text, "Hello world!");

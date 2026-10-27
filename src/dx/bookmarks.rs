@@ -50,10 +50,7 @@ impl Bookmark {
     }
 
     pub fn to_palette_item(&self) -> PaletteItem {
-        let badge = self
-            .folder
-            .clone()
-            .unwrap_or_else(|| "Thor".to_string());
+        let badge = self.folder.clone().unwrap_or_else(|| "Thor".to_string());
         PaletteItem::new(
             self.id.clone(),
             self.title.clone(),
@@ -107,9 +104,8 @@ impl BookmarkStore {
             if raw.trim().is_empty() {
                 Vec::new()
             } else {
-                let file: BookmarkFile = serde_json::from_str(&raw).map_err(|e| {
-                    io::Error::new(io::ErrorKind::InvalidData, e)
-                })?;
+                let file: BookmarkFile = serde_json::from_str(&raw)
+                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
                 file.bookmarks
             }
         } else {
@@ -132,7 +128,11 @@ impl BookmarkStore {
         &self.bookmarks
     }
 
-    pub fn add(&mut self, title: impl Into<String>, url: impl Into<String>) -> io::Result<Bookmark> {
+    pub fn add(
+        &mut self,
+        title: impl Into<String>,
+        url: impl Into<String>,
+    ) -> io::Result<Bookmark> {
         let bookmark = Bookmark::new(title, url);
         // Skip exact URL duplicates — return existing.
         if let Some(existing) = self.bookmarks.iter().find(|b| b.url == bookmark.url) {
@@ -144,7 +144,10 @@ impl BookmarkStore {
     }
 
     /// Add multiple bookmarks in a single transaction to prevent O(N^2) I/O overhead.
-    pub fn add_batch(&mut self, bookmarks: impl IntoIterator<Item = Bookmark>) -> io::Result<usize> {
+    pub fn add_batch(
+        &mut self,
+        bookmarks: impl IntoIterator<Item = Bookmark>,
+    ) -> io::Result<usize> {
         let mut added = 0;
         for bookmark in bookmarks {
             if !self.bookmarks.iter().any(|b| b.url == bookmark.url) {
@@ -190,7 +193,8 @@ impl BookmarkStore {
     /// Import from Chrome Bookmarks JSON (roots/bookmark_bar/…).
     /// Skips URLs already present. Returns count newly added.
     pub fn import_chrome_json(&mut self, chrome_json: &str) -> io::Result<usize> {
-        let parsed = parse_chrome_bookmarks(chrome_json).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+        let parsed = parse_chrome_bookmarks(chrome_json)
+            .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
         let mut added = 0;
         for item in parsed {
             if item.item_type != PaletteItemType::Bookmark {
@@ -225,7 +229,10 @@ impl BookmarkStore {
     }
 
     pub fn to_palette_items(&self) -> Vec<PaletteItem> {
-        self.bookmarks.iter().map(Bookmark::to_palette_item).collect()
+        self.bookmarks
+            .iter()
+            .map(Bookmark::to_palette_item)
+            .collect()
     }
 
     /// Seed with Thor default bookmarks when the store is empty.
@@ -252,9 +259,13 @@ impl BookmarkStore {
 
         let lock_path = self.path.with_extension("lock");
         let mut retries = 0;
-        
+
         loop {
-            match fs::OpenOptions::new().write(true).create_new(true).open(&lock_path) {
+            match fs::OpenOptions::new()
+                .write(true)
+                .create_new(true)
+                .open(&lock_path)
+            {
                 Ok(_) => break,
                 Err(e) if e.kind() == io::ErrorKind::AlreadyExists => {
                     if retries > 50 {
@@ -272,11 +283,11 @@ impl BookmarkStore {
         let file = BookmarkFile {
             bookmarks: self.bookmarks.clone(),
         };
-        
+
         let write_result = (|| -> io::Result<()> {
             let json = serde_json::to_string_pretty(&file)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-            
+
             let temp_path = self.path.with_extension("tmp");
             fs::write(&temp_path, json)?;
             fs::rename(&temp_path, &self.path)?;
@@ -350,15 +361,15 @@ mod tests {
             assert!(store.list().is_empty());
 
             let a = store.add("Rust", "https://www.rust-lang.org").unwrap();
-            let b = store
-                .add("Thor", "https://github.com/thor/thor")
-                .unwrap();
+            let b = store.add("Thor", "https://github.com/thor/thor").unwrap();
             assert_eq!(store.list().len(), 2);
             assert!(a.id.starts_with("bm_"));
             assert_ne!(a.id, b.id);
 
             // Duplicate URL returns existing, does not grow.
-            let dup = store.add("Rust Again", "https://www.rust-lang.org").unwrap();
+            let dup = store
+                .add("Rust Again", "https://www.rust-lang.org")
+                .unwrap();
             assert_eq!(dup.id, a.id);
             assert_eq!(store.list().len(), 2);
         }

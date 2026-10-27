@@ -160,10 +160,15 @@ impl AppState {
     }
 
     pub fn projects(&self) -> Result<&crate::projects::ProjectStore, String> {
-        self.projects.get_or_init(|| {
-            crate::projects::ProjectStore::open(&thor_data_dir().join("Projects/projects.sqlite3"))
+        self.projects
+            .get_or_init(|| {
+                crate::projects::ProjectStore::open(
+                    &thor_data_dir().join("Projects/projects.sqlite3"),
+                )
                 .map_err(|error| error.to_string())
-        }).as_ref().map_err(Clone::clone)
+            })
+            .as_ref()
+            .map_err(Clone::clone)
     }
 
     pub fn tamper(&self) -> &TrafficTamperEngine {
@@ -178,7 +183,9 @@ impl AppState {
         &self.security
     }
 
-    pub fn tab_history(&self) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
+    pub fn tab_history(
+        &self,
+    ) -> parking_lot::MutexGuard<'_, crate::dx::cmd_palette::TabHistoryTracker> {
         self.tab_history.lock()
     }
 

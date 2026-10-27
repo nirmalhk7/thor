@@ -1,14 +1,14 @@
+use std::net::TcpListener;
+use std::sync::mpsc;
 use std::sync::{Arc, Barrier};
 use std::thread;
-use std::net::TcpListener;
 use std::time::Duration;
-use std::sync::mpsc;
 use thor::AppState;
 
 #[test]
 fn test_app_state_stress() {
     let (tx, rx) = mpsc::channel();
-    
+
     thread::spawn(move || {
         let state = AppState::global();
         let num_threads = 100;
@@ -53,10 +53,10 @@ fn test_app_state_stress() {
         for h in handles {
             h.join().unwrap();
         }
-        
+
         let _ = tx.send(());
     });
-    
+
     match rx.recv_timeout(Duration::from_secs(10)) {
         Ok(_) => {}
         Err(_) => panic!("Test timed out after 10 seconds - deadlocked!"),

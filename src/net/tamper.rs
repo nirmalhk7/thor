@@ -123,7 +123,9 @@ impl TrafficTamperEngine {
 
     /// Toggle live traffic interception state
     pub fn set_interception_enabled(&self, enabled: bool) {
-        self.inner.interception_enabled.store(enabled, Ordering::Release);
+        self.inner
+            .interception_enabled
+            .store(enabled, Ordering::Release);
         // Enabling intercept implies breakpoint hold until UI forward/drop (or timeout).
         self.inner.breakpoint_mode.store(enabled, Ordering::Release);
     }
@@ -162,7 +164,10 @@ impl TrafficTamperEngine {
                 }
                 if match_ok {
                     if !rule.replace_header_key.is_empty() {
-                        req.headers.insert(rule.replace_header_key.clone(), rule.replace_header_value.clone());
+                        req.headers.insert(
+                            rule.replace_header_key.clone(),
+                            rule.replace_header_value.clone(),
+                        );
                         req.is_modified = true;
                     }
 
@@ -173,7 +178,9 @@ impl TrafficTamperEngine {
                             request_id: req.id.clone(),
                             timestamp: req.timestamp,
                             status_code,
-                            headers: [("content-type".to_string(), "application/json".to_string())].into_iter().collect(),
+                            headers: [("content-type".to_string(), "application/json".to_string())]
+                                .into_iter()
+                                .collect(),
                             body: rule.mock_body.clone(),
                             duration_ms: rule.delay_ms.unwrap_or(0),
                         };
@@ -205,17 +212,33 @@ impl TrafficTamperEngine {
 
     /// Get all pending intercepted requests waiting for manual tampering
     pub fn get_pending_requests(&self) -> Vec<InterceptedRequest> {
-        self.inner.pending_interceptions.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner
+            .pending_interceptions
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Forward a pending request (with optional manual edits)
-    pub fn forward_request(&self, request_id: &str, edited_req: Option<InterceptedRequest>) -> Option<InterceptedRequest> {
-        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+    pub fn forward_request(
+        &self,
+        request_id: &str,
+        edited_req: Option<InterceptedRequest>,
+    ) -> Option<InterceptedRequest> {
+        let mut pending = self
+            .inner
+            .pending_interceptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
             let req = pending.remove(pos);
             let out = edited_req.unwrap_or(req);
             {
-                let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+                let mut releases = self
+                    .inner
+                    .pause_releases
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 releases.insert(request_id.to_string(), PauseRelease::Forward(out.clone()));
             }
             self.inner.pause_cv.notify_all();
@@ -226,12 +249,20 @@ impl TrafficTamperEngine {
 
     /// Drop/cancel an intercepted request without forwarding
     pub fn drop_request(&self, request_id: &str) -> bool {
-        let mut pending = self.inner.pending_interceptions.write().unwrap_or_else(|e| e.into_inner());
+        let mut pending = self
+            .inner
+            .pending_interceptions
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         if let Some(pos) = pending.iter().position(|r| r.id == request_id) {
             let req = pending.remove(pos);
             self.record_history(req, None);
             {
-                let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+                let mut releases = self
+                    .inner
+                    .pause_releases
+                    .lock()
+                    .unwrap_or_else(|e| e.into_inner());
                 releases.insert(request_id.to_string(), PauseRelease::Drop);
             }
             self.inner.pause_cv.notify_all();
@@ -242,13 +273,13 @@ impl TrafficTamperEngine {
 
     /// Block until UI forwards/drops a Pause'd request, or `timeout` elapses.
     /// On timeout, auto-continues with the original pending request (removed from queue).
-    pub fn wait_for_pause_release(
-        &self,
-        request_id: &str,
-        timeout: Duration,
-    ) -> PauseRelease {
+    pub fn wait_for_pause_release(&self, request_id: &str, timeout: Duration) -> PauseRelease {
         let deadline = Instant::now() + timeout;
-        let mut releases = self.inner.pause_releases.lock().unwrap_or_else(|e| e.into_inner());
+        let mut releases = self
+            .inner
+            .pause_releases
+            .lock()
+            .unwrap_or_else(|e| e.into_inner());
         loop {
             if let Some(action) = releases.remove(request_id) {
                 return action;
@@ -279,7 +310,11 @@ impl TrafficTamperEngine {
     }
 
     /// Record completed request/response pair into history for Repeater/Inspector (with SEC-027 secret redaction)
-    pub fn record_history(&self, mut req: InterceptedRequest, mut resp: Option<InterceptedResponse>) {
+    pub fn record_history(
+        &self,
+        mut req: InterceptedRequest,
+        mut resp: Option<InterceptedResponse>,
+    ) {
         for (k, v) in req.headers.iter_mut() {
             let k_lower = k.to_lowercase();
             if k_lower == "authorization" || k_lower == "cookie" || k_lower == "x-api-key" {
@@ -294,12 +329,20 @@ impl TrafficTamperEngine {
                 }
             }
         }
-        let mut hist = self.inner.history.write().unwrap_or_else(|e| e.into_inner());
+        let mut hist = self
+            .inner
+            .history
+            .write()
+            .unwrap_or_else(|e| e.into_inner());
         hist.push((req, resp));
     }
 
     pub fn get_history(&self) -> Vec<(InterceptedRequest, Option<InterceptedResponse>)> {
-        self.inner.history.read().unwrap_or_else(|e| e.into_inner()).clone()
+        self.inner
+            .history
+            .read()
+            .unwrap_or_else(|e| e.into_inner())
+            .clone()
     }
 
     /// Add automated tamper rule
@@ -402,7 +445,10 @@ mod tests {
 
         let processed = engine.process_outgoing_request(req).unwrap();
         assert!(processed.is_modified);
-        assert_eq!(processed.headers.get("X-Thor-Injected").map(|s| s.as_str()), Some("true"));
+        assert_eq!(
+            processed.headers.get("X-Thor-Injected").map(|s| s.as_str()),
+            Some("true")
+        );
     }
 
     #[test]

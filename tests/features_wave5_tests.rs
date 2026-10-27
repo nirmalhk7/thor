@@ -22,11 +22,8 @@ fn test_wave5_registry_still_144() {
 #[test]
 fn test_orch_ci_bundle_artifacts_non_empty() {
     let session = RecordedSession::new("Wave5 Checkout", "https://shop.example/checkout");
-    let orch = FeatureOrchestrator::invoke(
-        "ci-bundle",
-        &json!({ "session": session }),
-    )
-    .expect("ci-bundle orch");
+    let orch = FeatureOrchestrator::invoke("ci-bundle", &json!({ "session": session }))
+        .expect("ci-bundle orch");
 
     let result = orch.get("result").unwrap_or(&orch);
     let playwright = result["playwright_ts"].as_str().unwrap_or("");
@@ -107,10 +104,8 @@ fn test_soft_nav_report_and_lcp_media_from_mocked_vitals() {
     assert!((soft.avg_lcp_ms - 420.0).abs() < 1e-6);
 
     // lcpElement.size fallback when lcpSize absent.
-    let via_el = CdpBridge::parse_web_vitals_ex(
-        r#"{"lcp":1000,"lcpElement":{"size":9999}}"#,
-    )
-    .expect("el size");
+    let via_el = CdpBridge::parse_web_vitals_ex(r#"{"lcp":1000,"lcpElement":{"size":9999}}"#)
+        .expect("el size");
     assert_eq!(via_el.1, Some(9999));
 
     // Zero / missing size stays None.

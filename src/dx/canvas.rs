@@ -8,10 +8,22 @@ pub enum Breakpoint {
 
 #[derive(Debug, Clone)]
 pub enum ViewportEvent {
-    Scroll { x: f32, y: f32 },
-    Click { x: f32, y: f32, element_id: Option<String> },
-    FormInput { element_id: String, value: String },
-    DomSnapshot3D { layer_count: usize },
+    Scroll {
+        x: f32,
+        y: f32,
+    },
+    Click {
+        x: f32,
+        y: f32,
+        element_id: Option<String>,
+    },
+    FormInput {
+        element_id: String,
+        value: String,
+    },
+    DomSnapshot3D {
+        layer_count: usize,
+    },
 }
 
 /// Multi-viewport synchronized scroll/click/form event bus across 3-6 breakpoint panes.
@@ -23,11 +35,7 @@ pub struct CanvasEventBus {
 impl CanvasEventBus {
     pub fn new() -> Self {
         Self {
-            active_breakpoints: vec![
-                Breakpoint::Mobile,
-                Breakpoint::Tablet,
-                Breakpoint::Laptop,
-            ],
+            active_breakpoints: vec![Breakpoint::Mobile, Breakpoint::Tablet, Breakpoint::Laptop],
             sync_enabled: true,
         }
     }
@@ -45,7 +53,7 @@ impl CanvasEventBus {
         if !self.sync_enabled {
             return;
         }
-        
+
         for bp in &self.active_breakpoints {
             if *bp != source {
                 // In a real implementation, this would send the event over a channel

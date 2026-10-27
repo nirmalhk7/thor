@@ -44,12 +44,24 @@ impl LlmCleanContext {
                     tag_buf.push(chars.next().unwrap());
                 }
                 let lower_tag = tag_buf.to_lowercase();
-                
+
                 // Detect tags to skip content entirely
-                if lower_tag == "script" || lower_tag == "style" || lower_tag == "svg" || lower_tag == "path" || lower_tag == "noscript" || lower_tag == "iframe" {
+                if lower_tag == "script"
+                    || lower_tag == "style"
+                    || lower_tag == "svg"
+                    || lower_tag == "path"
+                    || lower_tag == "noscript"
+                    || lower_tag == "iframe"
+                {
                     skip_content = true;
                     skip_tag_depth += 1;
-                } else if lower_tag.starts_with("/script") || lower_tag.starts_with("/style") || lower_tag.starts_with("/svg") || lower_tag.starts_with("/path") || lower_tag.starts_with("/noscript") || lower_tag.starts_with("/iframe") {
+                } else if lower_tag.starts_with("/script")
+                    || lower_tag.starts_with("/style")
+                    || lower_tag.starts_with("/svg")
+                    || lower_tag.starts_with("/path")
+                    || lower_tag.starts_with("/noscript")
+                    || lower_tag.starts_with("/iframe")
+                {
                     if skip_tag_depth > 0 {
                         skip_tag_depth -= 1;
                     }
@@ -126,7 +138,9 @@ mod tests {
 
         let res = LlmCleanContext::clean_dom(html);
         assert!(res.markdown.contains("# Thor Browser Documentation"));
-        assert!(res.markdown.contains("Thor is a high-performance developer browser built in Rust."));
+        assert!(res
+            .markdown
+            .contains("Thor is a high-performance developer browser built in Rust."));
         assert!(!res.markdown.contains("background: black"));
         assert!(!res.markdown.contains("analytics"));
         assert!(res.token_savings_percent > 30.0);

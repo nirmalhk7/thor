@@ -84,12 +84,12 @@ fn b64_encode(bytes: &[u8]) -> String {
 fn request_body(event: &EventRequestPaused) -> Option<String> {
     let entries = event.request.post_data_entries.as_ref()?;
     let mut raw = String::new();
-        for entry in entries {
-            if let Some(b) = &entry.bytes {
-                // CDP Binary is already a base64 string; keep opaque text for tamper history.
-                raw.push_str(AsRef::<str>::as_ref(b));
-            }
+    for entry in entries {
+        if let Some(b) = &entry.bytes {
+            // CDP Binary is already a base64 string; keep opaque text for tamper history.
+            raw.push_str(AsRef::<str>::as_ref(b));
         }
+    }
     if raw.is_empty() {
         None
     } else {
@@ -124,13 +124,17 @@ pub fn attach_blocking(
             .pattern(
                 RequestPattern::builder()
                     .url_pattern("*")
-                    .request_stage(chromiumoxide::cdp::browser_protocol::fetch::RequestStage::Request)
+                    .request_stage(
+                        chromiumoxide::cdp::browser_protocol::fetch::RequestStage::Request,
+                    )
                     .build(),
             )
             .pattern(
                 RequestPattern::builder()
                     .url_pattern("*")
-                    .request_stage(chromiumoxide::cdp::browser_protocol::fetch::RequestStage::Response)
+                    .request_stage(
+                        chromiumoxide::cdp::browser_protocol::fetch::RequestStage::Response,
+                    )
                     .build(),
             )
             .handle_auth_requests(false)

@@ -277,7 +277,6 @@ impl Default for AiEngine {
     }
 }
 
-
 // ===========================================================================
 // Wave-2 AI features (12)
 // ===========================================================================
@@ -980,7 +979,9 @@ impl AiEngine {
     pub fn record_prompt_version(&self, name: &str, content: &str) -> PromptVersion {
         let mut timeline = self.prompt_timeline.lock();
         let history = timeline.entry(name.to_string()).or_default();
-        let diff_from_prev = history.last().map(|prev| self.prompt_diff(&prev.content, content));
+        let diff_from_prev = history
+            .last()
+            .map(|prev| self.prompt_diff(&prev.content, content));
         let version = PromptVersion {
             version: history.len() + 1,
             content: content.to_string(),
@@ -1064,7 +1065,11 @@ impl AiEngine {
                 ));
             }
             if e.arguments_json.len() > 8_000 {
-                issues.push(format!("{} huge arguments ({} bytes)", e.name, e.arguments_json.len()));
+                issues.push(format!(
+                    "{} huge arguments ({} bytes)",
+                    e.name,
+                    e.arguments_json.len()
+                ));
             }
         }
         let avg = if events.is_empty() {
@@ -1113,7 +1118,11 @@ impl AiEngine {
                 if let Some(p) = by_index.get_mut(&idx) {
                     p.success = !is_error;
                     if is_error {
-                        p.error = Some(p.error.clone().unwrap_or_else(|| "tool_result error".into()));
+                        p.error = Some(
+                            p.error
+                                .clone()
+                                .unwrap_or_else(|| "tool_result error".into()),
+                        );
                     }
                     if let (Some(start), Some(end)) = (p.start_ms, end_ms) {
                         if end >= start {
@@ -1125,7 +1134,10 @@ impl AiEngine {
         };
 
         for line in sse.lines() {
-            let data = line.strip_prefix("data:").map(str::trim).unwrap_or(line.trim());
+            let data = line
+                .strip_prefix("data:")
+                .map(str::trim)
+                .unwrap_or(line.trim());
             if data.is_empty() || data == "[DONE]" {
                 continue;
             }
@@ -1163,10 +1175,7 @@ impl AiEngine {
                             }
                         })
                         .unwrap_or_default();
-                    let call_id = tc
-                        .get("id")
-                        .and_then(|i| i.as_str())
-                        .map(|s| s.to_string());
+                    let call_id = tc.get("id").and_then(|i| i.as_str()).map(|s| s.to_string());
                     let entry = by_index.entry(idx).or_default();
                     if !name.is_empty() {
                         entry.name = name;
@@ -1268,7 +1277,9 @@ impl AiEngine {
             }
         }
 
-        by_index.into_values().map(|p| ToolCallEvent {
+        by_index
+            .into_values()
+            .map(|p| ToolCallEvent {
                 name: if p.name.is_empty() {
                     "unknown".into()
                 } else {
@@ -1302,8 +1313,7 @@ impl AiEngine {
                 content: if e.success {
                     format!("ok latency_ms={}", e.latency_ms)
                 } else {
-                    e.error
-                        .unwrap_or_else(|| "pending: no tool_result".into())
+                    e.error.unwrap_or_else(|| "pending: no tool_result".into())
                 },
             });
         }
@@ -1328,9 +1338,11 @@ impl AiEngine {
         let tokens_saved: usize = events
             .iter()
             .map(|e| {
-                e.cached_tokens
-                    .unwrap_or(e.tokens_saved)
-                    .max(if e.hit { e.tokens_saved } else { 0 })
+                e.cached_tokens.unwrap_or(e.tokens_saved).max(if e.hit {
+                    e.tokens_saved
+                } else {
+                    0
+                })
             })
             .sum();
         let hit_rate = if events.is_empty() {
@@ -1342,11 +1354,17 @@ impl AiEngine {
         for e in events {
             let model = e.model.as_deref().unwrap_or("gpt-4o");
             let prompt = e.prompt_tokens.unwrap_or(0);
-            let cached = e.cached_tokens.unwrap_or(if e.hit { e.tokens_saved } else { 0 });
+            let cached = e
+                .cached_tokens
+                .unwrap_or(if e.hit { e.tokens_saved } else { 0 });
             let completion = e.completion_tokens.unwrap_or(0);
             if cached > 0 || e.hit {
-                let with_cache =
-                    LlmStudio::estimate_cost_with_caching(model, prompt.max(cached), cached, completion);
+                let with_cache = LlmStudio::estimate_cost_with_caching(
+                    model,
+                    prompt.max(cached),
+                    cached,
+                    completion,
+                );
                 let without = LlmStudio::estimate_cost(model, prompt.max(cached), completion);
                 saved_usd += (without.total_cost_usd - with_cache.total_cost_usd).max(0.0);
             }
@@ -1396,7 +1414,8 @@ impl AiEngine {
 
     pub fn token_waste_auditor(&self, segments: &[TokenWasteSegment]) -> TokenWasteReport {
         let total: usize = segments.iter().map(|s| s.tokens).sum();
-        let unused: Vec<&TokenWasteSegment> = segments.iter().filter(|s| !s.cited_in_output).collect();
+        let unused: Vec<&TokenWasteSegment> =
+            segments.iter().filter(|s| !s.cited_in_output).collect();
         let wasted: usize = unused.iter().map(|s| s.tokens).sum();
         let waste_pct = if total == 0 {
             0.0
@@ -1552,10 +1571,7 @@ impl AiEngine {
                     if let Some((method, start_ts, req_bytes)) = pending_req.remove(&id) {
                         let latency = match (start_ts, ts) {
                             (Some(a), Some(b)) => b.saturating_sub(a),
-                            _ => v
-                                .get("latency_ms")
-                                .and_then(|l| l.as_u64())
-                                .unwrap_or(0),
+                            _ => v.get("latency_ms").and_then(|l| l.as_u64()).unwrap_or(0),
                         };
                         out.push(McpMessage {
                             method,
@@ -1646,7 +1662,9 @@ impl AiEngine {
                 let claim_toks = tokenize_words(&c.claim);
                 !c.evidence_snippets.iter().any(|ev| {
                     let ev_toks = tokenize_words(ev);
-                    claim_toks.iter().any(|t| ev_toks.contains(t) && t.len() > 2)
+                    claim_toks
+                        .iter()
+                        .any(|t| ev_toks.contains(t) && t.len() > 2)
                 })
             })
             .map(|c| c.claim.clone())
@@ -1667,14 +1685,30 @@ impl AiEngine {
         }
     }
 
-    pub fn embedding_rag_bench(&self, pairs: &[EmbeddingPair], k: usize) -> EmbeddingRagBenchReport {
+    pub fn embedding_rag_bench(
+        &self,
+        pairs: &[EmbeddingPair],
+        k: usize,
+    ) -> EmbeddingRagBenchReport {
         let mut scored = pairs.to_vec();
-        scored.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        scored.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         let topk = scored.iter().take(k.max(1)).collect::<Vec<_>>();
         let relevant_hits = topk.iter().filter(|p| p.relevant).count();
         let precision_at_k = relevant_hits as f64 / topk.len().max(1) as f64;
-        let rel: Vec<f64> = pairs.iter().filter(|p| p.relevant).map(|p| p.score).collect();
-        let irrel: Vec<f64> = pairs.iter().filter(|p| !p.relevant).map(|p| p.score).collect();
+        let rel: Vec<f64> = pairs
+            .iter()
+            .filter(|p| p.relevant)
+            .map(|p| p.score)
+            .collect();
+        let irrel: Vec<f64> = pairs
+            .iter()
+            .filter(|p| !p.relevant)
+            .map(|p| p.score)
+            .collect();
         let avg_relevant_score = if rel.is_empty() {
             0.0
         } else {
@@ -1746,7 +1780,6 @@ impl AiEngine {
             issues,
         }
     }
-
 }
 
 /// Derive a stable mock-store signature from a model name and request body.
@@ -1834,7 +1867,9 @@ fn extract_completion(json: &serde_json::Value) -> String {
 /// Detect leaked PII / secrets (emails, API keys, JWTs) in free text.
 fn detect_pii(input: &str) -> Vec<InjectionFinding> {
     let mut findings = Vec::new();
-    for token in input.split(|c: char| c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\'' | '(' | ')' | '<' | '>')) {
+    for token in input.split(|c: char| {
+        c.is_whitespace() || matches!(c, ',' | ';' | '"' | '\'' | '(' | ')' | '<' | '>')
+    }) {
         let t = token.trim();
         if t.len() < 6 {
             continue;
@@ -1886,7 +1921,8 @@ fn is_api_key(t: &str) -> bool {
     }
     // Long high-entropy alphanumeric run.
     t.len() >= 32
-        && t.chars().all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        && t.chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
         && t.chars().any(|c| c.is_ascii_digit())
         && t.chars().any(|c| c.is_ascii_alphabetic())
 }
@@ -1896,7 +1932,14 @@ fn redact(t: &str) -> String {
         return "***".to_string();
     }
     let head: String = t.chars().take(3).collect();
-    let tail: String = t.chars().rev().take(2).collect::<String>().chars().rev().collect();
+    let tail: String = t
+        .chars()
+        .rev()
+        .take(2)
+        .collect::<String>()
+        .chars()
+        .rev()
+        .collect();
     format!("{head}***{tail}")
 }
 
@@ -1939,7 +1982,6 @@ fn jaccard(a: &str, b: &str) -> f64 {
     let union = sa.union(&sb).count().max(1);
     inter as f64 / union as f64
 }
-
 
 fn validate_json_schema_min(
     value: &serde_json::Value,
@@ -2035,10 +2077,9 @@ fn validate_json_schema_min(
                 errs.push(format!("{path}: expected number"));
             }
         }
-        "boolean"
-            if !value.is_boolean() => {
-                errs.push(format!("{path}: expected boolean"));
-            }
+        "boolean" if !value.is_boolean() => {
+            errs.push(format!("{path}: expected boolean"));
+        }
         _ => {}
     }
     errs
@@ -2372,8 +2413,16 @@ mod tests {
     fn test_token_waste_and_streaming_slo() {
         let e = AiEngine::new();
         let w = e.token_waste_auditor(&[
-            TokenWasteSegment { label: "sys".into(), tokens: 100, cited_in_output: true },
-            TokenWasteSegment { label: "dead".into(), tokens: 50, cited_in_output: false },
+            TokenWasteSegment {
+                label: "sys".into(),
+                tokens: 100,
+                cited_in_output: true,
+            },
+            TokenWasteSegment {
+                label: "dead".into(),
+                tokens: 50,
+                cited_in_output: false,
+            },
         ]);
         assert_eq!(w.wasted_tokens, 50);
         let s = e.streaming_slo_gates(&StreamingSloInput {
@@ -2404,8 +2453,18 @@ mod tests {
         }]);
         assert_eq!(grounded.unsupported, 0);
         let p = e.local_cloud_parity(&[
-            ParityRun { environment: "local".into(), output: "hi".into(), tokens: 3, latency_ms: 10 },
-            ParityRun { environment: "cloud".into(), output: "hi".into(), tokens: 3, latency_ms: 12 },
+            ParityRun {
+                environment: "local".into(),
+                output: "hi".into(),
+                tokens: 3,
+                latency_ms: 10,
+            },
+            ParityRun {
+                environment: "cloud".into(),
+                output: "hi".into(),
+                tokens: 3,
+                latency_ms: 12,
+            },
         ]);
         assert!(p.matched);
     }
@@ -2432,7 +2491,10 @@ data: [DONE]
         let tools = AiEngine::tool_call_events_from_sse(sse);
         assert!(!tools.is_empty());
         assert_eq!(tools[0].name, "search");
-        assert!(!tools[0].success, "call-only SSE must not fabricate success");
+        assert!(
+            !tools[0].success,
+            "call-only SSE must not fabricate success"
+        );
         let steps = AiEngine::agent_steps_from_sse(sse);
         assert!(steps.iter().any(|s| s.kind == "action"));
 
@@ -2467,5 +2529,4 @@ data: [DONE]
         let slo = e.streaming_slo_gates_from_waterfall(&wf, 500, 20.0, 200);
         assert!(slo.passed);
     }
-
 }

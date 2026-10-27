@@ -235,7 +235,10 @@ fn test_orchestrator_unknown_slug_and_missing_param_errors() {
     assert!(FeatureOrchestrator::invoke("does-not-exist", &json!({})).is_err());
     // Known slug but missing required param yields a descriptive error.
     let err = FeatureOrchestrator::invoke("css-cascade", &json!({})).unwrap_err();
-    assert!(err.contains("declarations"), "error should name the param: {err}");
+    assert!(
+        err.contains("declarations"),
+        "error should name the param: {err}"
+    );
 }
 
 #[test]
@@ -448,7 +451,10 @@ fn test_backend_chain_runner_executes_and_threads_captures() {
     assert_eq!(result.steps[0].status, 200);
     assert_eq!(result.steps[1].status, 200);
     assert!(result.steps[0].captured.contains(&"token".to_string()));
-    assert_eq!(result.vars.get("token").map(String::as_str), Some("secret-123"));
+    assert_eq!(
+        result.vars.get("token").map(String::as_str),
+        Some("secret-123")
+    );
 }
 
 #[test]
@@ -500,10 +506,7 @@ fn test_security_header_analyzer_flags_cors_and_csp_weaknesses() {
         "content-security-policy".to_string(),
         "default-src 'self' 'unsafe-inline' 'unsafe-eval'".to_string(),
     );
-    headers.insert(
-        "access-control-allow-origin".to_string(),
-        "*".to_string(),
-    );
+    headers.insert("access-control-allow-origin".to_string(), "*".to_string());
     headers.insert(
         "access-control-allow-credentials".to_string(),
         "true".to_string(),
@@ -674,9 +677,7 @@ fn test_ai_injection_scanner_detects_pii() {
         findings
     );
     assert!(
-        findings
-            .iter()
-            .any(|f| f.pattern.starts_with("pii:")),
+        findings.iter().any(|f| f.pattern.starts_with("pii:")),
         "pii findings carry a pii:* pattern"
     );
 }
@@ -687,7 +688,10 @@ fn test_ai_prompt_timeline_tracks_versions_with_diffs() {
     let name = "system-prompt";
     let v1 = ae.record_prompt_version(name, "You are a helpful assistant.");
     assert_eq!(v1.version, 1);
-    assert!(v1.diff_from_prev.is_none(), "first version has no prior diff");
+    assert!(
+        v1.diff_from_prev.is_none(),
+        "first version has no prior diff"
+    );
 
     let v2 = ae.record_prompt_version(name, "You are a concise, helpful assistant.");
     assert_eq!(v2.version, 2);

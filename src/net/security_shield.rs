@@ -100,7 +100,7 @@ impl SecurityShield {
         };
 
         let stripped = query_stripped || frag_stripped;
-        
+
         if !stripped {
             return (url_str.to_string(), false);
         }
@@ -117,7 +117,10 @@ impl SecurityShield {
     pub fn get_security_headers() -> Vec<(&'static str, &'static str)> {
         vec![
             ("User-Agent", CHROMIUM_USER_AGENT),
-            ("Sec-CH-UA", r#""Not/A)Brand";v="8", "Chromium";v="126", "Thor";v="1""#),
+            (
+                "Sec-CH-UA",
+                r#""Not/A)Brand";v="8", "Chromium";v="126", "Thor";v="1""#,
+            ),
             ("Sec-CH-UA-Mobile", "?0"),
             ("Sec-CH-UA-Platform", r#""macOS""#),
             ("DNT", "1"),
@@ -134,10 +137,7 @@ impl SecurityShield {
 
     /// Get specific DNT (Do Not Track) and GPC (Global Privacy Control) headers
     pub fn get_dnt_gpc_headers() -> Vec<(&'static str, &'static str)> {
-        vec![
-            ("DNT", "1"),
-            ("Sec-GPC", "1"),
-        ]
+        vec![("DNT", "1"), ("Sec-GPC", "1")]
     }
 }
 
@@ -184,4 +184,3 @@ mod tests {
         assert!(sec_headers.contains(&("Sec-GPC", "1")));
     }
 }
-

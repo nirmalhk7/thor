@@ -50,7 +50,12 @@ impl IdeBridge {
         }
     }
 
-    pub fn open_file(ide: Ide, file_path: &str, line: Option<usize>, col: Option<usize>) -> Result<(), String> {
+    pub fn open_file(
+        ide: Ide,
+        file_path: &str,
+        line: Option<usize>,
+        col: Option<usize>,
+    ) -> Result<(), String> {
         let uri = Self::build_uri(ide, file_path, line, col);
         Self::launch_uri(&uri)
     }
@@ -88,6 +93,9 @@ mod tests {
         assert_eq!(cursor_uri, "cursor://file/src/lib.rs:15");
 
         let webstorm_uri = IdeBridge::build_uri(Ide::WebStorm, "/src/App.tsx", Some(100), Some(5));
-        assert_eq!(webstorm_uri, "webstorm://open?file=/src/App.tsx&line=100&column=5");
+        assert_eq!(
+            webstorm_uri,
+            "webstorm://open?file=/src/App.tsx&line=100&column=5"
+        );
     }
 }

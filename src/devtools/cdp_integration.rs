@@ -58,10 +58,10 @@ impl CdpIntegration {
         self.log_tx = Some(tx.clone());
         self.log_rx = Some(rx);
 
-        let page = tab.page().ok_or_else(|| ChromiumError::Config("Page not initialized".to_string()))?;
-        let mut events = page
-            .event_listener::<EventConsoleApiCalled>()
-            .await?;
+        let page = tab
+            .page()
+            .ok_or_else(|| ChromiumError::Config("Page not initialized".to_string()))?;
+        let mut events = page.event_listener::<EventConsoleApiCalled>().await?;
 
         let logs = Arc::clone(&self.logs);
         let handle = tab.runtime().handle().spawn(async move {
