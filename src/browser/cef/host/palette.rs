@@ -1,12 +1,14 @@
 //! Native command menus stay outside untrusted page DOM and renderer IPC.
 use std::cell::RefCell;
 
-use super::{activate, active_browser, perform, theme, with_host, Action};
-use crate::browser::session::BrowserSession;
+mod actions;
+mod catalog;
+
+use super::{active_browser, theme, with_host};
 use crate::dx::bookmarks::BookmarkStore;
-use crate::dx::cmd_palette::{CmdPalette, CmdPaletteMode, PaletteItem, PaletteItemType};
-use crate::workbench::{API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
+use crate::dx::cmd_palette::{CmdPalette, CmdPaletteMode, PaletteItem};
 use ::cef::*;
+use actions::ChoiceDelegate;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Mode {
@@ -49,88 +51,8 @@ struct Menu {
 }
 thread_local! { static MENU: RefCell<Option<Menu>> = const { RefCell::new(None) }; }
 
-fn item(id: &str, title: &str, url: &str, category: &str, kind: PaletteItemType) -> PaletteItem {
-    PaletteItem::new(id, title, kind, url, None, None, category, None)
-}
-
-fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Vec<PaletteItem> {
-    let mut items: Vec<_> = session
-        .summaries()
-        .into_iter()
-        .map(|tab| {
-            item(
-                &format!("tab_{}", tab.target.id),
-                if tab.title.is_empty() {
-                    &tab.url
-                } else {
-                    &tab.title
-                },
-                &tab.url,
-                "Open tab",
-                PaletteItemType::Tab,
-            )
-        })
-        .collect();
-    if let Some(active) = session.active_tab() {
-        if let Ok(history) = session.history(active) {
-            items.extend(history.iter().rev().enumerate().map(|(i, visit)| {
-                item(
-                    &format!("history_{i}"),
-                    if visit.title.is_empty() {
-                        &visit.url
-                    } else {
-                        &visit.title
-                    },
-                    &visit.url,
-                    "This tab’s history",
-                    PaletteItemType::TabHistory,
-                )
-            }));
-        }
-    }
-    items.extend(bookmarks);
-    items
-}
-
-fn toolbox() -> Vec<PaletteItem> {
-    let mut items: Vec<_> = [
-        (
-            "control_center",
-            "Developer Control Center",
-            TOOLS_URL,
-            "144 engineer features",
-        ),
-        ("api", "API workspace", API_URL, "Requests and responses"),
-        (
-            "security",
-            "Security analyzers",
-            SECURITY_URL,
-            "Headers, JWT, response diff",
-        ),
-        ("inspect", "Inspect page", "", "Developer Tools"),
-        ("bookmark", "Bookmark current page", "", "Saved to Thor"),
-        ("new_tab", "New tab", HOME_URL, "Browse"),
-    ]
-    .into_iter()
-    .map(|(id, title, url, category)| item(id, title, url, category, PaletteItemType::Action))
-    .collect();
-    items.extend(
-        crate::AppState::global()
-            .features()
-            .registry()
-            .all()
-            .iter()
-            .map(|feature| {
-                item(
-                    &format!("feature_{}", feature.slug),
-                    &feature.name,
-                    &format!("{TOOLS_URL}#{}", feature.slug),
-                    feature.category.as_str(),
-                    PaletteItemType::Action,
-                )
-            }),
-    );
-    items
+pub(super) fn key(event: &KeyEvent) -> i32 {
+    actions::key(event)
 }
 
 pub(super) fn close() {
@@ -202,9 +124,9 @@ fn menu_model(mode: Mode) -> (CmdPalette, bool) {
             .and_then(Result::ok)
             .map(|store| store.to_palette_items())
             .unwrap_or_default();
-        with_host(|host| sites(&host.session, bookmarks)).unwrap_or_default()
+        with_host(|host| catalog::sites(&host.session, bookmarks)).unwrap_or_default()
     } else {
-        toolbox()
+        catalog::toolbox()
     };
     let palette_mode = match mode {
         Mode::Sites => CmdPaletteMode::BookmarksAndTabHistory,
@@ -403,116 +325,6 @@ fn update_bounds(menu: &Menu) {
     }
 }
 
-pub(super) fn key(event: &KeyEvent) -> i32 {
-    if !is_key_down(event) || !menu_is_open() {
-        return 0;
-    }
-    match event.windows_key_code {
-        27 => defer(None),
-        13 => choose_selected(),
-        38 | 40 => move_selection(event.windows_key_code == 40),
-        _ => return 0,
-    }
-    1
-}
-
-fn is_key_down(event: &KeyEvent) -> bool {
-    matches!(
-        event.type_,
-        KeyEventType::RAWKEYDOWN | KeyEventType::KEYDOWN
-    )
-}
-
-fn menu_is_open() -> bool {
-    MENU.with(|cell| cell.borrow().is_some())
-}
-
-fn choose_selected() {
-    if let Some(index) = MENU.with(|cell| cell.borrow().as_ref().map(|menu| menu.selected)) {
-        defer(Some(index));
-    }
-}
-
-fn move_selection(down: bool) {
-    MENU.with(|cell| {
-        if let Some(menu) = cell.borrow_mut().as_mut() {
-            let len = menu.matches.len();
-            if len > 0 {
-                menu.selected = if down {
-                    (menu.selected + 1) % len
-                } else {
-                    (menu.selected + len - 1) % len
-                };
-            }
-        }
-    });
-    refresh();
-}
-
-fn choose(index: usize) {
-    let selected = MENU.with(|cell| {
-        cell.borrow().as_ref().and_then(|menu| {
-            menu.matches
-                .get(index)
-                .cloned()
-                .map(|item| (menu.mode, item))
-        })
-    });
-    let Some((mode, item)) = selected else {
-        return;
-    };
-    close();
-    match mode {
-        Mode::Sites => choose_site(item),
-        Mode::Toolbox => choose_tool(item),
-    }
-}
-
-fn choose_site(item: PaletteItem) {
-    if item.item_type == PaletteItemType::Tab {
-        if let Some(id) = item.id.strip_prefix("tab_").and_then(|id| id.parse().ok()) {
-            activate(id);
-        }
-        return;
-    }
-    if let Some(frame) = active_browser().and_then(|browser| browser.main_frame()) {
-        frame.load_url(Some(&CefString::from(item.path_or_url.as_str())));
-    }
-}
-
-fn choose_tool(item: PaletteItem) {
-    match item.id.as_str() {
-        "inspect" => perform(&Action::Inspect),
-        "new_tab" => perform(&Action::New),
-        "bookmark" => bookmark_current_page(),
-        _ => perform(&Action::OpenTool(item.path_or_url)),
-    }
-}
-
-fn bookmark_current_page() {
-    let visit = with_host(|host| {
-        host.session
-            .summaries()
-            .into_iter()
-            .find(|tab| Some(tab.target.id) == host.session.active_tab())
-    });
-    let Some(Some(tab)) = visit else {
-        return;
-    };
-    let result = BookmarkStore::open().and_then(|mut store| store.add(&tab.title, &tab.url));
-    open(Mode::Sites);
-    MENU.with(|cell| {
-        if let Some(menu) = cell.borrow().as_ref() {
-            let message = match result {
-                Ok(_) => "Bookmark saved to Thor".to_string(),
-                Err(error) => format!("Bookmark not saved: {error}"),
-            };
-            menu.footer
-                .set_text(Some(&CefString::from(message.as_str())));
-        }
-    });
-}
-
 wrap_panel_delegate! {
     struct MenuPanelDelegate {color:u32}
     impl ViewDelegate {
@@ -534,27 +346,12 @@ wrap_textfield_delegate! {
         fn on_key_event(&self,_textfield:Option<&mut Textfield>,event:Option<&KeyEvent>)->i32 {event.map_or(0,|event|{let handled=key(event);if handled==1 {1}else{super::shortcut(event)}})}
     }
 }
-wrap_button_delegate! {
-    struct ChoiceDelegate {index:Option<usize>}
-    impl ViewDelegate {}
-    impl ButtonDelegate {fn on_button_pressed(&self,_button:Option<&mut Button>){defer(self.index);}}
-}
-
-fn defer(index: Option<usize>) {
-    let mut task = ChoiceTask::new(index);
-    if post_task(ThreadId::UI, Some(&mut task)) != 1 {
-        crate::thor_warn!("thor::cef", "CEF rejected a command menu action");
-    }
-}
-
-wrap_task! {
-    struct ChoiceTask {index:Option<usize>}
-    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{close();}}}
-}
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::browser::session::BrowserSession;
+    use crate::dx::cmd_palette::PaletteItemType;
     #[test]
     fn sites_expose_only_active_tab_history_and_remove_closed_tabs() {
         let mut session = BrowserSession::default();
@@ -567,14 +364,14 @@ mod tests {
             .record_navigation(second, "https://second.test", "Second")
             .unwrap();
         session.activate(second).unwrap();
-        let bookmark = item(
+        let bookmark = catalog::item(
             "bookmark",
             "Saved",
             "https://saved.test",
             "Bookmarks",
             PaletteItemType::Bookmark,
         );
-        let result = sites(&session, vec![bookmark.clone()]);
+        let result = catalog::sites(&session, vec![bookmark.clone()]);
         assert_eq!(
             result
                 .iter()
@@ -591,7 +388,7 @@ mod tests {
             .any(|item| item.item_type == PaletteItemType::TabHistory
                 && item.path_or_url == "https://first.test"));
         session.close_tab(second).unwrap();
-        let result = sites(&session, vec![bookmark]);
+        let result = catalog::sites(&session, vec![bookmark]);
         assert!(!result
             .iter()
             .any(|item| item.path_or_url == "https://second.test"));
