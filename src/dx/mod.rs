@@ -1,11 +1,10 @@
-#[path = "3d_dom_snapshot.rs"]
-pub mod _3d_dom_snapshot;
 pub mod bitwarden;
 pub mod bookmarks;
 pub mod canvas;
 pub mod cmd_palette;
 pub mod css_overlay;
 pub mod decoder;
+pub mod dom_snapshot_3d;
 pub mod ide_bridge;
 pub mod llm_clean_context;
 pub mod llm_studio;
@@ -15,7 +14,6 @@ pub mod visit_recon;
 pub mod wasm_plugin;
 pub mod web3_inspector;
 
-pub use _3d_dom_snapshot::DomSnapshot3D;
 pub use bitwarden::{
     build_autofill_script, vault_palette_items, BitwardenVault, VaultError, VaultItemSummary,
     VaultLogin, VaultState, VaultStatus,
@@ -31,6 +29,7 @@ pub use cmd_palette::{
     SettingsRegistry, TabHistoryEntry, TabHistoryTracker,
 };
 pub use decoder::{DecodedJwt, DecoderStudio, PayloadType};
+pub use dom_snapshot_3d::DomSnapshot3D;
 pub use ide_bridge::IdeBridge;
 pub use llm_clean_context::LlmCleanContext;
 pub use llm_studio::{LlmCostEstimate, LlmStudio, SseStreamMetrics, SseStreamParser};

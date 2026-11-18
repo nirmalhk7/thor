@@ -26,6 +26,10 @@ jobs:
           fi
       - name: Test release version logic
         run: python3 -m unittest discover -s tests -p test_semantic_version.py
+      - name: Check repository structure
+        run: |
+          python3 -m unittest discover -s tests -p test_repository_structure.py
+          python3 scripts/check_structure.py
       - name: Check all Rust targets
         run: cargo check --locked --workspace --all-targets
       - name: Run all Rust tests

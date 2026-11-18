@@ -1,19 +1,5 @@
-# Thor browser overlays (Chromium tree)
+# Browser integration assets
 
-Files here are copied/patched into `$THOR_CHROMIUM_SRC/src` by `scripts/apply_thor_branding.sh`.
+`extensions/thor-lab/` contains the browser extension assets. `native_messaging/com.thor.labs.json` is the native messaging host template for the Rust sidecar.
 
-```
-browser/
-  gn_args.thor.gn          # recommended out/Thor args
-  branding/
-    BRANDING               # product name strings
-    thor_resources.md      # resource ID notes
-  patches/
-    0001-thor-product-name.patch.example
-  native_messaging/
-    com.thor.labs.json     # host manifest template for Rust sidecar
-  isolation/
-    MAPPING.md             # Level 1–3 → Profile/Partition/WebContents
-```
-
-Do not edit Chromium UI from multiple agents at once — Browser Chrome stream owns `chrome/browser` changes.
+Thor's product runtime lives in `src/browser/cef/`. Identity isolation uses CEF request contexts. See [the architecture](../docs/ARCHITECTURE.md) for current ownership and trust boundaries.

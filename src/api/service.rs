@@ -156,14 +156,7 @@ impl HttpService {
             Method::from_bytes(spec.method.as_bytes()).map_err(|_| ApiError::InvalidMethod)?;
         let resolved = variables.resolve(&spec.url)?;
         let mut url = Url::parse(&resolved).map_err(|_| ApiError::InvalidUrl)?;
-        if !matches!(url.scheme(), "http" | "https")
-            || url.host_str().is_none()
-            || !url.username().is_empty()
-            || url.password().is_some()
-            || url.fragment().is_some()
-        {
-            return Err(ApiError::InvalidUrl);
-        }
+        validate_request_url(&url)?;
         for entry in &spec.query {
             url.query_pairs_mut().append_pair(
                 &variables.resolve(&entry.name)?,
@@ -252,6 +245,25 @@ fn apply_body(
         request = request.header(CONTENT_TYPE, content_type);
     }
     Ok(request.body(bytes))
+}
+
+fn validate_request_url(url: &Url) -> Result<(), ApiError> {
+    if !matches!(url.scheme(), "http" | "https") {
+        return Err(ApiError::InvalidUrl);
+    }
+    if url.host_str().is_none() {
+        return Err(ApiError::InvalidUrl);
+    }
+    if !url.username().is_empty() {
+        return Err(ApiError::InvalidUrl);
+    }
+    if url.password().is_some() {
+        return Err(ApiError::InvalidUrl);
+    }
+    if url.fragment().is_some() {
+        return Err(ApiError::InvalidUrl);
+    }
+    Ok(())
 }
 
 fn url_form(entries: &[Header], variables: &Variables) -> Result<String, ApiError> {

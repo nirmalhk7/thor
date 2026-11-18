@@ -587,37 +587,27 @@ pub fn hdr_ms_samples(n: usize) -> Vec<f64> {
         .collect()
 }
 
+const OWNER_CONTEXTS: [(&str, bool); 4] = [
+    ("Admin", true),
+    ("Owner", true),
+    ("Other User", false),
+    ("Anonymous", false),
+];
+
 /// The canonical 4-context authorization probe set for a single owner-scoped
 /// endpoint (Admin + Owner legitimately allowed; Other User + Anonymous must be
 /// denied). `status` simulates a vulnerable endpoint that grants everyone.
 pub fn authz_probes() -> Vec<AuthzProbe> {
     let endpoint = "/api/orders/1001";
-    vec![
-        AuthzProbe {
-            role: "Admin".into(),
+    OWNER_CONTEXTS
+        .into_iter()
+        .map(|(name, owner)| AuthzProbe {
+            role: name.into(),
             endpoint: endpoint.into(),
-            should_allow: true,
+            should_allow: owner,
             status: 200,
-        },
-        AuthzProbe {
-            role: "Owner".into(),
-            endpoint: endpoint.into(),
-            should_allow: true,
-            status: 200,
-        },
-        AuthzProbe {
-            role: "Other User".into(),
-            endpoint: endpoint.into(),
-            should_allow: false,
-            status: 200,
-        },
-        AuthzProbe {
-            role: "Anonymous".into(),
-            endpoint: endpoint.into(),
-            should_allow: false,
-            status: 200,
-        },
-    ]
+        })
+        .collect()
 }
 
 /// A recorded session with `steps` DOM interactions + periodic network traces.
@@ -715,32 +705,15 @@ pub fn sample_webhook_event() -> WebhookEvent {
 /// broken object-level authz; Anonymous correctly denied).
 pub fn idor_probes() -> Vec<IdorProbe> {
     let resource = "/api/orders/1001";
-    vec![
-        IdorProbe {
-            identity: "Admin".into(),
+    OWNER_CONTEXTS
+        .into_iter()
+        .map(|(name, owner)| IdorProbe {
+            identity: name.into(),
             resource: resource.into(),
-            is_owner: true,
-            status: 200,
-        },
-        IdorProbe {
-            identity: "Owner".into(),
-            resource: resource.into(),
-            is_owner: true,
-            status: 200,
-        },
-        IdorProbe {
-            identity: "Other User".into(),
-            resource: resource.into(),
-            is_owner: false,
-            status: 200,
-        },
-        IdorProbe {
-            identity: "Anonymous".into(),
-            resource: resource.into(),
-            is_owner: false,
-            status: 401,
-        },
-    ]
+            is_owner: owner,
+            status: if name == "Anonymous" { 401 } else { 200 },
+        })
+        .collect()
 }
 
 // --- Measurement harness ---------------------------------------------------
@@ -985,18 +958,8 @@ pub fn measure_cdp_ingest_network() -> FeaturePathResult {
     result(SLA_CDP_INGEST_NETWORK, per_op)
 }
 
-pub fn measure_budget_check_unified() -> FeaturePathResult {
-    let engine = PerfEngine::new();
-    let budgets = PerformanceBudgets::core_web_vitals();
-    let vitals = BrowserMetrics {
-        lcp_ms: 1800.0,
-        inp_ms: 120.0,
-        cls: 0.05,
-        tbt_ms: 100.0,
-        ttfb_ms: 400.0,
-        ..Default::default()
-    };
-    let load = LoadMetrics {
+pub(super) fn budget_load_metrics(vitals: BrowserMetrics) -> LoadMetrics {
+    LoadMetrics {
         total_requests: 1000,
         successful_requests: 995,
         failed_requests: 5,
@@ -1011,12 +974,26 @@ pub fn measure_budget_check_unified() -> FeaturePathResult {
         p95_latency_ms: 100.0,
         p99_latency_ms: 150.0,
         status_codes: Default::default(),
-        browser_vitals: Some(vitals.clone()),
+        browser_vitals: Some(vitals),
         transfer_bytes: None,
         decoded_bytes: None,
         lcp_media_bytes: None,
         soft_nav: None,
+    }
+}
+
+pub fn measure_budget_check_unified() -> FeaturePathResult {
+    let engine = PerfEngine::new();
+    let budgets = PerformanceBudgets::core_web_vitals();
+    let vitals = BrowserMetrics {
+        lcp_ms: 1800.0,
+        inp_ms: 120.0,
+        cls: 0.05,
+        tbt_ms: 100.0,
+        ttfb_ms: 400.0,
+        ..Default::default()
     };
+    let load = budget_load_metrics(vitals.clone());
     let per_op = measure_per_op(5, 20_000, || {
         let pe = engine.check_budgets(
             black_box(&budgets),

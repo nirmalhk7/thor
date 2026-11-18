@@ -39,7 +39,7 @@ The product name is Thor. The requested visual direction is lean and futuristic.
 
 ## Evidence on Hand
 
-The CEF shell lives in `src/browser/cef/host.rs`; browser session behavior lives in `src/browser/session.rs`. The existing shell uses native CEF controls. `src/workbench/` contains an API request editor and Rust commands for sending and saving requests. Security engines exist in `src/features/security.rs` and `src/net/`, but their existence alone does not mean every tool is available from the CEF shell. No benchmark claims or demonstration metrics are authorized for the new-tab surface.
+The CEF shell lives in `src/browser/cef/host/mod.rs`; browser session behavior lives in `src/browser/session.rs`. The existing shell uses native CEF controls. `src/workbench/` contains an API request editor and Rust commands for sending and saving requests. Security engines exist in `src/features/security/mod.rs` and `src/net/`, but their existence alone does not mean every tool is available from the CEF shell. No benchmark claims or demonstration metrics are authorized for the new-tab surface.
 
 ## Product Principles
 

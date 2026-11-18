@@ -13,11 +13,13 @@ Thor.app
 └── Rust engines: API execution, FeatureEngine, evidence, security, load
 ```
 
-`src/main.rs` enters `src/browser/cef`. `src/browser/cef/mod.rs` dispatches subprocesses, loads the CEF framework, sets the Thor cache root, and configures the dedicated macOS Keychain service `Thor Safe Storage` with account `Thor`. The legacy Chromium and Wry modules are migration code; they are not Thor’s product launch path.
+`src/main.rs` enters `src/browser/cef`. `src/browser/cef/mod.rs` dispatches subprocesses, loads the CEF framework, sets the Thor cache root, and configures the dedicated macOS Keychain service `Thor Safe Storage` with account `Thor`. Standalone Labs/CDP executable discovery lives in `src/engine/browser_discovery.rs`.
+
+Modules with child files keep their entry point in `mod.rs` inside the owning directory. Leaf modules use `snake_case.rs`. Feature domain implementations live under `src/features/{frontend,backend,security,perf_features,qa,ai}/`; `catalog.rs` binds the 144 feature IDs to handlers under `orchestrator/`. Rust module paths remain independent of this file layout.
 
 ## Window and browser controls
 
-`src/browser/cef/host.rs` owns the native Thor window, toolbar, tab views, CEF request contexts, and browser session. The toolbar provides navigation, reload, workspace, address entry, and the Developer control. Cmd+K opens Sites; Cmd+Shift+K opens the Toolbox. Both routes resolve to native Thor actions.
+`src/browser/cef/host/mod.rs` owns the native Thor window, toolbar, tab views, CEF request contexts, and browser session. The toolbar provides navigation, reload, workspace, address entry, and the Developer control. Cmd+K opens Sites; Cmd+Shift+K opens the Toolbox. Both routes resolve to native Thor actions.
 
 Each identity receives a CEF `RequestContext`. Persistent identities use a cache directory under `Thor/CEF/Identities/<identity-id>`; disposable identities use an empty cache path and do not persist session cookies. Tabs are created with their identity’s context.
 
@@ -37,9 +39,10 @@ Workspace pages communicate with the Rust `Workbench` through CEF message routin
 
 ## Build and verification
 
-The CEF crate resolves a pinned prebuilt CEF distribution. No Chromium source checkout or depot_tools are required. Legacy scripts named `fetch_chromium.sh`, `build_chromium.sh`, `run_thor_chromium.sh`, and `bootstrap_chromium_snapshot.sh` are disabled.
+The CEF crate resolves a pinned prebuilt CEF distribution. No Chromium source checkout or depot_tools are required. The retired downstream shell, branding overlays, source-build scripts, and placeholder package scripts have been removed.
 
 ```bash
+make check-structure
 cargo check --locked --all-targets
 cargo clippy --locked --all-targets -- -D warnings
 cargo test --locked --lib

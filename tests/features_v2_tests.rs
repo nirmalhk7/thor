@@ -72,8 +72,9 @@ impl TestServer {
             while flag.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((mut stream, _)) => {
-                        let mut buf = [0u8; 4096];
-                        let _ = stream.read(&mut buf);
+                        if read_test_request(&mut stream).is_err() {
+                            continue;
+                        }
                         let _ = stream.write_all(response.as_bytes());
                         let _ = stream.flush();
                     }
@@ -92,6 +93,36 @@ impl TestServer {
     }
 }
 
+fn read_test_request(stream: &mut TcpStream) -> std::io::Result<()> {
+    use std::io::{BufRead, BufReader, Error, ErrorKind};
+
+    stream.set_nonblocking(false)?;
+    stream.set_read_timeout(Some(Duration::from_secs(2)))?;
+    let mut reader = BufReader::new(stream);
+    let mut content_length = 0;
+    loop {
+        let mut line = String::new();
+        if reader.read_line(&mut line)? == 0 {
+            return Err(Error::new(
+                ErrorKind::UnexpectedEof,
+                "incomplete request headers",
+            ));
+        }
+        if line == "\r\n" || line == "\n" {
+            break;
+        }
+        if let Some((name, value)) = line.split_once(':') {
+            if name.eq_ignore_ascii_case("content-length") {
+                content_length = value
+                    .trim()
+                    .parse()
+                    .map_err(|error| Error::new(ErrorKind::InvalidData, error))?;
+            }
+        }
+    }
+    reader.read_exact(&mut vec![0u8; content_length])
+}
+
 impl Drop for TestServer {
     fn drop(&mut self) {
         self.running.store(false, Ordering::SeqCst);
@@ -99,6 +130,36 @@ impl Drop for TestServer {
             let _ = h.join();
         }
     }
+}
+
+#[test]
+fn test_loopback_fixture_waits_for_complete_fragmented_request() {
+    let server = TestServer::start(200, "complete");
+    let address = server.url.strip_prefix("http://").unwrap();
+    let mut stream = TcpStream::connect(address).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .unwrap();
+    let fragments = [
+        "POST /split HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\n",
+        "Connection: close\r\n\r\nab",
+    ];
+    for fragment in fragments {
+        stream.write_all(fragment.as_bytes()).unwrap();
+        let result = stream.read(&mut [0u8; 1]);
+        assert!(
+            matches!(result, Err(ref error) if matches!(error.kind(), std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut)),
+            "fixture responded before the complete request arrived: {result:?}"
+        );
+    }
+    stream.write_all(b"cd").unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    assert!(response.starts_with("HTTP/1.1 200 OK\r\n"), "{response}");
+    assert!(response.ends_with("\r\n\r\ncomplete"), "{response}");
 }
 
 /// Fire a single raw HTTP request at `127.0.0.1:port` and return the raw

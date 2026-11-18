@@ -1,15 +1,14 @@
 use thor::daemon::prewarm::PrewarmDaemon;
 
 #[test]
+#[ignore = "Requires an owned Chromium executable configured with THOR_CHROMIUM_PATH"]
 fn test_exhaustion() {
     let daemon = PrewarmDaemon::new(1);
 
     // Create an instance by manually starting it
-    let result = daemon.warm_thor_chromium(false);
-    if result.is_err() {
-        println!("Error warming up: {:?}", result.err());
-        return;
-    }
+    daemon
+        .warm_thor_chromium(false)
+        .expect("owned Chromium runtime must start for this live test");
 
     // Acquire a tab
     let _tab1 = daemon.acquire_tab().unwrap();

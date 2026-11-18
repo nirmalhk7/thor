@@ -2,7 +2,7 @@
 
 ## Overview
 
-Thor incorporates a dedicated **AI / LLM Developer Studio** (`src/dx/llm_studio.rs` and `src/dx/llm_clean_context.rs`) tailored for vibecoders, AI engineers, and prompt developers. Thor tracks real-time SSE stream latency, token generation rates (tok/s), API token costs with prompt caching discounts, and provides 1-click DOM-to-LLM clean context copying.
+Thor incorporates a dedicated **AI / LLM Developer Studio** (`src/dx/llm_studio/mod.rs` and `src/dx/llm_clean_context.rs`) tailored for vibecoders, AI engineers, and prompt developers. Thor tracks real-time SSE stream latency, token generation rates (tok/s), API token costs with prompt caching discounts, and provides 1-click DOM-to-LLM clean context copying.
 
 ---
 
@@ -72,4 +72,4 @@ Wired to `Cmd+Shift+C` shortcut, `src/dx/llm_clean_context.rs` provides 1-click 
 
 ## AI Domain Feature Suite
 
-Twenty-four AI `FeatureId`s (tool-call forensics with honest SSE `tool_result` merge, cache-hit ledger → `saved_usd`, JSON Schema guard, MCP traffic lens, streaming SLO gates from waterfall, eval dataset miner, and more) live under `src/features/ai.rs` and deepen `llm_studio` pricing/SSE. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.
+Twenty-four AI `FeatureId`s (tool-call forensics with honest SSE `tool_result` merge, cache-hit ledger → `saved_usd`, JSON Schema guard, MCP traffic lens, streaming SLO gates from waterfall, eval dataset miner, and more) live under `src/features/ai/mod.rs` and deepen `llm_studio` pricing/SSE. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

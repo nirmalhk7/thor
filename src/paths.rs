@@ -51,7 +51,7 @@ pub fn thor_data_dir() -> PathBuf {
     }
 }
 
-/// Legacy dual-window Chromium profile under the Thor data directory.
+/// Standalone CDP browser profile under the Thor data directory.
 pub fn thor_chromium_profile_dir() -> PathBuf {
     thor_data_dir().join("ChromiumProfile")
 }
@@ -66,10 +66,8 @@ pub fn thor_downloads_dir() -> PathBuf {
     thor_data_dir().join("Downloads")
 }
 
-/// Returns the legacy dual-window Chromium executable path relative to Thor's executable.
-///
-/// The embedded CEF product does not use this path. It remains for the transitional
-/// `THOR_LEGACY_DUAL_WINDOW` runtime only.
+/// Standalone CDP browser executable path relative to Thor's executable.
+/// The embedded CEF product does not use this path.
 pub fn thor_bundled_chromium_path() -> PathBuf {
     let mut exe_path = std::env::current_exe().unwrap_or_else(|_| PathBuf::from("."));
 
@@ -85,12 +83,12 @@ pub fn thor_bundled_chromium_path() -> PathBuf {
         .join("Chromium")
 }
 
-/// Legacy Chromium snapshot cache used by the transitional dual-window runtime.
+/// Browser executable cache for standalone CDP tooling.
 pub fn thor_chromium_cache_dir() -> PathBuf {
     thor_data_dir().join("ChromiumCache")
 }
 
-/// Legacy cached Chromium executable path used by the transitional dual-window runtime.
+/// Cached browser executable path for standalone CDP tooling.
 pub fn thor_cached_chromium_path() -> PathBuf {
     thor_chromium_cache_dir()
         .join("Chromium.app")

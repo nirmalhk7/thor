@@ -2,6 +2,7 @@ use std::time::Duration;
 use thor::engine::chromium_runtime::{ChromiumRuntime, ChromiumRuntimeConfig};
 
 #[tokio::test]
+#[ignore = "Requires an owned Chromium executable configured with THOR_CHROMIUM_PATH"]
 async fn test_runtime_prewarm_exhaustion() {
     let cfg = ChromiumRuntimeConfig {
         prewarm_pool_size: 1,
@@ -10,11 +11,9 @@ async fn test_runtime_prewarm_exhaustion() {
         ..Default::default()
     };
 
-    // Some CI might not have Chromium, so we skip if not found
-    let rt = match ChromiumRuntime::launch(cfg).await {
-        Ok(rt) => rt,
-        Err(_) => return,
-    };
+    let rt = ChromiumRuntime::launch(cfg)
+        .await
+        .expect("owned Chromium runtime must start for this live test");
 
     // Pop the only prewarmed tab
     let tab1 = rt.acquire_tab().await.expect("tab1");

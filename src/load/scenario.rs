@@ -147,45 +147,66 @@ impl PerformanceBudgets {
             }
         };
 
-        // Synthetic / estimated CWV (e.g. HTTP-derived) is excluded from budgets.
         if let Some(v) = vitals.filter(|v| !v.synthetic) {
-            if let Some(b) = self.max_lcp_ms {
-                gate("lcp_ms", v.lcp_ms, b, true);
-            }
-            if let Some(b) = self.max_inp_ms {
-                gate("inp_ms", v.inp_ms, b, true);
-            }
-            if let Some(b) = self.max_cls {
-                gate("cls", v.cls, b, true);
-            }
-            if let Some(b) = self.max_tbt_ms {
-                gate("tbt_ms", v.tbt_ms, b, true);
-            }
-            if let Some(b) = self.max_ttfb_ms {
-                gate("ttfb_ms", v.ttfb_ms, b, true);
-            }
+            self.evaluate_vitals(v, &mut gate);
         }
-
         if let Some(l) = load {
-            if let Some(b) = self.max_p95_latency_ms {
-                gate("p95_latency_ms", l.p95_latency_ms, b, true);
-            }
-            if let Some(b) = self.max_p99_latency_ms {
-                gate("p99_latency_ms", l.p99_latency_ms, b, true);
-            }
-            if let Some(b) = self.max_error_rate {
-                let error_rate = if l.total_requests > 0 {
-                    l.failed_requests as f64 / l.total_requests as f64
-                } else {
-                    0.0
-                };
-                gate("error_rate", error_rate, b, true);
-            }
-            if let Some(b) = self.min_rps {
-                gate("rps", l.rps, b, false);
-            }
+            self.evaluate_load(l, &mut gate);
         }
+        self.evaluate_transfer(transfer_bytes, decoded_bytes, lcp_media_bytes, &mut gate);
 
+        BudgetEvaluation {
+            passed: violations.is_empty(),
+            violations,
+            checked,
+        }
+    }
+
+    fn evaluate_vitals(&self, v: &BrowserMetrics, gate: &mut impl FnMut(&str, f64, f64, bool)) {
+        if let Some(b) = self.max_lcp_ms {
+            gate("lcp_ms", v.lcp_ms, b, true);
+        }
+        if let Some(b) = self.max_inp_ms {
+            gate("inp_ms", v.inp_ms, b, true);
+        }
+        if let Some(b) = self.max_cls {
+            gate("cls", v.cls, b, true);
+        }
+        if let Some(b) = self.max_tbt_ms {
+            gate("tbt_ms", v.tbt_ms, b, true);
+        }
+        if let Some(b) = self.max_ttfb_ms {
+            gate("ttfb_ms", v.ttfb_ms, b, true);
+        }
+    }
+
+    fn evaluate_load(&self, l: &LoadMetrics, gate: &mut impl FnMut(&str, f64, f64, bool)) {
+        if let Some(b) = self.max_p95_latency_ms {
+            gate("p95_latency_ms", l.p95_latency_ms, b, true);
+        }
+        if let Some(b) = self.max_p99_latency_ms {
+            gate("p99_latency_ms", l.p99_latency_ms, b, true);
+        }
+        if let Some(b) = self.max_error_rate {
+            let error_rate = if l.total_requests > 0 {
+                l.failed_requests as f64 / l.total_requests as f64
+            } else {
+                0.0
+            };
+            gate("error_rate", error_rate, b, true);
+        }
+        if let Some(b) = self.min_rps {
+            gate("rps", l.rps, b, false);
+        }
+    }
+
+    fn evaluate_transfer(
+        &self,
+        transfer_bytes: Option<u64>,
+        decoded_bytes: Option<u64>,
+        lcp_media_bytes: Option<u64>,
+        gate: &mut impl FnMut(&str, f64, f64, bool),
+    ) {
         if let (Some(transfer), Some(max)) = (transfer_bytes, self.max_transfer_bytes) {
             gate("transfer_bytes", transfer as f64, max as f64, true);
         }
@@ -201,12 +222,6 @@ impl PerformanceBudgets {
         }
         if let (Some(media), Some(max)) = (lcp_media_bytes, self.max_lcp_media_bytes) {
             gate("lcp_media_bytes", media as f64, max as f64, true);
-        }
-
-        BudgetEvaluation {
-            passed: violations.is_empty(),
-            violations,
-            checked,
         }
     }
 

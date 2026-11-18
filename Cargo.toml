@@ -64,15 +64,15 @@ name = "cmd_palette_bench"
 harness = false
 
 [[bench]]
-name = "ipc_bench"
+name = "locust_scoring_bench"
 harness = false
 
 [[bench]]
-name = "cold_start_bench"
+name = "shield_sanitize_bench"
 harness = false
 
 [[bench]]
-name = "memory_soak_bench"
+name = "consent_classification_bench"
 harness = false
 
 [[bench]]

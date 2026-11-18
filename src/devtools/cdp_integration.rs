@@ -66,26 +66,7 @@ impl CdpIntegration {
         let logs = Arc::clone(&self.logs);
         let handle = tab.runtime().handle().spawn(async move {
             while let Some(event) = events.next().await {
-                let level = format!("{:?}", event.r#type).to_lowercase();
-                let message = event
-                    .args
-                    .iter()
-                    .filter_map(|arg| {
-                        arg.value
-                            .as_ref()
-                            .map(|v| v.to_string())
-                            .or_else(|| arg.description.clone())
-                            .or_else(|| arg.unserializable_value.as_ref().map(|u| format!("{u:?}")))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let entry = ConsoleLogEvent {
-                    timestamp: now_ms(),
-                    level,
-                    message,
-                };
-                logs.lock().push(entry.clone());
-                let _ = tx.send(entry);
+                record_console_event(&event, &logs, &tx);
             }
         });
         self.listener_task = Some(handle);
@@ -112,26 +93,7 @@ impl CdpIntegration {
                 Err(_) => return,
             };
             while let Some(event) = events.next().await {
-                let level = format!("{:?}", event.r#type).to_lowercase();
-                let message = event
-                    .args
-                    .iter()
-                    .filter_map(|arg| {
-                        arg.value
-                            .as_ref()
-                            .map(|v| v.to_string())
-                            .or_else(|| arg.description.clone())
-                            .or_else(|| arg.unserializable_value.as_ref().map(|u| format!("{u:?}")))
-                    })
-                    .collect::<Vec<_>>()
-                    .join(" ");
-                let entry = ConsoleLogEvent {
-                    timestamp: now_ms(),
-                    level,
-                    message,
-                };
-                logs.lock().push(entry.clone());
-                let _ = tx_bg.send(entry);
+                record_console_event(&event, &logs, &tx_bg);
             }
         });
 
@@ -199,6 +161,33 @@ impl CdpIntegration {
         };
         Some(format!("{scheme}://{host_port}"))
     }
+}
+
+fn record_console_event(
+    event: &EventConsoleApiCalled,
+    logs: &Mutex<Vec<ConsoleLogEvent>>,
+    tx: &UnboundedSender<ConsoleLogEvent>,
+) {
+    let level = format!("{:?}", event.r#type).to_lowercase();
+    let message = event
+        .args
+        .iter()
+        .filter_map(|arg| {
+            arg.value
+                .as_ref()
+                .map(|v| v.to_string())
+                .or_else(|| arg.description.clone())
+                .or_else(|| arg.unserializable_value.as_ref().map(|u| format!("{u:?}")))
+        })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let entry = ConsoleLogEvent {
+        timestamp: now_ms(),
+        level,
+        message,
+    };
+    logs.lock().push(entry.clone());
+    let _ = tx.send(entry);
 }
 
 /// Parse a Core Web Vitals JSON payload — as returned by a `Runtime.evaluate`

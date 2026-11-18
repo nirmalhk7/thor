@@ -45,7 +45,7 @@ Thor provides an extensive suite of features across core browsing, product speci
 
 ---
 
-## 4. 🤖 AI / LLM Developer Studio (`src/dx/llm_studio.rs`)
+## 4. 🤖 AI / LLM Developer Studio (`src/dx/llm_studio/mod.rs`)
 
 - **2026 Model Pricing Table**: Built-in pricing engine supporting prompt caching discounts:
   - `claude-3.7-sonnet`: $0.003 / 1k input ($0.0003 cached), $0.015 / 1k output.
@@ -60,11 +60,11 @@ Thor provides an extensive suite of features across core browsing, product speci
 
 ## 5. 🛡️ Security Specialist & Pentesting Suite
 
-- **IDOR Matrix Testing (`src/net/idor_matrix.rs`)**: Replays intercepted HTTP requests across multiple Level 2 Identity Contexts. Uses `compute_json_structure_hash` to hash JSON response schemas, eliminating false-positive IDOR alerts on 200 OK error wrappers.
-- **Traffic Tamper Engine (`src/net/tamper.rs`)**: Pause, edit, forward, drop, or inject custom HTTP headers into outgoing requests. Supports inline response mocking (`mock_status`, `mock_body`, `delay_ms`).
+- **IDOR Matrix Testing (`src/net/idor_matrix/mod.rs`)**: Replays intercepted HTTP requests across multiple Level 2 Identity Contexts. Uses `compute_json_structure_hash` to hash JSON response schemas, eliminating false-positive IDOR alerts on 200 OK error wrappers.
+- **Traffic Tamper Engine (`src/net/tamper/mod.rs`)**: Pause, edit, forward, drop, or inject custom HTTP headers into outgoing requests. Supports inline response mocking (`mock_status`, `mock_body`, `delay_ms`).
 - **SEC-027 Secret Redaction**: Automatically masks sensitive `Authorization`, `Cookie`, and `X-API-Key` values with `[REDACTED]` in proxy logs.
 - **Pure-Rust SSL CA Generator (`src/net/ssl_ca.rs`)**: Generates custom ECDSA P-256 root CAs (`Thor Dev CA`) and leaf certs (`*.localhost`, `*.test`). Auto-installs trust into macOS Keychain (`security`), Windows Cert Store (`certutil`), or Linux NSS DB.
-- **JWT & Web3 Decoder (`src/dx/decoder.rs`, `src/dx/web3_inspector.rs`)**: Auto-detects and decodes JWT claims, base64 payloads, EVM 4-byte ABI selectors, and EIP-55 address checksums.
+- **JWT & Web3 Decoder (`src/dx/decoder.rs`, `src/dx/web3_inspector/mod.rs`)**: Auto-detects and decodes JWT claims, base64 payloads, EVM 4-byte ABI selectors, and EIP-55 address checksums.
 - **Consent-gated labs** (`src/net/consent.rs` + Security domain engines): SSRF / session-fixation / fuzz / race-live refuse public targets without `lab_consent`; expanded abuse-host blocklist.
 
 ---

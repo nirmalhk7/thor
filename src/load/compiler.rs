@@ -22,36 +22,8 @@ impl ScenarioCompiler {
             });
         }
 
-        // Validate each step
         for (idx, step) in scenario.steps.iter().enumerate() {
-            match step {
-                ScenarioStep::Navigate { url } => {
-                    if url.is_empty() {
-                        return Err(format!("Step {}: Navigate URL cannot be empty", idx));
-                    }
-                }
-                ScenarioStep::HttpRequest { method, url, .. } => {
-                    if method.is_empty() || url.is_empty() {
-                        return Err(format!("Step {}: HttpRequest requires method and url", idx));
-                    }
-                }
-                ScenarioStep::Click { selector } => {
-                    if selector.is_empty() {
-                        return Err(format!("Step {}: Click selector cannot be empty", idx));
-                    }
-                }
-                ScenarioStep::Fill { selector, .. } => {
-                    if selector.is_empty() {
-                        return Err(format!("Step {}: Fill selector cannot be empty", idx));
-                    }
-                }
-                ScenarioStep::WebSocketConnect { url, .. } => {
-                    if url.is_empty() {
-                        return Err(format!("Step {}: WebSocket URL cannot be empty", idx));
-                    }
-                }
-                ScenarioStep::Wait { .. } | ScenarioStep::CustomScript { .. } => {}
-            }
+            validate_step(idx, step)?;
         }
 
         Ok(scenario)
@@ -80,6 +52,29 @@ impl ScenarioCompiler {
             });
         }
         Self::compile(scenario)
+    }
+}
+
+fn validate_step(idx: usize, step: &ScenarioStep) -> Result<(), String> {
+    let error = match step {
+        ScenarioStep::Navigate { url } => url.is_empty().then_some("Navigate URL cannot be empty"),
+        ScenarioStep::HttpRequest { method, url, .. } => {
+            (method.is_empty() || url.is_empty()).then_some("HttpRequest requires method and url")
+        }
+        ScenarioStep::Click { selector } => selector
+            .is_empty()
+            .then_some("Click selector cannot be empty"),
+        ScenarioStep::Fill { selector, .. } => selector
+            .is_empty()
+            .then_some("Fill selector cannot be empty"),
+        ScenarioStep::WebSocketConnect { url, .. } => {
+            url.is_empty().then_some("WebSocket URL cannot be empty")
+        }
+        ScenarioStep::Wait { .. } | ScenarioStep::CustomScript { .. } => None,
+    };
+    match error {
+        Some(message) => Err(format!("Step {}: {}", idx, message)),
+        None => Ok(()),
     }
 }
 

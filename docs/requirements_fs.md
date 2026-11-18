@@ -20,7 +20,7 @@
 
 | Layer | Owns | Must not own |
 |-------|------|--------------|
-| **Shell** (`shell/`) | Window, native toolbar, omnibox/tabs chrome, Cmd+K / Cmd+⇧K surfaces, IPC dispatch, layout of tool bars | HTTP semantics, CDP protocol details, Locust scheduling, cert crypto |
+| **Browser host** (`src/browser/cef/host/`) | Window, native toolbar, omnibox/tabs chrome, Cmd+K / Cmd+⇧K surfaces, trusted workspace IPC, layout of tool bars | HTTP semantics, CDP protocol details, Locust scheduling, cert crypto |
 | **Content engine** (`engine/`) | Tab lifecycle, navigate/back/forward/reload, freeze/unfreeze, prewarm, profile-backed browsing context, CDP targets | Persistence format for collections; Locust swarm logic; chrome HTML |
 | **Net** (`net/`) | Security shield, traffic tamper model, Locust swarm, local SSL CA | UI chrome; tab visual bounds |
 | **DX** (`dx/`) | Cmd palette payloads, bookmarks, decoder, stack detect, IDE bridge stubs | Browser process lifecycle |

@@ -18,7 +18,7 @@ graph TD
     E --> F[Latency Percentiles: p50, p90, p99]
 ```
 
-### 1. BrowserRunner (`src/load/browser_runner.rs`)
+### 1. BrowserRunner (`src/load/browser_runner/mod.rs`)
 - **Focus**: Real browser DOM execution, layout rendering, and Web Vitals telemetry.
 - **CDP Instrumentation**: Injects `PerformanceObserver` scripts to capture:
   - **LCP (Largest Contentful Paint)**: Render time of largest hero image/text block.
@@ -26,13 +26,13 @@ graph TD
   - **TBT (Total Blocking Time)**: Sum of long-task execution times (>50ms) between FCP and TTI.
   - **CLS (Cumulative Layout Shift)**: Structural layout instability score.
 
-### 2. ProtocolRunner (`src/load/protocol_runner.rs`)
+### 2. ProtocolRunner (`src/load/protocol_runner/mod.rs`)
 - **Focus**: High-concurrency protocol load generation (HTTP/1.1, HTTP/2, WebSockets).
 - **Architecture**: Asynchronous multi-threaded Tokio worker pool issuing non-blocking HTTP requests with minimal memory overhead, capable of scaling to 10,000+ RPS on a single developer laptop.
 
 ---
 
-## Lock-Free $O(1)$ Atomic Metrics Aggregation (`src/load/metrics.rs`)
+## Lock-Free $O(1)$ Atomic Metrics Aggregation (`src/load/metrics/mod.rs`)
 
 Traditional metrics collection uses mutexes to push timing samples into vectors, causing lock contention and high latency jitter at high RPS. Thor uses a **lock-free logarithmic atomic bucket array**:
 
@@ -70,4 +70,4 @@ Thor enforces strict memory efficiency to remain lighter than Chrome and Firefox
 
 ## Performance Domain Feature Suite
 
-Twenty-five Performance `FeatureId`s (budgets, waterfall, INP, flame graph, LCP element forensics, long-task radar, freeze–resume bench, soft-nav vitals, conn-pool / HTTP/3 / compression / media gates, continuous profiler, and more) live under `src/features/perf_features.rs` and are invocable from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.
+Twenty-five Performance `FeatureId`s (budgets, waterfall, INP, flame graph, LCP element forensics, long-task radar, freeze–resume bench, soft-nav vitals, conn-pool / HTTP/3 / compression / media gates, continuous profiler, and more) live under `src/features/perf_features/mod.rs` and are invocable from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

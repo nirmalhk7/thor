@@ -1,0 +1,460 @@
+//! One CDP page/target per Thor tab.
+//! Supports 3-Level Isolation Hierarchy (Profile -> Identity Context -> Tab)
+//! and 4-Stage Tab Lifecycle (Active -> Frozen -> Discarded -> Expired).
+
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::Arc;
+use std::time::Instant;
+
+use chromiumoxide::cdp::browser_protocol::page::{
+    BringToFrontParams, GetNavigationHistoryParams, NavigateToHistoryEntryParams, StopLoadingParams,
+};
+use chromiumoxide::cdp::browser_protocol::storage::ClearDataForOriginParams;
+use chromiumoxide::cdp::browser_protocol::target::{
+    ActivateTargetParams, OpenDevToolsParams, TargetId,
+};
+use chromiumoxide::Page;
+use parking_lot::{Mutex, RwLock};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+
+use super::chromium_runtime::{block_on_handle, ChromiumError, ChromiumResult, ChromiumRuntime};
+use super::freezing::{CdpPageFreezer, ProcessFreezer};
+
+/// Opaque tab identifier assigned by [`ChromiumRuntime`].
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+pub struct TabId(pub u64);
+
+/// 4-Stage Tab Lifecycle:
+/// 1. Active: foreground or recently active, full CDP execution.
+/// 2. Frozen: background tab after 15m idle, stopped/paused via CDP.
+/// 3. Discarded: background tab after 1h idle, CDP target detached & memory released while retaining session state.
+/// 4. Expired: background tab after 24h idle, tab closed and history wiped.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum TabLifecycle {
+    Active,
+    Frozen,
+    Discarded,
+    Expired,
+}
+
+/// Level 2 Isolation: Identity Context
+/// Holds cookies, localStorage, IndexedDB settings, Service Worker settings, and Auth tokens.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct IdentityContext {
+    pub id: String,
+    pub profile_id: String,
+    pub is_ephemeral: bool,
+    pub cookies: HashMap<String, String>,
+    pub local_storage: HashMap<String, String>,
+    pub indexed_db_enabled: bool,
+    pub service_workers_enabled: bool,
+    pub auth_tokens: HashMap<String, String>,
+}
+
+impl IdentityContext {
+    pub fn new(id: &str, profile_id: &str, is_ephemeral: bool) -> Self {
+        Self {
+            id: id.to_string(),
+            profile_id: profile_id.to_string(),
+            is_ephemeral,
+            cookies: HashMap::new(),
+            local_storage: HashMap::new(),
+            indexed_db_enabled: true,
+            service_workers_enabled: true,
+            auth_tokens: HashMap::new(),
+        }
+    }
+
+    pub fn ephemeral(profile_id: &str) -> Self {
+        static NEXT_EPHEMERAL_ID: std::sync::atomic::AtomicU64 =
+            std::sync::atomic::AtomicU64::new(1);
+        let nanos = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map(|d| d.as_nanos())
+            .unwrap_or(0);
+        let counter = NEXT_EPHEMERAL_ID.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+        Self::new(&format!("ephemeral-{nanos}-{counter}"), profile_id, true)
+    }
+
+    pub fn set_cookie(&mut self, key: &str, val: &str) {
+        self.cookies.insert(key.to_string(), val.to_string());
+    }
+
+    pub fn get_cookie(&self, key: &str) -> Option<&String> {
+        self.cookies.get(key)
+    }
+
+    pub fn set_local_storage(&mut self, key: &str, val: &str) {
+        self.local_storage.insert(key.to_string(), val.to_string());
+    }
+
+    pub fn get_local_storage(&self, key: &str) -> Option<&String> {
+        self.local_storage.get(key)
+    }
+
+    pub fn set_auth_token(&mut self, realm: &str, token: &str) {
+        self.auth_tokens
+            .insert(realm.to_string(), token.to_string());
+    }
+
+    pub fn get_auth_token(&self, realm: &str) -> Option<&String> {
+        self.auth_tokens.get(realm)
+    }
+}
+
+/// Cloneable CDP evaluate handle for the active tab (used by [`crate::features::cdp_bridge`]).
+#[derive(Clone)]
+pub struct TabEvalHandle {
+    page: Arc<Mutex<Option<Page>>>,
+    runtime: Arc<ChromiumRuntime>,
+}
+
+impl TabEvalHandle {
+    /// Evaluate JS and return a string (unwraps JSON string values).
+    pub fn evaluate_blocking(&self, expression: &str) -> Result<String, String> {
+        let page = self
+            .page
+            .lock()
+            .clone()
+            .ok_or_else(|| "no active CDP page target for tab".to_string())?;
+        let expression = expression.to_owned();
+        block_on_handle(self.runtime.handle(), async move {
+            let result = page
+                .evaluate(expression)
+                .await
+                .map_err(|e| format!("evaluate failed: {e}"))?;
+            let value = result
+                .into_value::<Value>()
+                .map_err(|e| format!("evaluate value: {e}"))?;
+            Ok(match value {
+                Value::String(s) => s,
+                other => other.to_string(),
+            })
+        })
+    }
+}
+
+/// CDP-backed tab session: navigate, history, JS eval, freeze/discard lifecycle.
+pub struct TabSession {
+    id: TabId,
+    page: Arc<Mutex<Option<Page>>>,
+    runtime: Arc<ChromiumRuntime>,
+    frozen: AtomicBool,
+    lifecycle: Arc<RwLock<TabLifecycle>>,
+    cached_title: Arc<Mutex<Option<String>>>,
+    // Level 2 Isolation: Identity Context
+    identity_context: Arc<Mutex<IdentityContext>>,
+    // Level 3 Isolation: Tab-scoped state
+    nav_history: Arc<Mutex<Vec<HistoryEntry>>>,
+    scroll_position: Arc<Mutex<(f64, f64)>>,
+    trace_buffer: Arc<Mutex<Vec<String>>>,
+    last_active: Arc<Mutex<Instant>>,
+}
+
+impl TabSession {
+    pub(crate) fn from_page(id: TabId, page: Page, runtime: Arc<ChromiumRuntime>) -> Self {
+        let identity_context =
+            IdentityContext::new(&format!("ctx_{}", id.0), "default_profile", false);
+        Self::from_page_with_context(id, page, runtime, identity_context)
+    }
+
+    pub(crate) fn from_page_with_context(
+        id: TabId,
+        page: Page,
+        runtime: Arc<ChromiumRuntime>,
+        identity_context: IdentityContext,
+    ) -> Self {
+        Self {
+            id,
+            page: Arc::new(Mutex::new(Some(page))),
+            runtime,
+            frozen: AtomicBool::new(false),
+            lifecycle: Arc::new(RwLock::new(TabLifecycle::Active)),
+            cached_title: Arc::new(Mutex::new(None)),
+            identity_context: Arc::new(Mutex::new(identity_context)),
+            nav_history: Arc::new(Mutex::new(Vec::new())),
+            scroll_position: Arc::new(Mutex::new((0.0, 0.0))),
+            trace_buffer: Arc::new(Mutex::new(Vec::new())),
+            last_active: Arc::new(Mutex::new(Instant::now())),
+        }
+    }
+
+    pub fn id(&self) -> TabId {
+        self.id
+    }
+
+    pub fn target_id(&self) -> Option<TargetId> {
+        self.page.lock().as_ref().map(|p| p.target_id().clone())
+    }
+
+    pub fn page(&self) -> Option<Page> {
+        self.page.lock().clone()
+    }
+
+    pub fn runtime(&self) -> &Arc<ChromiumRuntime> {
+        &self.runtime
+    }
+
+    pub fn lifecycle(&self) -> TabLifecycle {
+        *self.lifecycle.read()
+    }
+
+    pub fn set_lifecycle(&self, stage: TabLifecycle) {
+        *self.lifecycle.write() = stage;
+        if stage == TabLifecycle::Frozen {
+            self.frozen.store(true, Ordering::Relaxed);
+        } else if stage == TabLifecycle::Active {
+            self.frozen.store(false, Ordering::Relaxed);
+        }
+    }
+
+    pub fn identity_context(&self) -> IdentityContext {
+        self.identity_context.lock().clone()
+    }
+
+    pub fn update_identity_context<F: FnOnce(&mut IdentityContext)>(&self, f: F) {
+        f(&mut self.identity_context.lock());
+    }
+
+    pub fn is_ephemeral_context(&self) -> bool {
+        self.identity_context.lock().is_ephemeral
+    }
+
+    pub fn nav_history(&self) -> Vec<HistoryEntry> {
+        self.nav_history.lock().clone()
+    }
+
+    pub fn push_nav_history(&self, url: &str) {
+        let mut hist = self.nav_history.lock();
+        if hist.last().map(|e| e.url.as_str()) != Some(url) {
+            let seq = hist.len() as u64;
+            hist.push(HistoryEntry {
+                sequence: seq,
+                visited_at: std::time::SystemTime::now(),
+                url: url.to_string(),
+                normalized_url: normalize_url(url),
+                title: self.cached_title().unwrap_or_default(),
+                transition: "link".to_string(), // default
+            });
+        }
+    }
+
+    pub fn append_history(&self, other: Vec<HistoryEntry>) {
+        let mut hist = self.nav_history.lock();
+        for mut entry in other {
+            if hist.last().map(|e| e.normalized_url.as_str()) != Some(entry.normalized_url.as_str())
+            {
+                entry.sequence = hist.len() as u64;
+                hist.push(entry);
+            }
+        }
+        // Cap at 100 entries
+        if hist.len() > 100 {
+            let overflow = hist.len() - 100;
+            hist.drain(0..overflow);
+            // Re-sequence
+            for (i, e) in hist.iter_mut().enumerate() {
+                e.sequence = i as u64;
+            }
+        }
+    }
+
+    pub fn scroll_position(&self) -> (f64, f64) {
+        *self.scroll_position.lock()
+    }
+
+    pub fn set_scroll_position(&self, x: f64, y: f64) {
+        *self.scroll_position.lock() = (x, y);
+    }
+
+    pub fn trace_buffer(&self) -> Vec<String> {
+        self.trace_buffer.lock().clone()
+    }
+
+    pub fn push_trace(&self, entry: &str) {
+        self.trace_buffer.lock().push(entry.to_string());
+    }
+
+    pub fn last_active(&self) -> Instant {
+        *self.last_active.lock()
+    }
+
+    pub fn touch(&self) {
+        *self.last_active.lock() = Instant::now();
+    }
+
+    /// Ensure active page target is restored if discarded.
+    fn ensure_active_page(&self) -> ChromiumResult<Page> {
+        if self.lifecycle() == TabLifecycle::Discarded {
+            self.restore_blocking()?;
+        }
+        self.page.lock().clone().ok_or_else(|| {
+            ChromiumError::Other(anyhow::anyhow!("No active CDP page target for tab"))
+        })
+    }
+
+    async fn refresh_title_cache(&self) {
+        let page_opt = self.page.lock().clone();
+        if let Some(page) = page_opt {
+            if let Ok(result) = page.evaluate("document.title").await {
+                if let Ok(title) = result.into_value::<String>() {
+                    *self.cached_title.lock() = Some(title);
+                }
+            }
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_tab_id_construction() {
+        let id = TabId(42);
+        assert_eq!(id.0, 42);
+        assert_eq!(format!("{:?}", id), "TabId(42)");
+    }
+
+    #[test]
+    fn test_four_stage_lifecycle_enum() {
+        assert_ne!(TabLifecycle::Active, TabLifecycle::Frozen);
+        assert_ne!(TabLifecycle::Frozen, TabLifecycle::Discarded);
+        assert_ne!(TabLifecycle::Discarded, TabLifecycle::Expired);
+    }
+
+    #[test]
+    fn test_identity_context_ephemeral() {
+        let ctx = IdentityContext::ephemeral("dev_host");
+        assert!(ctx.is_ephemeral);
+        assert_eq!(ctx.profile_id, "dev_host");
+        assert!(ctx.id.starts_with("ephemeral-"));
+    }
+
+    #[test]
+    fn test_identity_context_storage_and_tokens() {
+        let mut ctx = IdentityContext::new("ctx_1", "dev_host", false);
+        ctx.set_cookie("session_id", "secret_123");
+        ctx.set_local_storage("theme", "dark");
+        ctx.set_auth_token("api.dev", "Bearer token_xyz");
+
+        assert_eq!(
+            ctx.get_cookie("session_id").map(|s| s.as_str()),
+            Some("secret_123")
+        );
+        assert_eq!(
+            ctx.get_local_storage("theme").map(|s| s.as_str()),
+            Some("dark")
+        );
+        assert_eq!(
+            ctx.get_auth_token("api.dev").map(|s| s.as_str()),
+            Some("Bearer token_xyz")
+        );
+    }
+
+    #[test]
+    fn test_ephemeral_identity_context_collision() {
+        use std::collections::HashSet;
+        use std::sync::{Arc, Mutex};
+        use std::thread;
+
+        let thread_count = 10;
+        let iters = 1000;
+        let mut handles = vec![];
+        let results = Arc::new(Mutex::new(Vec::new()));
+
+        for _ in 0..thread_count {
+            let results_clone = Arc::clone(&results);
+            handles.push(thread::spawn(move || {
+                let mut local_ids = Vec::new();
+                for _ in 0..iters {
+                    let ctx = IdentityContext::ephemeral("dev_host");
+                    local_ids.push(ctx.id);
+                }
+                results_clone.lock().unwrap().extend(local_ids);
+            }));
+        }
+
+        for h in handles {
+            h.join().unwrap();
+        }
+
+        let all_ids = results.lock().unwrap();
+        let mut unique_ids = HashSet::new();
+        let mut collisions = 0;
+        for id in all_ids.iter() {
+            if !unique_ids.insert(id.clone()) {
+                collisions += 1;
+            }
+        }
+
+        // Assert no collisions
+        assert_eq!(
+            collisions, 0,
+            "Found {} collisions in ephemeral ID generation!",
+            collisions
+        );
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct HistoryEntry {
+    pub sequence: u64,
+    pub visited_at: std::time::SystemTime,
+    pub url: String,
+    pub normalized_url: String,
+    pub title: String,
+    pub transition: String,
+}
+
+pub fn normalize_url(url: &str) -> String {
+    // Basic normalization: lowercase scheme and host, strip ports, resolve dots
+    let mut out = String::new();
+    let parts: Vec<&str> = url.splitn(2, "://").collect();
+    if parts.len() != 2 {
+        return url.to_string();
+    }
+    let scheme = parts[0].to_lowercase();
+    out.push_str(&scheme);
+    out.push_str("://");
+
+    let rest = parts[1];
+    let path_start = rest.find('/').unwrap_or(rest.len());
+    let authority = &rest[0..path_start];
+    let path_query = &rest[path_start..];
+
+    // parse host and port
+    let host_port: Vec<&str> = authority.split(':').collect();
+    let host = host_port[0].to_lowercase();
+    let port = if host_port.len() > 1 {
+        Some(host_port[1])
+    } else {
+        None
+    };
+
+    out.push_str(&host);
+    if let Some(p) = port {
+        if !((scheme == "http" && p == "80") || (scheme == "https" && p == "443")) {
+            out.push(':');
+            out.push_str(p);
+        }
+    }
+
+    if path_query.is_empty() {
+        out.push('/');
+    } else {
+        // resolve dot segments minimally
+        out.push_str(path_query);
+    }
+    out
+}
+
+#[cfg(test)]
+mod behavior_tests;
+
+mod closing;
+mod evaluation;
+mod lifecycle;
+mod navigation;

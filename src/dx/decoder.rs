@@ -136,53 +136,41 @@ impl DecoderStudio {
             return Ok(Vec::new());
         }
 
-        #[inline(always)]
-        fn b64_val(b: u8) -> Result<u32, &'static str> {
-            match b {
-                b'A'..=b'Z' => Ok((b - b'A') as u32),
-                b'a'..=b'z' => Ok((b - b'a' + 26) as u32),
-                b'0'..=b'9' => Ok((b - b'0' + 52) as u32),
-                b'+' | b'-' => Ok(62),
-                b'/' | b'_' => Ok(63),
-                _ => Err("Invalid base64 character"),
-            }
-        }
-
         let mut out = Vec::with_capacity((clean_bytes.len() * 3) / 4);
-        let mut i = 0;
-        while i < clean_bytes.len() {
-            let b0 = b64_val(clean_bytes[i])?;
-            let b1 = if i + 1 < clean_bytes.len() {
-                b64_val(clean_bytes[i + 1])?
-            } else {
-                0
-            };
-            let b2 = if i + 2 < clean_bytes.len() {
-                b64_val(clean_bytes[i + 2])?
-            } else {
-                0
-            };
-            let b3 = if i + 3 < clean_bytes.len() {
-                b64_val(clean_bytes[i + 3])?
-            } else {
-                0
-            };
-
-            let triple = (b0 << 18) | (b1 << 12) | (b2 << 6) | b3;
-
-            out.push(((triple >> 16) & 0xFF) as u8);
-            if i + 2 < clean_bytes.len() {
-                out.push(((triple >> 8) & 0xFF) as u8);
-            }
-            if i + 3 < clean_bytes.len() {
-                out.push((triple & 0xFF) as u8);
-            }
-
-            i += 4;
+        for chunk in clean_bytes.chunks(4) {
+            decode_base64_chunk(chunk, &mut out)?;
         }
 
         Ok(out)
     }
+}
+
+#[inline(always)]
+fn b64_val(b: u8) -> Result<u32, &'static str> {
+    match b {
+        b'A'..=b'Z' => Ok((b - b'A') as u32),
+        b'a'..=b'z' => Ok((b - b'a' + 26) as u32),
+        b'0'..=b'9' => Ok((b - b'0' + 52) as u32),
+        b'+' | b'-' => Ok(62),
+        b'/' | b'_' => Ok(63),
+        _ => Err("Invalid base64 character"),
+    }
+}
+
+fn decode_base64_chunk(chunk: &[u8], out: &mut Vec<u8>) -> Result<(), &'static str> {
+    let mut triple = 0;
+    for &byte in chunk {
+        triple = (triple << 6) | b64_val(byte)?;
+    }
+    triple <<= (4 - chunk.len()) * 6;
+    out.push(((triple >> 16) & 0xFF) as u8);
+    if chunk.len() > 2 {
+        out.push(((triple >> 8) & 0xFF) as u8);
+    }
+    if chunk.len() > 3 {
+        out.push((triple & 0xFF) as u8);
+    }
+    Ok(())
 }
 
 #[cfg(test)]

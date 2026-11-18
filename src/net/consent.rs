@@ -32,47 +32,48 @@ fn host_from_url(url: &str) -> Option<String> {
 
 /// True for loopback, RFC1918, `.localhost`, `.test`, `dev.local`.
 pub fn is_private_or_local_url(url: &str) -> bool {
-    let Some(host) = host_from_url(url) else {
+    host_from_url(url).is_some_and(|host| is_local_hostname(&host) || is_private_ipv4(&host))
+}
+
+fn is_local_hostname(host: &str) -> bool {
+    matches!(host, "localhost" | "127.0.0.1" | "::1" | "dev.local")
+        || host.ends_with(".localhost")
+        || host.ends_with(".test")
+}
+
+fn is_private_ipv4(host: &str) -> bool {
+    let Ok(std::net::IpAddr::V4(v4)) = host.parse::<std::net::IpAddr>() else {
         return false;
     };
-    if host == "localhost" || host == "127.0.0.1" || host == "::1" {
-        return true;
-    }
-    if host.ends_with(".localhost") || host.ends_with(".test") || host == "dev.local" {
-        return true;
-    }
-    if let Ok(std::net::IpAddr::V4(v4)) = host.parse::<std::net::IpAddr>() {
-        let o = v4.octets();
-        if o[0] == 10 || o[0] == 127 {
-            return true;
-        }
-        if o[0] == 172 && (16..=31).contains(&o[1]) {
-            return true;
-        }
-        if o[0] == 192 && o[1] == 168 {
-            return true;
-        }
-    }
-    false
+    matches!(
+        v4.octets(),
+        [10 | 127, ..] | [172, 16..=31, ..] | [192, 168, ..]
+    )
 }
 
 /// Block obvious cloud-metadata / link-local abuse targets (SEC-066).
 pub fn is_blocked_abuse_target(url: &str) -> bool {
     let lower = url.to_lowercase();
     let host = host_from_url(url).unwrap_or_default();
-    lower.contains("169.254.169.254")
-        || lower.contains("metadata.google")
-        || lower.contains("metadata.goog")
-        || lower.contains("metadata.azure.com")
-        || lower.contains("instance-data")
-        || lower.contains("100.100.100.200")
-        || lower.contains("168.63.129.16")
-        || lower.contains("[fd00:ec2::254]")
-        || lower.contains("fd00:ec2::254")
-        || host == "metadata"
-        || host.ends_with(".internal") && lower.contains("metadata")
-        || host == "kubernetes.default"
-        || host == "kubernetes.default.svc"
+    const BLOCKED_SUBSTRINGS: [&str; 9] = [
+        "169.254.169.254",
+        "metadata.google",
+        "metadata.goog",
+        "metadata.azure.com",
+        "instance-data",
+        "100.100.100.200",
+        "168.63.129.16",
+        "[fd00:ec2::254]",
+        "fd00:ec2::254",
+    ];
+    BLOCKED_SUBSTRINGS
+        .iter()
+        .any(|pattern| lower.contains(pattern))
+        || matches!(
+            host.as_str(),
+            "metadata" | "kubernetes.default" | "kubernetes.default.svc"
+        )
+        || (host.ends_with(".internal") && lower.contains("metadata"))
 }
 
 /// Require explicit lab consent for non-local public targets.
@@ -115,6 +116,15 @@ pub fn validate_locust_start(gate: LocustStartGate) -> Result<LocustConfig, Stri
         );
     }
 
+    validate_locust_limits(&gate, private)?;
+
+    let users = gate.users.max(1);
+    let ramp = gate.ramp_up_secs;
+    let runtime = gate.runtime_secs.max(1);
+    Ok(LocustConfig::new(url, users, ramp, runtime))
+}
+
+fn validate_locust_limits(gate: &LocustStartGate, private: bool) -> Result<(), String> {
     let user_cap = if private {
         LOCUST_MAX_USERS
     } else {
@@ -139,10 +149,7 @@ pub fn validate_locust_start(gate: LocustStartGate) -> Result<LocustConfig, Stri
         ));
     }
 
-    let users = gate.users.max(1);
-    let ramp = gate.ramp_up_secs;
-    let runtime = gate.runtime_secs.max(1);
-    Ok(LocustConfig::new(url, users, ramp, runtime))
+    Ok(())
 }
 
 #[cfg(test)]

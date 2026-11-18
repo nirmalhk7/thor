@@ -207,23 +207,7 @@ async fn handle_paused(
             fulfill(page, &event.request_id, &resp).await?;
         }
         TamperOutcome::Forward(fwd) => {
-            if fwd.is_modified {
-                let headers = to_header_entries(&fwd.headers);
-                let mut builder = ContinueRequestParams::builder()
-                    .request_id(event.request_id.clone())
-                    .url(fwd.url.clone())
-                    .method(fwd.method.clone())
-                    .headers(headers);
-                if let Some(body) = fwd.body.clone() {
-                    builder = builder.post_data(body);
-                }
-                let params = builder.build().map_err(|e| anyhow::anyhow!(e))?;
-                page.execute(params).await?;
-            } else {
-                page.execute(ContinueRequestParams::new(event.request_id.clone()))
-                    .await?;
-            }
-            tamper.record_history(fwd, None);
+            forward_request(page, tamper, &event.request_id, fwd).await?;
         }
         TamperOutcome::Pause => {
             // True hold: block CDP continue until UI forward/drop (or 30s timeout).
@@ -247,27 +231,37 @@ async fn handle_paused(
                     page.execute(params).await?;
                 }
                 crate::net::tamper::PauseRelease::Forward(fwd) => {
-                    if fwd.is_modified {
-                        let headers = to_header_entries(&fwd.headers);
-                        let mut builder = ContinueRequestParams::builder()
-                            .request_id(event.request_id.clone())
-                            .url(fwd.url.clone())
-                            .method(fwd.method.clone())
-                            .headers(headers);
-                        if let Some(body) = fwd.body.clone() {
-                            builder = builder.post_data(body);
-                        }
-                        let params = builder.build().map_err(|e| anyhow::anyhow!(e))?;
-                        page.execute(params).await?;
-                    } else {
-                        page.execute(ContinueRequestParams::new(event.request_id.clone()))
-                            .await?;
-                    }
-                    tamper.record_history(fwd, None);
+                    forward_request(page, tamper, &event.request_id, fwd).await?;
                 }
             }
         }
     }
+    Ok(())
+}
+
+async fn forward_request(
+    page: &Page,
+    tamper: &TrafficTamperEngine,
+    request_id: &chromiumoxide::cdp::browser_protocol::fetch::RequestId,
+    fwd: InterceptedRequest,
+) -> anyhow::Result<()> {
+    if fwd.is_modified {
+        let headers = to_header_entries(&fwd.headers);
+        let mut builder = ContinueRequestParams::builder()
+            .request_id(request_id.clone())
+            .url(fwd.url.clone())
+            .method(fwd.method.clone())
+            .headers(headers);
+        if let Some(body) = fwd.body.clone() {
+            builder = builder.post_data(body);
+        }
+        let params = builder.build().map_err(|e| anyhow::anyhow!(e))?;
+        page.execute(params).await?;
+    } else {
+        page.execute(ContinueRequestParams::new(request_id.clone()))
+            .await?;
+    }
+    tamper.record_history(fwd, None);
     Ok(())
 }
 

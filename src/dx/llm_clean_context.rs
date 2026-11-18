@@ -27,68 +27,7 @@ impl LlmCleanContext {
             };
         }
 
-        let mut out = String::with_capacity(raw_len / 4);
-        let mut in_tag = false;
-        let mut skip_content = false;
-        let mut skip_tag_depth = 0;
-
-        let mut chars = html.chars().peekable();
-        while let Some(ch) = chars.next() {
-            if ch == '<' {
-                in_tag = true;
-                let mut tag_buf = String::new();
-                while let Some(&next_ch) = chars.peek() {
-                    if next_ch == '>' || next_ch.is_whitespace() {
-                        break;
-                    }
-                    tag_buf.push(chars.next().unwrap());
-                }
-                let lower_tag = tag_buf.to_lowercase();
-
-                // Detect tags to skip content entirely
-                if lower_tag == "script"
-                    || lower_tag == "style"
-                    || lower_tag == "svg"
-                    || lower_tag == "path"
-                    || lower_tag == "noscript"
-                    || lower_tag == "iframe"
-                {
-                    skip_content = true;
-                    skip_tag_depth += 1;
-                } else if lower_tag.starts_with("/script")
-                    || lower_tag.starts_with("/style")
-                    || lower_tag.starts_with("/svg")
-                    || lower_tag.starts_with("/path")
-                    || lower_tag.starts_with("/noscript")
-                    || lower_tag.starts_with("/iframe")
-                {
-                    if skip_tag_depth > 0 {
-                        skip_tag_depth -= 1;
-                    }
-                    if skip_tag_depth == 0 {
-                        skip_content = false;
-                    }
-                }
-
-                // Add structural markdown headers
-                if !skip_content {
-                    match lower_tag.as_str() {
-                        "h1" => out.push_str("\n\n# "),
-                        "h2" => out.push_str("\n\n## "),
-                        "h3" => out.push_str("\n\n### "),
-                        "h4" => out.push_str("\n\n#### "),
-                        "p" | "div" => out.push('\n'),
-                        "li" => out.push_str("\n- "),
-                        "code" | "pre" => out.push_str(" `"),
-                        _ => {}
-                    }
-                }
-            } else if ch == '>' {
-                in_tag = false;
-            } else if !in_tag && !skip_content {
-                out.push(ch);
-            }
-        }
+        let out = DomCleaner::new(raw_len / 4).extract(html);
 
         // Clean up multiple newlines and whitespace
         let mut cleaned_lines = Vec::new();
@@ -112,6 +51,74 @@ impl LlmCleanContext {
             clean_markdown_len: clean_len,
             token_savings_percent: savings.max(0.0),
             markdown: clean_markdown,
+        }
+    }
+}
+
+struct DomCleaner {
+    out: String,
+    in_tag: bool,
+    skip_tag_depth: usize,
+}
+
+impl DomCleaner {
+    fn new(capacity: usize) -> Self {
+        Self {
+            out: String::with_capacity(capacity),
+            in_tag: false,
+            skip_tag_depth: 0,
+        }
+    }
+
+    fn extract(mut self, html: &str) -> String {
+        let mut chars = html.chars().peekable();
+        while let Some(ch) = chars.next() {
+            match ch {
+                '<' => {
+                    self.in_tag = true;
+                    let tag: String = std::iter::from_fn(|| {
+                        let &next = chars.peek()?;
+                        if next == '>' || next.is_whitespace() {
+                            None
+                        } else {
+                            chars.next()
+                        }
+                    })
+                    .collect();
+                    self.process_tag(&tag.to_lowercase());
+                }
+                '>' => self.in_tag = false,
+                _ if !self.in_tag && self.skip_tag_depth == 0 => self.out.push(ch),
+                _ => {}
+            }
+        }
+        self.out
+    }
+
+    fn process_tag(&mut self, tag: &str) {
+        const SKIPPED: [&str; 6] = ["script", "style", "svg", "path", "noscript", "iframe"];
+        if SKIPPED.contains(&tag) {
+            self.skip_tag_depth += 1;
+        } else if let Some(closing) = tag.strip_prefix('/') {
+            if SKIPPED.iter().any(|name| closing.starts_with(name)) {
+                self.skip_tag_depth = self.skip_tag_depth.saturating_sub(1);
+            }
+        }
+        if self.skip_tag_depth == 0 {
+            self.push_structure(tag);
+        }
+    }
+
+    fn push_structure(&mut self, tag: &str) {
+        match tag {
+            "h1" => self.out.push_str("\n\n# "),
+            "h2" => self.out.push_str("\n\n## "),
+            "h3" => self.out.push_str("\n\n### "),
+            "h4" => self.out.push_str("\n\n#### "),
+            "p" | "div" => self.out.push('\n'),
+            "li" => self.out.push_str("\n- "),
+            "code" | "pre" => self.out.push_str(" `"),
+            _ => {}
         }
     }
 }

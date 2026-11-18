@@ -2,7 +2,7 @@
 
 **Document type:** Security requirements (not implementation)  
 **Audience:** Developer / Tester / Perf agents  
-**Scope grounding:** `src/net` (tamper, ssl_ca, security_shield, locust), `src/dx` (decoder, wasm_plugin), `src/engine/profiles.rs`, chrome↔Rust IPC in `shell/`  
+**Scope grounding:** `src/net` (tamper, ssl_ca, security_shield, locust), `src/dx` (decoder, wasm_plugin), `src/engine/profiles.rs`, trusted workspace IPC in `src/browser/cef/host/workspace.rs` and `src/workbench/commands.rs`.
 **Status:** Binding for v1 product behavior; some surfaces (WASM/MV3, full CDP Fetch MITM) are partially deferred but still constrained here.
 
 ---
@@ -109,7 +109,7 @@ Aligned with `ProfileMode` / `ProfileConfig` in `src/engine/profiles.rs`.
 
 ## 4. Traffic tamper rules
 
-Grounded in `TrafficTamperEngine` / `TamperRule` (`src/net/tamper.rs`). Interception defaults off today — keep that.
+Grounded in `TrafficTamperEngine` / `TamperRule` (`src/net/tamper/mod.rs`). Interception defaults off today — keep that.
 
 ### MUST
 
@@ -288,7 +288,7 @@ Grounded in `SecurityShield`.
 
 ## 11. Secure IPC (chrome ↔ content / Rust)
 
-Chrome is wry webview HTML/JS; content is Chromium; Rust handles privileged actions (`shell/mod.rs` IPC allowlist).
+Thor embeds CEF browser views. Rust handles privileged actions; workspace requests pass the trust checks in `src/browser/cef/host/workspace.rs` and command dispatch in `src/workbench/commands.rs`.
 
 ### MUST
 

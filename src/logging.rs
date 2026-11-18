@@ -429,18 +429,26 @@ pub fn init_panic_hook() {
     }));
 }
 
+#[doc(hidden)]
 #[macro_export]
-macro_rules! thor_info {
-    ($target:expr, $($arg:tt)+) => {
+macro_rules! thor_log_record {
+    ($level:expr, $target:expr, $($arg:tt)+) => {
         $crate::logging::Logger::global().log(
             $crate::logging::LogRecord::new(
-                $crate::logging::LogLevel::Info,
+                $level,
                 $target,
                 format!($($arg)+),
                 Some(file!()),
                 Some(line!()),
             )
         )
+    };
+}
+
+#[macro_export]
+macro_rules! thor_info {
+    ($target:expr, $($arg:tt)+) => {
+        $crate::thor_log_record!($crate::logging::LogLevel::Info, $target, $($arg)+)
     };
     ($($arg:tt)+) => {
         $crate::thor_info!("thor", $($arg)+)
@@ -450,15 +458,7 @@ macro_rules! thor_info {
 #[macro_export]
 macro_rules! thor_warn {
     ($target:expr, $($arg:tt)+) => {
-        $crate::logging::Logger::global().log(
-            $crate::logging::LogRecord::new(
-                $crate::logging::LogLevel::Warn,
-                $target,
-                format!($($arg)+),
-                Some(file!()),
-                Some(line!()),
-            )
-        )
+        $crate::thor_log_record!($crate::logging::LogLevel::Warn, $target, $($arg)+)
     };
     ($($arg:tt)+) => {
         $crate::thor_warn!("thor", $($arg)+)
@@ -468,15 +468,7 @@ macro_rules! thor_warn {
 #[macro_export]
 macro_rules! thor_err {
     ($target:expr, $($arg:tt)+) => {
-        $crate::logging::Logger::global().log(
-            $crate::logging::LogRecord::new(
-                $crate::logging::LogLevel::Error,
-                $target,
-                format!($($arg)+),
-                Some(file!()),
-                Some(line!()),
-            )
-        )
+        $crate::thor_log_record!($crate::logging::LogLevel::Error, $target, $($arg)+)
     };
     ($($arg:tt)+) => {
         $crate::thor_err!("thor", $($arg)+)
@@ -486,15 +478,7 @@ macro_rules! thor_err {
 #[macro_export]
 macro_rules! thor_debug {
     ($target:expr, $($arg:tt)+) => {
-        $crate::logging::Logger::global().log(
-            $crate::logging::LogRecord::new(
-                $crate::logging::LogLevel::Debug,
-                $target,
-                format!($($arg)+),
-                Some(file!()),
-                Some(line!()),
-            )
-        )
+        $crate::thor_log_record!($crate::logging::LogLevel::Debug, $target, $($arg)+)
     };
     ($($arg:tt)+) => {
         $crate::thor_debug!("thor", $($arg)+)
@@ -504,15 +488,7 @@ macro_rules! thor_debug {
 #[macro_export]
 macro_rules! thor_trace {
     ($target:expr, $($arg:tt)+) => {
-        $crate::logging::Logger::global().log(
-            $crate::logging::LogRecord::new(
-                $crate::logging::LogLevel::Trace,
-                $target,
-                format!($($arg)+),
-                Some(file!()),
-                Some(line!()),
-            )
-        )
+        $crate::thor_log_record!($crate::logging::LogLevel::Trace, $target, $($arg)+)
     };
     ($($arg:tt)+) => {
         $crate::thor_trace!("thor", $($arg)+)

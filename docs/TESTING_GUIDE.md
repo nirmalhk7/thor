@@ -2,7 +2,7 @@
 
 ## Overview
 
-Thor enforces strict testing discipline: **no code change is declared complete without empirical automated test verification**. The suite covers library unit tests, Engineer Feature Suite regression packs, integration tests, MCP RPC endpoints, performance/SLA benches, and concurrency safety checks.
+Thor enforces strict testing discipline: **no code change is declared complete without empirical automated test verification**. The suite covers library unit tests, Engineer Feature Suite regression packs, integration tests, MCP RPC endpoints, performance/SLA benches, and concurrency safety checks. Some tests change process-wide environment variables and `AppState`; run regression suites with `--test-threads=1`, as CI does.
 
 ---
 
@@ -11,8 +11,8 @@ Thor enforces strict testing discipline: **no code change is declared complete w
 ### 1. Library Unit Tests (`cargo test --lib`)
 
 ```bash
-cargo test --lib
-cargo test --lib features::   # FeatureEngine, orchestrator, domain engines, SLAs
+cargo test --locked --lib -- --test-threads=1
+cargo test --locked --lib features:: -- --test-threads=1
 ```
 
 Feature-related lib coverage includes registry (144), domain analyzers, CDP bridge ingest/parse, quarantine hydrate/persist, SoftNav refuse-all-zero, HMAC webhook vectors, and feature-path SLA enforcement.
@@ -30,31 +30,34 @@ Feature-related lib coverage includes registry (144), domain analyzers, CDP brid
 | `features_wave5_tests` | SoftNav on `LoadMetrics` + `lcp_media_bytes`, CiBundle non-empty artifacts, quarantine `persist_ok` |
 
 ```bash
-cargo test --test features_tests
-cargo test --test features_v2_tests
-cargo test --test features_wave2_tests
-cargo test --test features_wave4_tests
-cargo test --test features_wave5_tests
+cargo test --locked --test features_tests -- --test-threads=1
+cargo test --locked --test features_v2_tests -- --test-threads=1
+cargo test --locked --test features_wave2_tests -- --test-threads=1
+cargo test --locked --test features_wave4_tests -- --test-threads=1
+cargo test --locked --test features_wave5_tests -- --test-threads=1
 ```
 
 Registry invariant: `FeatureId::ALL.len() == 144` (asserted in lib + wave packs).
 
 ---
 
-### 3. MCP Server Test Suite (`cargo test --lib mcp`)
+### 3. MCP integration suites
 
 ```bash
-cargo test --lib mcp
+cargo test --locked --test mcp_protocol_tests -- --test-threads=1
+cargo test --locked --test mcp_transport_tests -- --test-threads=1
+cargo test --locked --test mcp_stdio_tests -- --test-threads=1
+cargo test --locked --test mcp_connection_tests -- --test-threads=1
 ```
 
-Covers initialize, tools/list, tools/call graceful paths, SSE + JSON-RPC HTTP endpoints.
+Covers JSON-RPC validation, browser command dispatch and navigation generations, authenticated HTTP/SSE transports, stdio forwarding, and private connection credentials. Tool schemas and transport contracts are documented in [MCP_SERVER.md](MCP_SERVER.md).
 
 ---
 
 ### 4. Integration Tests (`cargo test --test integration_tests`)
 
 ```bash
-cargo test --test integration_tests
+cargo test --locked --test integration_tests -- --test-threads=1
 ```
 
 Cross-module contracts: AppState, history scope, Locust local listener, profile toggle, shield/tamper, palette payloads.
@@ -63,23 +66,35 @@ Cross-module contracts: AppState, history scope, Locust local listener, profile 
 
 ### 5. Live Chromium Launch Smoke Test (`live_launch_smoke`)
 
-Requires an installed Chrome/Chromium executable:
+This ignored test exercises the standalone CDP runtime, not the embedded CEF product. Configure an owned browser through `THOR_CHROMIUM_PATH`; system browser discovery additionally requires `THOR_ALLOW_SYSTEM_CHROME=1`.
 
 ```bash
-cargo test --lib live_launch_smoke -- --ignored
+cargo test --locked --lib live_launch_smoke -- --ignored --test-threads=1
 ```
 
-DevCC **`from_active_tab`** happy-path also needs a live `TabSession` evaluator (hook published from `chromium_tabs`). Without Chromium, invoke must return a clear `Err` — never empty-success theater.
+DevCC **`from_active_tab`** paths need an evaluator registered through `CdpBridge::install_active_evaluator` in `src/features/cdp_bridge/mod.rs`. Without that evaluator, invocation must return a clear `Err`. A running browser alone does not prove this hook is installed. Native CEF browser command dispatch lives separately in `src/browser/cef/host/commands.rs`.
+
+The standalone prewarm suites in `tests/test_prewarm_exhaust.rs` and `tests/test_runtime_prewarm.rs` also require an owned Chromium executable. They are explicitly ignored in ordinary regression runs. Run either with `--ignored --test-threads=1` after configuring `THOR_CHROMIUM_PATH`; a browser startup failure then fails the test instead of silently returning success.
 
 ---
 
 ## Benchmark Suite (`benches/`)
 
+Choose benchmarks by the operation their source measures:
+
+| Target | Actual measurement |
+| --- | --- |
+| `shield_sanitize_bench` | Security shield URL sanitization |
+| `locust_scoring_bench` | Locust metric scoring |
+| `cmd_palette_bench` | Palette search, URL sanitization, stack detection, and metric scoring |
+| `consent_classification_bench` | Private/local host classification |
+| `feature_sla_bench` | Feature-path latency SLAs |
+
 ```bash
-cargo bench --bench cold_start_bench
-cargo bench --bench ipc_bench
+cargo bench --bench shield_sanitize_bench
+cargo bench --bench locust_scoring_bench
 cargo bench --bench cmd_palette_bench
-cargo bench --bench memory_soak_bench
+cargo bench --bench consent_classification_bench
 cargo bench --bench feature_sla_bench   # Feature-path latency SLAs
 ```
 
@@ -88,7 +103,11 @@ cargo bench --bench feature_sla_bench   # Feature-path latency SLAs
 ## Code Quality & Warning Discipline
 
 ```bash
-cargo check
+make check-structure
+cargo check --locked --workspace --all-targets
+cargo test --locked --workspace -- --test-threads=1
 ```
 
-Prefer fixing warnings in touched modules; do not expand the registry without updating `FeatureId::ALL`, orchestrator arms, DevCC count, and the feature test packs.
+`check-structure` exercises the checker CLI, then checks Rust filenames, directory-owned module entries, and parent module declarations. It does not replace Rust compilation or prove feature behavior.
+
+Prefer fixing warnings in touched modules; do not expand the registry without updating `FeatureId::ALL`, `src/features/catalog.rs`, handler dispatch under `src/features/orchestrator/`, DevCC count, and the feature test packs.

@@ -6,7 +6,7 @@ Thor provides a comprehensive, privileged security testing suite embedded direct
 
 ---
 
-## 1. IDOR Matrix Engine (`src/net/idor_matrix.rs`)
+## 1. IDOR Matrix Engine (`src/net/idor_matrix/mod.rs`)
 
 The **IDOR (Insecure Direct Object Reference) Matrix Engine** automates authorization testing across multiple user roles (`Admin`, `Standard User`, `Anonymous`).
 
@@ -31,7 +31,7 @@ graph LR
 
 ---
 
-## 2. Traffic Tamper Engine & Response Mocking (`src/net/tamper.rs`)
+## 2. Traffic Tamper Engine & Response Mocking (`src/net/tamper/mod.rs`)
 
 The **Traffic Tamper Engine** operates directly on outgoing and incoming HTTP traffic via CDP `Fetch` domain integration.
 
@@ -88,4 +88,4 @@ The **Decoder Studio** automatically identifies and decodes complex payload form
 
 ## Security Domain Feature Suite
 
-Twenty-four Security `FeatureId`s (authz matrix, JWT deep, CORS/CSP forensics, consent-gated fixation/SSRF, GraphQL authz, race analyzer, SRI, OOB listener, and more) live under `src/features/security.rs` with lab consent in `src/net/consent.rs`. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.
+Twenty-four Security `FeatureId`s (authz matrix, JWT deep, CORS/CSP forensics, consent-gated fixation/SSRF, GraphQL authz, race analyzer, SRI, OOB listener, and more) live under `src/features/security/mod.rs` with lab consent in `src/net/consent.rs`. Invoke from **Cmd+⇧K → Developer Control Center**. See [FEATURES.md](FEATURES.md) §8.

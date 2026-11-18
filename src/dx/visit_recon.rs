@@ -272,14 +272,7 @@ impl VisitReconEngine {
             .unwrap_or(url_hint)
             .to_string();
         let html = raw.get("html").and_then(|v| v.as_str()).unwrap_or("");
-        let mut header_map: BTreeMap<String, String> = BTreeMap::new();
-        if let Some(obj) = raw.get("headers").and_then(|v| v.as_object()) {
-            for (k, v) in obj {
-                if let Some(s) = v.as_str() {
-                    header_map.insert(k.to_lowercase(), s.to_string());
-                }
-            }
-        }
+        let header_map = capture_headers(raw);
 
         let sec = SecurityEngine::new();
         let headers = if header_map.is_empty() {
@@ -397,19 +390,7 @@ impl VisitReconEngine {
             .and_then(|v| serde_json::from_value(v.clone()).ok());
 
         // Build security details from header_map & cookies
-        let mut csp_directives = BTreeMap::new();
-        if let Some(csp) = header_map.get("content-security-policy") {
-            for part in csp.split(';') {
-                let part = part.trim();
-                if let Some(space_idx) = part.find(' ') {
-                    let dir = part[..space_idx].trim().to_string();
-                    let val = part[space_idx + 1..].trim().to_string();
-                    csp_directives.insert(dir, val);
-                } else if !part.is_empty() {
-                    csp_directives.insert(part.to_string(), "".to_string());
-                }
-            }
-        }
+        let csp_directives = csp_directives(&header_map);
 
         let cors_mode = match header_map
             .get("access-control-allow-origin")
@@ -533,6 +514,37 @@ fn redact_value(v: &str) -> String {
     } else {
         "[REDACTED]".into()
     }
+}
+
+fn capture_headers(raw: &serde_json::Value) -> BTreeMap<String, String> {
+    let mut header_map: BTreeMap<String, String> = BTreeMap::new();
+    if let Some(obj) = raw.get("headers").and_then(|v| v.as_object()) {
+        for (k, v) in obj {
+            if let Some(s) = v.as_str() {
+                header_map.insert(k.to_lowercase(), s.to_string());
+            }
+        }
+    }
+
+    header_map
+}
+
+fn csp_directives(header_map: &BTreeMap<String, String>) -> BTreeMap<String, String> {
+    let mut csp_directives = BTreeMap::new();
+    if let Some(csp) = header_map.get("content-security-policy") {
+        for part in csp.split(';') {
+            let part = part.trim();
+            if let Some(space_idx) = part.find(' ') {
+                let dir = part[..space_idx].trim().to_string();
+                let val = part[space_idx + 1..].trim().to_string();
+                csp_directives.insert(dir, val);
+            } else if !part.is_empty() {
+                csp_directives.insert(part.to_string(), "".to_string());
+            }
+        }
+    }
+
+    csp_directives
 }
 
 #[cfg(test)]

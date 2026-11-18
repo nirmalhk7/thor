@@ -42,6 +42,8 @@ struct ToolHandler {
 }
 
 impl BrowserSideHandler for ToolHandler {
+    // Approved Qlty function-parameters exception for this callback only:
+    // CEF's BrowserSideHandler trait requires all six parameters.
     fn on_query_str(
         &self,
         _browser: Option<Browser>,

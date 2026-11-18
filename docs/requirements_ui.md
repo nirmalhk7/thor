@@ -2,7 +2,7 @@
 
 **Document type:** Product / UI requirements (not implementation)  
 **Audience:** Developer, Tester, Perf agent  
-**Context:** Matte obsidian aesthetic; native macOS AppKit unified titlebar (52px) is the live chrome; HTML chrome in `gui.rs` is legacy reference for tool surfaces; dual always-on WKWebViews are a known hit-testing failure mode.
+**Context:** Native browser controls live in `src/browser/cef/host/`; embedded developer surfaces live in `src/workbench/`. Current visual tokens are defined in `DESIGN.md`. Preserve native omnibox and action hit-testing when changing either surface.
 
 ---
 

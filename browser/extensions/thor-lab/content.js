@@ -1,9 +1,11 @@
 // Detect common frameworks on the page and post a summary to the SW.
 (function () {
   try {
-    const react =
+    const hasReactRenderers = () =>
       !!(window.__REACT_DEVTOOLS_GLOBAL_HOOK__ && window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers &&
-        window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size) ||
+        window.__REACT_DEVTOOLS_GLOBAL_HOOK__.renderers.size);
+    const react =
+      hasReactRenderers() ||
       !!document.querySelector("[data-reactroot],[data-reactid]") ||
       !!(window.React && window.React.version);
     const vue = !!(window.__VUE__ || window.Vue || document.querySelector("[data-v-]"));
