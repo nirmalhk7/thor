@@ -30,6 +30,13 @@ jobs:
         run: |
           python3 -m unittest discover -s tests -p test_repository_structure.py
           python3 scripts/check_structure.py
+      - name: Test updater packaging
+        run: python3 -m unittest discover -s tests -p test_sparkle_updates.py
+      - name: Test update signing with disposable keys
+        run: |
+          SPARKLE_DIR="$(bash scripts/setup_sparkle.sh)"
+          export SPARKLE_DIR
+          python3 -m unittest discover -s tests -p test_sparkle_signing.py
       - name: Check all Rust targets
         run: cargo check --locked --workspace --all-targets
       - name: Run all Rust tests
@@ -93,7 +100,23 @@ jobs:
         if: steps.existing.outputs.publish == 'true'
         env:
           VERSION: ${{ steps.semver.outputs.version }}
-        run: ./scripts/package_macos.sh "$VERSION"
+          THOR_UPDATE_PUBLIC_KEY: ${{ vars.THOR_UPDATE_PUBLIC_KEY }}
+          THOR_UPDATE_PRIVATE_KEY: ${{ secrets.THOR_UPDATE_PRIVATE_KEY }}
+        run: |
+          set -euo pipefail
+          : "${THOR_UPDATE_PUBLIC_KEY:?Configure the public update key in repository variables}"
+          : "${THOR_UPDATE_PRIVATE_KEY:?Configure the private update key in repository secrets}"
+          # Keep the signing secret out of compiler and packager environments.
+          unset THOR_UPDATE_PRIVATE_KEY
+          SPARKLE_DIR="$(bash scripts/setup_sparkle.sh)"
+          export SPARKLE_DIR
+          ./scripts/package_macos.sh "$VERSION"
+      - name: Sign update archive and feed
+        if: steps.existing.outputs.publish == 'true'
+        env:
+          VERSION: ${{ steps.semver.outputs.version }}
+          THOR_UPDATE_PRIVATE_KEY: ${{ secrets.THOR_UPDATE_PRIVATE_KEY }}
+        run: bash scripts/sign_update.sh "$VERSION"
       - name: Verify release archives
         if: steps.existing.outputs.publish == 'true'
         run: shasum -a 256 -c dist/checksums.txt
@@ -118,6 +141,7 @@ jobs:
             "dist/Thor-v${VERSION}-macos.zip" \
             "dist/Thor-v${VERSION}-macos.dmg" \
             dist/checksums.txt \
+            dist/appcast.xml \
             --target "$(git rev-parse HEAD)" \
             --title "Thor Browser $TAG" \
             --generate-notes

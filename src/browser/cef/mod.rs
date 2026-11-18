@@ -3,6 +3,8 @@
 mod host;
 #[cfg(target_os = "macos")]
 mod mac;
+#[cfg(target_os = "macos")]
+mod updates;
 
 use std::path::{Path, PathBuf};
 
@@ -75,6 +77,8 @@ pub fn run() -> anyhow::Result<()> {
         host::release();
         anyhow::bail!("CEF initialization failed");
     }
+    #[cfg(target_os = "macos")]
+    updates::setup_menu();
     run_message_loop();
     host::release();
     shutdown();

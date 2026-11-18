@@ -26,6 +26,20 @@ for helper in "Helper" "Helper (GPU)" "Helper (Renderer)" "Helper (Plugin)" "Hel
   }
 done
 
+if [[ -n "${THOR_UPDATE_PUBLIC_KEY:-}" ]]; then
+  : "${SPARKLE_DIR:?Set SPARKLE_DIR to the pinned Sparkle distribution}"
+  python3 scripts/sparkle_updates.py --app "$APP" \
+    --sparkle-dir "$SPARKLE_DIR" --public-key "$THOR_UPDATE_PUBLIC_KEY"
+  # Seal our unsigned CEF bundle for Sparkle's integrity checks. Preserve the
+  # upstream Sparkle framework's existing signature and helper entitlements.
+  codesign --force --sign - "$FRAMEWORK"
+  for helper in "$APP"/Contents/Frameworks/Thor\ Helper*.app; do
+    codesign --force --sign - "$helper"
+  done
+  codesign --force --sign - "$APP"
+  codesign --verify --deep --strict "$APP"
+fi
+
 ZIP="dist/Thor-v${VERSION}-macos.zip"
 DMG="dist/Thor-v${VERSION}-macos.dmg"
 ditto -c -k --sequesterRsrc --keepParent "$APP" "$ZIP"
