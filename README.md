@@ -1,3 +1,5 @@
+<img src="assets/thor-logo.png" alt="Thor browser logo" width="160" height="160">
+
 # Thor
 
 > **A high-performance, ephemeral developer browser where every tab is an isolated experiment and every interaction can become a test, trace, benchmark, finding, or reproducible artifact.**
