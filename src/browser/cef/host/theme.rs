@@ -5,12 +5,75 @@ pub(super) const INSET: u32 = 0xff101419;
 pub(super) const TEXT: u32 = 0xffedf1f5;
 pub(super) const MUTED: u32 = 0xffa6b0bd;
 pub(super) const ACCENT: u32 = 0xff90b8f8;
+pub(super) const CHROME: u32 = 0xff000000;
+pub(super) const FIELD: u32 = 0xff393939;
+pub(super) const DRAWER: u32 = 0xff262626;
+pub(super) const SCRIM: u32 = 0x80262626;
+pub(super) const TOOLBAR_HEIGHT: i32 = 35;
+pub(super) const FIELD_HEIGHT: i32 = 22;
+pub(super) const DRAWER_WIDTH: i32 = 281;
+pub(super) const TRAFFIC_LIGHT_SPACE: i32 = 82;
+
+pub(super) fn drawer_bounds(content: Rect) -> (Rect, Rect) {
+    let drawer_width = content.width.clamp(0, DRAWER_WIDTH);
+    let scrim_width = content.width.max(0) - drawer_width;
+    (
+        Rect {
+            width: scrim_width,
+            ..content
+        },
+        Rect {
+            x: content.x + scrim_width,
+            width: drawer_width,
+            ..content
+        },
+    )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn drawer_and_scrim_cover_only_content_and_share_an_edge() {
+        let content = Rect {
+            x: 0,
+            y: 35,
+            width: 712,
+            height: 380,
+        };
+        let (scrim, drawer) = drawer_bounds(content);
+        assert_eq!(
+            (scrim.x, scrim.y, scrim.width, scrim.height),
+            (0, 35, 431, 380)
+        );
+        assert_eq!(
+            (drawer.x, drawer.y, drawer.width, drawer.height),
+            (431, 35, 281, 380)
+        );
+    }
+
+    #[test]
+    fn drawer_stays_within_the_content_when_space_is_limited() {
+        let (scrim, drawer) = drawer_bounds(Rect {
+            x: 12,
+            y: 60,
+            width: 180,
+            height: 250,
+        });
+        assert_eq!(scrim.width, 0);
+        assert_eq!(
+            (drawer.x, drawer.y, drawer.width, drawer.height),
+            (12, 60, 180, 250)
+        );
+    }
+}
 
 pub(super) fn apply(window: &Window) {
     for (id, color) in [
         (ColorId::COLOR_PRIMARY_BACKGROUND, BG),
         (ColorId::COLOR_WINDOW_BACKGROUND, BG),
-        (ColorId::COLOR_TEXTFIELD_BACKGROUND, INSET),
+        (ColorId::COLOR_TEXTFIELD_BACKGROUND, FIELD),
         (ColorId::COLOR_TEXTFIELD_FOREGROUND, TEXT),
         (ColorId::COLOR_TEXTFIELD_FOREGROUND_PLACEHOLDER, MUTED),
         (ColorId::COLOR_BUTTON_FOREGROUND, TEXT),

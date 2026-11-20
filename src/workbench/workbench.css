@@ -9,3 +9,9 @@ button,input,select,textarea{font:inherit;color:inherit;border:1px solid var(--l
 .workspace-home{display:flex;justify-content:space-between;color:var(--text);text-decoration:none;margin-bottom:22px;font-size:15px;font-weight:600}.workspace-home span{font-size:12px;color:var(--muted);font-weight:400}.workspace-security{color:var(--accent);text-decoration:none;margin-top:24px;padding:8px 0}.workspace-security:hover{text-decoration:underline;text-underline-offset:4px}.workspace-home:focus-visible,.workspace-security:focus-visible{outline:2px solid var(--accent);outline-offset:4px}
 
 input::placeholder,textarea::placeholder{color:var(--muted);opacity:1}
+@media(max-width:360px){
+  main,aside{padding-inline:12px}
+  .editor-tabs{flex-wrap:wrap;gap:0 12px}
+  .request-line #url{order:-1;flex:0 0 100%}
+  .save-line #request-title{flex-basis:100%}
+}

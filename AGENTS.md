@@ -118,6 +118,11 @@ make check-structure
 
 Live Chromium smoke test is `#[ignore]` (`live_launch_smoke`) — needs Thor-owned browser. DevCC `from_active_tab` requires a live evaluator; without Chromium it must `Err` (never empty-success theater).
 
+## Chromium process cleanup
+
+- Track the Thor Chromium browser process and its helpers when running tests, smoke checks, or diagnostics. On completion or failure, close the browser through its normal shutdown path and check for leftover processes, including reparented crashpad helpers.
+- Before reporting completion, send `SIGTERM` to any confirmed leftover Thor Chromium processes. Recheck after a short wait and use `SIGKILL` only for confirmed survivors. Verify the browser and helpers exited. Confirm ownership with the executable path and process tree or recorded launch PIDs. Preserve active user browser sessions and other Chromium instances.
+
 ## Edit discipline
 
 - Match existing style; minimal diffs.

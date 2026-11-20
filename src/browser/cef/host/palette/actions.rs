@@ -10,11 +10,19 @@ pub(super) fn key(event: &KeyEvent) -> i32 {
     }
     match event.windows_key_code {
         27 => defer(None),
-        13 => choose_selected(),
-        38 | 40 => move_selection(event.windows_key_code == 40),
+        13 if search_has_focus() => choose_selected(),
+        38 | 40 if search_has_focus() => move_selection(event.windows_key_code == 40),
         _ => return 0,
     }
     1
+}
+
+fn search_has_focus() -> bool {
+    MENU.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|menu| menu.search.has_focus() == 1)
+    })
 }
 
 fn is_key_down(event: &KeyEvent) -> bool {
@@ -61,7 +69,8 @@ fn choose(index: usize) {
     close();
     match mode {
         Mode::Sites => choose_site(item),
-        Mode::Toolbox => choose_tool(item),
+        Mode::Toolbox | Mode::Security => choose_tool(item),
+        Mode::Extensions => {}
     }
 }
 
@@ -86,6 +95,9 @@ fn choose_tool(item: PaletteItem) {
         "inspect" => perform(&Action::Inspect),
         "new_tab" => perform(&Action::New),
         "bookmark" => bookmark_current_page(),
+        "api" => perform(&Action::ApiDrawer),
+        "security" => open(Mode::Security),
+        "extensions" => open(Mode::Extensions),
         _ => perform(&Action::OpenTool(item.path_or_url)),
     }
 }
@@ -129,5 +141,5 @@ wrap_button_delegate! {
 
 wrap_task! {
     struct ChoiceTask {index:Option<usize>}
-    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{close();}}}
+    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{perform(&Action::DismissDrawer);}}}
 }

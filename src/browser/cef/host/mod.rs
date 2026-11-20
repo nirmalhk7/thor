@@ -227,7 +227,7 @@ fn add_button(panel: &Panel, title: &str, action: Action) -> Option<LabelButton>
         width: 44,
         height: 34,
     }));
-    button.set_background_color(theme::BG);
+    button.set_background_color(theme::CHROME);
     panel.add_child_view(Some(&mut View::from(&button)));
     Some(button)
 }
@@ -237,12 +237,12 @@ fn add_icon(panel: &Panel, title: &str, icon: theme::Icon, action: Action) -> Op
     button.set_accessible_name(Some(&CefString::from(title)));
     button.set_tooltip_text(Some(&CefString::from(title)));
     button.set_minimum_size(Some(&Size {
-        width: 32,
-        height: 34,
+        width: 24,
+        height: 29,
     }));
     button.set_maximum_size(Some(&Size {
-        width: 32,
-        height: 34,
+        width: 24,
+        height: 29,
     }));
     for state in [
         ButtonState::NORMAL,
@@ -260,6 +260,28 @@ fn add_icon(panel: &Panel, title: &str, icon: theme::Icon, action: Action) -> Op
         }
     }
     Some(button)
+}
+
+fn add_shortcut(panel: &Panel, legend: &str, name: &str, action: Action) {
+    if let Some(button) = add_button(panel, legend, action) {
+        button.set_accessible_name(Some(&CefString::from(name)));
+        button.set_tooltip_text(Some(&CefString::from(name)));
+        button.set_background_color(theme::FIELD);
+        button.set_font_list(Some(&CefString::from("Arial, 11px")));
+        button.set_minimum_size(Some(&Size {
+            width: 0,
+            height: theme::FIELD_HEIGHT,
+        }));
+        button.set_maximum_size(Some(&Size {
+            width: 0,
+            height: theme::FIELD_HEIGHT,
+        }));
+        button.set_insets(Some(&Insets {
+            left: 5,
+            right: 5,
+            ..Default::default()
+        }));
+    }
 }
 
 fn shortcut_action(event: &KeyEvent) -> Option<Action> {
@@ -324,6 +346,23 @@ wrap_task! {
     impl Task {fn execute(&self){perform(&self.action);}}
 }
 
+fn update_drag_regions(window: &Window) {
+    if !cfg!(target_os = "macos") {
+        return;
+    }
+    let width = (window.size().width - theme::TRAFFIC_LIGHT_SPACE).max(0);
+    let strip = |y| DraggableRegion {
+        bounds: Rect {
+            x: theme::TRAFFIC_LIGHT_SPACE,
+            y,
+            width,
+            height: 3,
+        },
+        draggable: 1,
+    };
+    window.set_draggable_regions(Some(&[strip(0), strip(theme::TOOLBAR_HEIGHT - 3)]));
+}
+
 fn create_window(window: &Window) -> anyhow::Result<()> {
     theme::apply(window);
     let root = panel_create(None).ok_or_else(|| anyhow::anyhow!("CEF root panel unavailable"))?;
@@ -335,36 +374,64 @@ fn create_window(window: &Window) -> anyhow::Result<()> {
         }))
         .ok_or_else(|| anyhow::anyhow!("CEF root layout unavailable"))?;
     let toolbar = panel_create(None).ok_or_else(|| anyhow::anyhow!("CEF toolbar unavailable"))?;
-    toolbar.set_background_color(theme::BG);
+    toolbar.set_background_color(theme::CHROME);
     let toolbar_layout = toolbar
         .set_to_box_layout(Some(&BoxLayoutSettings {
             horizontal: 1,
-            minimum_cross_axis_size: 46,
+            minimum_cross_axis_size: theme::TOOLBAR_HEIGHT - 6,
             between_child_spacing: 4,
-            inside_border_horizontal_spacing: 10,
-            inside_border_vertical_spacing: 6,
+            inside_border_insets: Insets {
+                top: 3,
+                bottom: 3,
+                left: if cfg!(target_os = "macos") {
+                    theme::TRAFFIC_LIGHT_SPACE + 7
+                } else {
+                    10
+                },
+                right: 10,
+            },
             cross_axis_alignment: AxisAlignment::CENTER,
             ..Default::default()
         }))
         .ok_or_else(|| anyhow::anyhow!("CEF toolbar layout unavailable"))?;
     let back = add_icon(&toolbar, "Back", theme::Icon::Back, Action::Back);
-    let forward = add_icon(&toolbar, "Forward", theme::Icon::Forward, Action::Forward);
     add_icon(&toolbar, "Reload", theme::Icon::Reload, Action::Reload);
-    add_icon(&toolbar, "Workspace", theme::Icon::Home, Action::Home);
+    let forward = add_icon(&toolbar, "Forward", theme::Icon::Forward, Action::Forward);
+    let omnibox =
+        panel_create(None).ok_or_else(|| anyhow::anyhow!("CEF address panel unavailable"))?;
+    omnibox.set_background_color(theme::FIELD);
+    let omnibox_layout = omnibox
+        .set_to_box_layout(Some(&BoxLayoutSettings {
+            horizontal: 1,
+            between_child_spacing: 3,
+            cross_axis_alignment: AxisAlignment::CENTER,
+            ..Default::default()
+        }))
+        .ok_or_else(|| anyhow::anyhow!("CEF address layout unavailable"))?;
+    if let Some(home) = add_icon(&omnibox, "Workspace", theme::Icon::Home, Action::Home) {
+        let size = Size { width: 24, height: theme::FIELD_HEIGHT };
+        home.set_minimum_size(Some(&size));
+        home.set_maximum_size(Some(&size));
+        home.set_background_color(theme::FIELD);
+    }
     let mut delegate = AddressDelegate::new();
     let address = textfield_create(Some(&mut delegate))
         .ok_or_else(|| anyhow::anyhow!("CEF omnibox unavailable"))?;
     address.set_accessible_name(Some(&CefString::from("Address")));
     address.set_placeholder_text(Some(&CefString::from("Enter a URL or localhost address")));
     address.set_font_list(Some(&CefString::from("Arial, 13px")));
-    address.set_background_color(theme::INSET);
-    address.set_size(Some(&Size {
-        width: 400,
-        height: 34,
-    }));
-    toolbar.add_child_view(Some(&mut View::from(&address)));
-    toolbar_layout.set_flex_for_view(Some(&mut View::from(&address)), 1);
-    add_button(&toolbar, "Developer", Action::Toolbox);
+    address.set_background_color(theme::FIELD);
+    omnibox.add_child_view(Some(&mut View::from(&address)));
+    omnibox_layout.set_flex_for_view(Some(&mut View::from(&address)), 1);
+    let (toolbox, sites) = if cfg!(target_os = "macos") {
+        ("⌘⇧K", "⌘K")
+    } else {
+        ("Ctrl+Shift+K", "Ctrl+K")
+    };
+    add_shortcut(&omnibox, toolbox, "Developer toolbox", Action::Toolbox);
+    add_shortcut(&omnibox, sites, "Sites", Action::Sites);
+    toolbar.add_child_view(Some(&mut View::from(&omnibox)));
+    toolbar_layout.set_flex_for_view(Some(&mut View::from(&omnibox)), 1);
     let content =
         panel_create(None).ok_or_else(|| anyhow::anyhow!("CEF content panel unavailable"))?;
     content.set_background_color(theme::BG);
@@ -390,6 +457,7 @@ fn create_window(window: &Window) -> anyhow::Result<()> {
     });
     new_tab(0, HOME_URL)?;
     window.show();
+    update_drag_regions(window);
     window.activate();
     Ok(())
 }
@@ -465,9 +533,18 @@ wrap_window_delegate! {
             close_window(); 0
         }
         fn on_window_destroyed(&self, _window: Option<&mut Window>) { quit_message_loop(); }
-        fn on_window_bounds_changed(&self, _window: Option<&mut Window>, _bounds: Option<&Rect>) { palette::refresh(); }
+        fn on_window_bounds_changed(&self, window: Option<&mut Window>, _bounds: Option<&Rect>) {
+            if let Some(window) = window { update_drag_regions(window); }
+            palette::refresh();
+        }
         fn on_key_event(&self, _window: Option<&mut Window>, event: Option<&KeyEvent>) -> i32 { event.map_or(0, shortcut) }
         fn with_standard_window_buttons(&self, _window: Option<&mut Window>) -> i32 { 1 }
+        fn is_frameless(&self, _window: Option<&mut Window>) -> i32 { i32::from(cfg!(target_os = "macos")) }
+        fn titlebar_height(&self, _window: Option<&mut Window>, height: Option<&mut f32>) -> i32 {
+            if !cfg!(target_os = "macos") { return 0; }
+            if let Some(height) = height { *height = theme::TOOLBAR_HEIGHT as f32; }
+            1
+        }
         fn can_resize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_maximize(&self, _window: Option<&mut Window>) -> i32 { 1 }
         fn can_minimize(&self, _window: Option<&mut Window>) -> i32 { 1 }
@@ -563,7 +640,11 @@ wrap_button_delegate! {
 
 wrap_textfield_delegate! {
     struct AddressDelegate {}
-    impl ViewDelegate {}
+    impl ViewDelegate {
+        fn preferred_size(&self, _view: Option<&mut View>) -> Size { Size { width: 400, height: theme::FIELD_HEIGHT } }
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size { Size { width: 150, height: theme::FIELD_HEIGHT } }
+        fn on_focus(&self, _view: Option<&mut View>) { palette::dismiss(); }
+    }
     impl TextfieldDelegate {
         fn on_key_event(&self, textfield: Option<&mut Textfield>, event: Option<&KeyEvent>) -> i32 {
             let (Some(textfield), Some(event)) = (textfield, event) else { return 0; };

@@ -66,6 +66,7 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
             SECURITY_URL,
             "Headers, JWT, response diff",
         ),
+        ("extensions", "Extensions", "", "Browser"),
         ("inspect", "Inspect page", "", "Developer Tools"),
         ("bookmark", "Bookmark current page", "", "Saved to Thor"),
         ("new_tab", "New tab", HOME_URL, "Browse"),
@@ -90,4 +91,40 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
             }),
     );
     items
+}
+
+pub(super) fn security() -> Vec<PaletteItem> {
+    [
+        ("headers", "Security headers", "Review browser protections"),
+        ("jwt", "JWT inspector", "Inspect claims and expiry"),
+        ("diff", "Response diff", "Compare HTTP snapshots"),
+    ]
+    .into_iter()
+    .map(|(id, title, detail)| {
+        item(
+            id,
+            title,
+            &format!("{SECURITY_URL}#{id}"),
+            detail,
+            PaletteItemType::Action,
+        )
+    })
+    .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn security_drawer_opens_the_matching_offline_analyzer() {
+        let items = security();
+        for (title, url) in [
+            ("Security headers", "thor://workbench/security#headers"),
+            ("JWT inspector", "thor://workbench/security#jwt"),
+            ("Response diff", "thor://workbench/security#diff"),
+        ] {
+            assert!(items.iter().any(|item| item.title == title && item.path_or_url == url));
+        }
+    }
 }
