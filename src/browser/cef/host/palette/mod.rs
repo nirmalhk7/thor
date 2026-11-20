@@ -48,6 +48,7 @@ struct Menu {
     model: CmdPalette,
     matches: Vec<PaletteItem>,
     selected: usize,
+    bookmarks_unavailable: bool,
 }
 thread_local! { static MENU: RefCell<Option<Menu>> = const { RefCell::new(None) }; }
 
@@ -88,7 +89,7 @@ fn label(text: &str) -> Option<LabelButton> {
     let mut delegate = ChoiceDelegate::new(None);
     let label = label_button_create(Some(&mut delegate), Some(&CefString::from(text)))?;
     label.set_enabled(0);
-    label.set_font_list(Some(&CefString::from("Arial, 12px")));
+    label.set_font_list(Some(&CefString::from(theme::FONT)));
     label.set_text_color(ButtonState::DISABLED, theme::MUTED);
     label.set_background_color(theme::DRAWER);
     label.set_horizontal_alignment(HorizontalAlignment::LEFT);
@@ -102,7 +103,7 @@ fn build(mode: Mode) -> anyhow::Result<()> {
     let (model, unavailable) = menu_model(mode);
     let panel = menu_panel()?;
     let search = add_search(&panel, mode)?;
-    let results = add_results(&panel)?;
+    let results = add_results(&panel, mode)?;
     let footer = add_footer(&panel, unavailable)?;
     let scrim = create_scrim(&window)?;
     let Some(controller) =
@@ -122,6 +123,7 @@ fn build(mode: Mode) -> anyhow::Result<()> {
             model,
             matches: vec![],
             selected: 0,
+            bookmarks_unavailable: unavailable,
         })
     });
     refresh();
@@ -179,7 +181,7 @@ fn add_search(panel: &Panel, mode: Mode) -> anyhow::Result<Textfield> {
         textfield_create(Some(&mut delegate)).ok_or_else(|| anyhow::anyhow!("No menu search"))?;
     search.set_accessible_name(Some(&CefString::from(mode.search_name())));
     search.set_placeholder_text(Some(&CefString::from(mode.search_placeholder())));
-    search.set_font_list(Some(&CefString::from("Arial, 12px")));
+    search.set_font_list(Some(&CefString::from(theme::FONT)));
     search.set_background_color(theme::FIELD);
     if mode == Mode::Extensions {
         search.set_enabled(0);
@@ -214,11 +216,11 @@ fn add_search(panel: &Panel, mode: Mode) -> anyhow::Result<Textfield> {
     Ok(search)
 }
 
-fn add_results(panel: &Panel) -> anyhow::Result<Panel> {
+fn add_results(panel: &Panel, mode: Mode) -> anyhow::Result<Panel> {
     let results = panel_create(None).ok_or_else(|| anyhow::anyhow!("No result list"))?;
     results.set_to_box_layout(Some(&BoxLayoutSettings {
         cross_axis_alignment: AxisAlignment::STRETCH,
-        between_child_spacing: ROW_GAP,
+        between_child_spacing: row_metrics(mode).1,
         ..Default::default()
     }));
     panel.add_child_view(Some(&mut View::from(&results)));
@@ -268,15 +270,26 @@ pub(super) fn refresh() {
     });
 }
 
-const ROW_HEIGHT: i32 = 28;
-const ROW_GAP: i32 = 5;
+fn row_metrics(mode: Mode) -> (i32, i32) {
+    match mode {
+        Mode::Sites => (28, 5),
+        _ => (27, 10),
+    }
+}
 
 fn render_results(menu: &mut Menu, height: i32) {
     menu.results.remove_all_child_views();
-    let visible = ((height - 80) / (ROW_HEIGHT + ROW_GAP)).max(1) as usize;
+    let (row_height, row_gap) = row_metrics(menu.mode);
+    let visible = ((height - 80) / (row_height + row_gap)).max(1) as usize;
     let start = (menu.selected / visible) * visible;
     for (index, item) in menu.matches.iter().enumerate().skip(start).take(visible) {
-        append_result(&menu.results, item, index == menu.selected, index);
+        append_result(
+            &menu.results,
+            item,
+            index == menu.selected,
+            index,
+            menu.mode,
+        );
     }
     if menu.matches.is_empty() {
         let message = if menu.mode == Mode::Extensions {
@@ -290,30 +303,72 @@ fn render_results(menu: &mut Menu, height: i32) {
     }
 }
 
-fn append_result(results: &Panel, item: &PaletteItem, selected: bool, index: usize) {
+fn append_result(results: &Panel, item: &PaletteItem, selected: bool, index: usize, mode: Mode) {
     let Some(row) = panel_create(None) else {
         return;
     };
-    row.set_to_box_layout(Some(&BoxLayoutSettings {
-        cross_axis_alignment: AxisAlignment::STRETCH,
+    let Some(layout) = row.set_to_box_layout(Some(&BoxLayoutSettings {
+        horizontal: 1,
+        cross_axis_alignment: AxisAlignment::CENTER,
+        between_child_spacing: if mode == Mode::Sites { 12 } else { 5 },
         ..Default::default()
-    }));
+    })) else {
+        return;
+    };
     let background = if selected {
         theme::FIELD
     } else {
         theme::DRAWER
     };
     row.set_background_color(background);
+    let mut delegate = ChoiceDelegate::new(Some(index));
+    if let Some(icon) = label_button_create(Some(&mut delegate), Some(&CefString::from(""))) {
+        let kind = if mode == Mode::Sites {
+            theme::Icon::Site
+        } else {
+            theme::Icon::Tool
+        };
+        for state in [
+            ButtonState::NORMAL,
+            ButtonState::HOVERED,
+            ButtonState::PRESSED,
+        ] {
+            if let Some(mut image) = theme::icon(kind, theme::ICON) {
+                icon.set_image(state, Some(&mut image));
+            }
+        }
+        let size = Size {
+            width: 27,
+            height: row_metrics(mode).0,
+        };
+        icon.set_minimum_size(Some(&size));
+        icon.set_maximum_size(Some(&size));
+        icon.set_background_color(background);
+        icon.set_focusable(0);
+        icon.set_accessible_name(Some(&CefString::from(item.title.as_str())));
+        row.add_child_view(Some(&mut View::from(&icon)));
+    }
+    let Some(text) = panel_create(None) else {
+        return;
+    };
+    text.set_to_box_layout(Some(&BoxLayoutSettings {
+        cross_axis_alignment: AxisAlignment::STRETCH,
+        ..Default::default()
+    }));
+    text.set_background_color(background);
+    row.add_child_view(Some(&mut View::from(&text)));
+    layout.set_flex_for_view(Some(&mut View::from(&text)), 1);
     let secondary = match item.item_type {
         crate::dx::cmd_palette::PaletteItemType::Action => item.category.as_str(),
         _ => item.path_or_url.as_str(),
     };
-    for (text, color, font, focusable) in [
-        (item.title.as_str(), theme::TEXT, "Arial, 12px", 1),
-        (secondary, theme::MUTED, "Arial, 10px", 0),
+    for (caption, color, font, focusable) in [
+        (item.title.as_str(), theme::TEXT, theme::FONT, 1),
+        (secondary, theme::MUTED, theme::DETAIL_FONT, 0),
     ] {
         let mut delegate = ChoiceDelegate::new(Some(index));
-        let Some(button) = label_button_create(Some(&mut delegate), Some(&CefString::from(text)))
+        let Some(button) =
+            label_button_create(Some(&mut delegate), Some(&CefString::from(caption)))
         else {
             return;
         };
@@ -324,18 +379,22 @@ fn append_result(results: &Panel, item: &PaletteItem, selected: bool, index: usi
         button.set_font_list(Some(&CefString::from(font)));
         button.set_horizontal_alignment(HorizontalAlignment::LEFT);
         button.set_insets(Some(&Insets {
-            left: 6,
-            right: 6,
+            left: 0,
+            right: 0,
             ..Default::default()
         }));
         let size = Size {
             width: 0,
-            height: ROW_HEIGHT / 2,
+            height: if focusable == 1 {
+                15
+            } else {
+                row_metrics(mode).0 - 15
+            },
         };
         button.set_minimum_size(Some(&size));
         button.set_maximum_size(Some(&size));
         button.set_focusable(focusable);
-        row.add_child_view(Some(&mut View::from(&button)));
+        text.add_child_view(Some(&mut View::from(&button)));
         button.set_background_color(background);
         button.set_enabled_text_colors(color);
     }
@@ -352,6 +411,13 @@ fn update_footer(menu: &Menu) {
             menu.selected + 1
         )
     };
+    let text = if menu.bookmarks_unavailable {
+        format!("Bookmarks unavailable. {text}")
+    } else {
+        text
+    };
+    menu.footer
+        .set_tooltip_text(Some(&CefString::from(text.as_str())));
     menu.footer.set_text(Some(&CefString::from(text.as_str())));
 }
 

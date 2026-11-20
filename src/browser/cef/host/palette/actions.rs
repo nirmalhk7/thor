@@ -95,7 +95,7 @@ fn choose_tool(item: PaletteItem) {
         "inspect" => perform(&Action::Inspect),
         "new_tab" => perform(&Action::New),
         "bookmark" => bookmark_current_page(),
-        "api" => perform(&Action::ApiDrawer),
+        "api" => perform(&Action::OpenTool(item.path_or_url)),
         "security" => open(Mode::Security),
         "extensions" => open(Mode::Extensions),
         _ => perform(&Action::OpenTool(item.path_or_url)),
@@ -141,5 +141,5 @@ wrap_button_delegate! {
 
 wrap_task! {
     struct ChoiceTask {index:Option<usize>}
-    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{perform(&Action::DismissDrawer);}}}
+    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{close();}}}
 }

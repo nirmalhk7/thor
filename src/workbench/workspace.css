@@ -102,3 +102,10 @@ kbd { font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; padding:
 @media(max-width:800px){.control-center{grid-template-columns:220px minmax(0,1fr)}.control-center .analyzer{padding:28px 24px}}
 
 #feature-result:empty::before{content:"Feature output appears here after execution.";font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color:var(--muted)}
+
+@media(max-width:600px){
+  .control-center{grid-template-columns:minmax(0,1fr)}
+  .control-center .feature-list{border-right:0;border-bottom:1px solid var(--line);padding:20px 16px;min-width:0}
+  .control-center .analyzer{padding:24px 16px;min-width:0}
+  .control-center #features{max-height:240px}
+}
