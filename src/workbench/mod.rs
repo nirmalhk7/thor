@@ -1,6 +1,7 @@
 //! Trusted tool surface and shared commands. External pages never reach this API.
 
 mod commands;
+mod passive_review;
 mod persistence;
 
 pub use commands::{Workbench, WorkbenchCommand};
@@ -51,7 +52,10 @@ pub fn command_allowed(url: &str, main_frame: bool, command: &WorkbenchCommand) 
             command,
             WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }
         ),
-        "/security" => matches!(command, WorkbenchCommand::SecurityAnalyze { .. }),
+        "/security" => matches!(
+            command,
+            WorkbenchCommand::SecurityAnalyze { .. } | WorkbenchCommand::PassiveReview { .. }
+        ),
         "/api" => !matches!(
             command,
             WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }

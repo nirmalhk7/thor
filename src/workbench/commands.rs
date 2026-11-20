@@ -18,6 +18,11 @@ pub enum WorkbenchCommand {
         #[serde(default)]
         payload: Value,
     },
+    PassiveReview {
+        headers: Vec<super::passive_review::HeaderEvidence>,
+        #[serde(default)]
+        evidence_name: Option<String>,
+    },
     ApiSend {
         request: RequestSpec,
         #[serde(default)]
@@ -94,6 +99,15 @@ impl<'a> Workbench<'a> {
                 }
                 crate::features::orchestrator::FeatureOrchestrator::invoke(&slug, &payload)
             }
+            WorkbenchCommand::PassiveReview {
+                headers,
+                evidence_name,
+            } => encode(super::passive_review::review(
+                super::passive_review::ReviewInput {
+                    headers,
+                    evidence_name,
+                },
+            )?),
             WorkbenchCommand::ApiSend { request, variables } => {
                 let response = self
                     .http
