@@ -89,6 +89,7 @@ pub fn asset(url: &str) -> Option<Asset> {
         "/security.js" => ("text/javascript", include_bytes!("security.js")),
         "/workbench.css" => ("text/css", include_bytes!("workbench.css")),
         "/workbench.js" => ("text/javascript", include_bytes!("workbench.js")),
+        "/api-collections.js" => ("text/javascript", include_bytes!("api-collections.js")),
         _ => return None,
     };
     Some(Asset { mime, bytes })
