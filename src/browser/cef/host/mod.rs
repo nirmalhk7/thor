@@ -220,7 +220,7 @@ fn add_button(panel: &Panel, title: &str, action: Action) -> Option<LabelButton>
     let button = label_button_create(Some(&mut delegate), Some(&CefString::from(title)))?;
     button.set_accessible_name(Some(&CefString::from(title)));
     button.set_tooltip_text(Some(&CefString::from(title)));
-    button.set_font_list(Some(&CefString::from("Arial, 12px")));
+    button.set_font_list(Some(&CefString::from(theme::FONT)));
     button.set_enabled_text_colors(theme::TEXT);
     button.set_text_color(ButtonState::DISABLED, theme::MUTED);
     button.set_minimum_size(Some(&Size {
@@ -253,7 +253,7 @@ fn add_icon(panel: &Panel, title: &str, icon: theme::Icon, action: Action) -> Op
         let color = if state == ButtonState::DISABLED {
             0xff687787
         } else {
-            theme::TEXT
+            theme::ICON
         };
         if let Some(mut image) = theme::icon(icon, color) {
             button.set_image(state, Some(&mut image));
@@ -266,8 +266,10 @@ fn add_shortcut(panel: &Panel, legend: &str, name: &str, action: Action) {
     if let Some(button) = add_button(panel, legend, action) {
         button.set_accessible_name(Some(&CefString::from(name)));
         button.set_tooltip_text(Some(&CefString::from(name)));
-        button.set_background_color(theme::FIELD);
-        button.set_font_list(Some(&CefString::from("Arial, 11px")));
+        button.set_background_color(theme::SHORTCUT);
+        button.set_font_list(Some(&CefString::from(theme::DETAIL_FONT)));
+        // Dark text on the export’s grey pill preserves small-text contrast.
+        button.set_enabled_text_colors(theme::CHROME);
         button.set_minimum_size(Some(&Size {
             width: 0,
             height: theme::FIELD_HEIGHT,
@@ -409,7 +411,10 @@ fn create_window(window: &Window) -> anyhow::Result<()> {
         }))
         .ok_or_else(|| anyhow::anyhow!("CEF address layout unavailable"))?;
     if let Some(home) = add_icon(&omnibox, "Workspace", theme::Icon::Home, Action::Home) {
-        let size = Size { width: 24, height: theme::FIELD_HEIGHT };
+        let size = Size {
+            width: 24,
+            height: theme::FIELD_HEIGHT,
+        };
         home.set_minimum_size(Some(&size));
         home.set_maximum_size(Some(&size));
         home.set_background_color(theme::FIELD);
@@ -419,12 +424,12 @@ fn create_window(window: &Window) -> anyhow::Result<()> {
         .ok_or_else(|| anyhow::anyhow!("CEF omnibox unavailable"))?;
     address.set_accessible_name(Some(&CefString::from("Address")));
     address.set_placeholder_text(Some(&CefString::from("Enter a URL or localhost address")));
-    address.set_font_list(Some(&CefString::from("Arial, 13px")));
+    address.set_font_list(Some(&CefString::from(theme::FONT)));
     address.set_background_color(theme::FIELD);
     omnibox.add_child_view(Some(&mut View::from(&address)));
     omnibox_layout.set_flex_for_view(Some(&mut View::from(&address)), 1);
     let (toolbox, sites) = if cfg!(target_os = "macos") {
-        ("⌘⇧K", "⌘K")
+        ("⌘+⇧+K", "⌘+K")
     } else {
         ("Ctrl+Shift+K", "Ctrl+K")
     };
@@ -517,7 +522,7 @@ wrap_window_delegate! {
     struct ThorWindowDelegate {}
     impl ViewDelegate {
         fn preferred_size(&self, _view: Option<&mut View>) -> Size { Size { width: 1280, height: 840 } }
-        fn minimum_size(&self, _view: Option<&mut View>) -> Size { Size { width: 720, height: 540 } }
+        fn minimum_size(&self, _view: Option<&mut View>) -> Size { Size { width: 712, height: 415 } }
     }
     impl PanelDelegate {}
     impl WindowDelegate {
@@ -678,25 +683,52 @@ wrap_load_handler! {
     }
 }
 
+// CEF wraps the Linux XEvent as a borrowed value; macOS uses an opaque pointer.
+// Keep platform ABI differences out of shortcut handling.
 wrap_keyboard_handler! {
     struct BrowserKeys;
     impl KeyboardHandler {
+        #[cfg(not(target_os = "linux"))]
         fn on_pre_key_event(&self, browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: *mut u8, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
-            let Some(event)=event else { return 0; };
-            if shortcut(event)==1 { return 1; }
-            if cfg!(target_os="macos") && matches!(event.type_,KeyEventType::KEYDOWN|KeyEventType::RAWKEYDOWN) && event.modifiers & sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0 != 0 {
-                if let Some(frame)=browser.and_then(|browser|browser.focused_frame()) {
-                    match event.windows_key_code {
-                        65=>frame.select_all(), 67=>frame.copy(), 86=>frame.paste(), 88=>frame.cut(),
-                        90 if event.modifiers & sys::cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0 != 0=>frame.redo(),
-                        90=>frame.undo(), _=>return 0,
-                    }
-                    return 1;
-                }
-            }
-            0
+            browser_key(browser, event)
+        }
+        #[cfg(target_os = "linux")]
+        fn on_pre_key_event(&self, browser: Option<&mut Browser>, event: Option<&KeyEvent>, _os_event: Option<&mut sys::_XEvent>, _is_keyboard_shortcut: Option<&mut i32>) -> i32 {
+            browser_key(browser, event)
         }
     }
+}
+
+fn browser_key(browser: Option<&mut Browser>, event: Option<&KeyEvent>) -> i32 {
+    let Some(event) = event else {
+        return 0;
+    };
+    if shortcut(event) == 1 {
+        return 1;
+    }
+    if cfg!(target_os = "macos")
+        && matches!(
+            event.type_,
+            KeyEventType::KEYDOWN | KeyEventType::RAWKEYDOWN
+        )
+        && event.modifiers & sys::cef_event_flags_t::EVENTFLAG_COMMAND_DOWN.0 != 0
+    {
+        if let Some(frame) = browser.and_then(|browser| browser.focused_frame()) {
+            match event.windows_key_code {
+                65 => frame.select_all(),
+                67 => frame.copy(),
+                86 => frame.paste(),
+                88 => frame.cut(),
+                90 if event.modifiers & sys::cef_event_flags_t::EVENTFLAG_SHIFT_DOWN.0 != 0 => {
+                    frame.redo()
+                }
+                90 => frame.undo(),
+                _ => return 0,
+            }
+            return 1;
+        }
+    }
+    0
 }
 
 #[cfg(test)]
