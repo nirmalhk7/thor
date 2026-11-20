@@ -67,7 +67,7 @@ async function send(event) {
     const operation = query({ command: "api_send", request, variables: variables() });
     state.pending = operation;
     $("cancel").disabled = false;
-    renderResponse(await operation.promise);
+    const response=await operation.promise;renderResponse(response);renderChecks(response);
   } catch (error) { message(error.message, true); $("response-summary").textContent = "Request failed or cancelled"; }
   finally { state.pending = null; $("send").disabled = false; $("cancel").disabled = true; }
 }
@@ -142,3 +142,47 @@ $("copy-response").addEventListener("click", async () => {
 });
 document.addEventListener("keydown", event => { if ((event.metaKey || event.ctrlKey) && event.key === "Enter") { event.preventDefault(); $("request-form").requestSubmit(); } });
 projects().catch(error => message(error.message, true));
+
+
+$("collection-file").addEventListener("change", async event => {
+  const file=event.target.files?.[0]; event.target.value=""; if(!file)return;
+  try {
+    if(!$("project").value) throw new Error("Select or create a project before importing.");
+    if(file.size>2*1024*1024) throw new Error("Collection files must be at most 2 MiB.");
+    const imported=ThorCollections.parseCollection(JSON.parse(await file.text()));
+    if(!imported.requests.length) throw new Error("This collection contains no supported HTTP requests.");
+    let saved=0;
+    for(const item of imported.requests){
+      await call({command:"request_save",project:$("project").value,title:item.title,request:item.request}); saved++;
+    }
+    await requests(); message(`Imported ${saved} requests from ${imported.name}. No requests were sent.`);
+  } catch(error){ message(error.message,true); }
+});
+$("export-collection").addEventListener("click", async () => {
+  try {
+    if(!$("project").value) throw new Error("Select a project to export.");
+    const docs=await call({command:"request_list",project:$("project").value});
+    const requests=[];
+    for(const doc of docs){const opened=await call({command:"request_open",id:doc.id}); requests.push({title:opened.title,request:opened.request});}
+    const collection=ThorCollections.exportCollection($("project").selectedOptions[0]?.textContent,requests);
+    const blob=new Blob([JSON.stringify(collection,null,2)],{type:"application/json"});
+    const url=URL.createObjectURL(blob); const link=document.createElement("a"); link.href=url; link.download="thor-collection.json"; link.click(); setTimeout(()=>URL.revokeObjectURL(url),0);
+    message(`Exported ${requests.length} saved requests. Authentication references were omitted.`);
+  } catch(error){message(error.message,true);}
+});
+
+$("environment-file").addEventListener("change",async event=>{
+ const file=event.target.files?.[0];event.target.value="";if(!file)return;
+ try{if(file.size>1024*1024)throw new Error("Environment files must be at most 1 MiB.");const environment=ThorCollections.parseEnvironment(JSON.parse(await file.text()));$("variables").value=JSON.stringify(environment.values,null,2);message(`Loaded ${Object.keys(environment.values).length} local variables from ${environment.name}. Values stay in this workbench session.`);}
+ catch(error){message(error.message,true);}
+});
+$("export-environment").addEventListener("click",()=>{
+ try{const values=variables().overrides;const env=ThorCollections.exportEnvironment("Thor local environment",values);const blob=new Blob([JSON.stringify(env,null,2)],{type:"application/json"});const url=URL.createObjectURL(blob);const link=document.createElement("a");link.href=url;link.download="thor-environment.json";link.click();setTimeout(()=>URL.revokeObjectURL(url),0);message("Exported local variables; secret-named values were redacted.");}
+ catch(error){message(error.message,true);}
+});
+
+function renderChecks(response){
+ const list=$("check-results");list.replaceChildren();
+ try{const checks=ThorCollections.evaluateResponseChecks(response,$("response-checks").value);for(const check of checks){const item=document.createElement("li");item.textContent=`${check.passed?"PASS":"FAIL"} · ${check.name}`;list.append(item);}if(checks.length)message(`${checks.filter(x=>x.passed).length}/${checks.length} response checks passed.`);}
+ catch(error){message(error.message,true);}
+}
