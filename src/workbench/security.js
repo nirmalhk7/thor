@@ -65,3 +65,62 @@ function selectMenuTool() {
 }
 window.addEventListener("hashchange", selectMenuTool);
 selectMenuTool();
+
+const passive = $("passive-form");
+let passiveReport = null;
+function parseEvidenceHeaders(text) {
+  return text.split(/\r?\n/).filter(line => line.trim()).map((line, index) => {
+    const split = line.indexOf(":");
+    if (split < 1) throw new Error(`Header line ${index + 1} needs Name: value.`);
+    return { name: line.slice(0, split).trim(), value: line.slice(split + 1).trim() };
+  });
+}
+function renderPassive(report) {
+  const container = $("passive-results"); container.replaceChildren();
+  for (const finding of report.findings) {
+    const article = document.createElement("article"); article.className = "passive-finding";
+    const title = document.createElement("h2"); title.textContent = finding.title;
+    const detail = document.createElement("p"); detail.textContent = `${finding.rule_id} · ${finding.severity.toUpperCase()} · ${finding.description}`;
+    const evidence = document.createElement("p"); evidence.textContent = finding.evidence;
+    const label = document.createElement("label"); label.textContent = "Triage";
+    const select = document.createElement("select"); select.setAttribute("aria-label", `Triage ${finding.rule_id}`);
+    for (const value of ["open", "accepted", "resolved"]) select.add(new Option(value[0].toUpperCase() + value.slice(1), value));
+    select.value = "open"; select.dataset.rule = finding.rule_id;
+    label.append(select); article.append(title, detail, evidence, label); container.append(article);
+  }
+}
+passive.addEventListener("submit", async event => {
+  event.preventDefault(); $("passive-run").disabled = true; $("passive-status").textContent = "Reviewing supplied headers locally…";
+  try {
+    const headers = parseEvidenceHeaders($("passive-headers").value);
+    const command = { command: "passive_review", headers, evidence_name: $("passive-name").value.trim() || undefined };
+    if (typeof window.cefQuery !== "function") throw new Error("Open this reviewer in Thor to connect to its local Rust analyzer.");
+    const report = await new Promise((resolve, reject) => window.cefQuery({request: JSON.stringify(command), onSuccess: text => { try { resolve(JSON.parse(text)); } catch { reject(new Error("Invalid reviewer response.")); } }, onFailure: (_code, error) => reject(new Error(error))}));
+    passiveReport = report; renderPassive(report); $("passive-export").disabled = false;
+    $("passive-status").textContent = `${report.findings.length} findings · evidence values omitted from the report.`;
+  } catch (error) { $("passive-status").textContent = error.message; }
+  finally { $("passive-run").disabled = false; }
+});
+$("passive-export").addEventListener("click", () => {
+  if (!passiveReport) return;
+  const triage = Object.fromEntries(Array.from(document.querySelectorAll("[data-rule]")).map(select => [select.dataset.rule, select.value]));
+  const blob = new Blob([JSON.stringify({ ...passiveReport, triage }, null, 2)], { type: "application/json" });
+  const link = document.createElement("a"); link.href = URL.createObjectURL(blob); link.download = "thor-passive-review.json"; link.click(); URL.revokeObjectURL(link.href);
+});
+const oldSelectTool = selectTool;
+selectTool = function(name) {
+  const panel = $("passive-panel");
+  if (name === "passive") {
+    activeTool = name; $("analyzer").hidden = true; panel.hidden = false;
+    for (const button of document.querySelectorAll("[data-tool]")) { const active = button.dataset.tool === name; button.setAttribute("aria-selected", String(active)); button.tabIndex = active ? 0 : -1; }
+    return;
+  }
+  panel.hidden = true; $("analyzer").hidden = false;
+  oldSelectTool(name);
+};
+function selectMenuTool() {
+  const name = window.location.hash.slice(1);
+  if ([...Object.keys(tools), "passive"].includes(name) && name !== activeTool) selectTool(name);
+}
+window.addEventListener("hashchange", selectMenuTool);
+selectMenuTool();

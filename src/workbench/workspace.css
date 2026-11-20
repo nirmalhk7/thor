@@ -109,3 +109,5 @@ kbd { font: 11px/1.5 ui-monospace, SFMono-Regular, Consolas, monospace; padding:
   .control-center .analyzer{padding:24px 16px;min-width:0}
   .control-center #features{max-height:240px}
 }
+.passive-finding{padding:16px 0;border-bottom:1px solid var(--line)}
+.passive-finding h2{margin:0 0 6px}.passive-finding p{overflow-wrap:anywhere}.passive-finding label{display:flex;gap:8px;align-items:center}.passive-finding select{min-width:120px}
