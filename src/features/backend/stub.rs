@@ -1,8 +1,8 @@
+use super::super::loopback::read_http_head;
 use super::{
     path_matches_template, Arc, AtomicBool, BTreeMap, BackendEngine, Duration, LiveStubReport,
-    Mutex, Ordering, StubRouteSpec, TcpListener,
+    Mutex, Ordering, StubRouteSpec, TcpListener, Write,
 };
-use super::{Read, Write};
 
 impl BackendEngine {
     pub fn live_stub_server(&self, routes: &[StubRouteSpec]) -> LiveStubReport {
@@ -73,11 +73,10 @@ fn live_stub_loop(
         match listener.accept() {
             Ok((mut stream, _addr)) => {
                 let _ = stream.set_nonblocking(false);
-                let _ = stream.set_read_timeout(Some(Duration::from_secs(2)));
                 hits.fetch_add(1, Ordering::SeqCst);
-                let mut buf = [0u8; 8192];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                let raw = String::from_utf8_lossy(&buf[..n]);
+                let Some(raw) = read_http_head(&mut stream) else {
+                    continue;
+                };
                 let (method, path) = parse_request_line(&raw);
                 let route = {
                     let rts = routes.lock();

@@ -1,5 +1,6 @@
 use super::*;
 use serde_json::json;
+use std::net::TcpStream;
 
 #[test]
 fn trace_keeps_orphan_roots_first_ties_and_unique_service_edges() {
@@ -172,4 +173,96 @@ fn webhook_and_oob_bind_failures_clear_previous_listener_slots() {
     assert!(get(port, "/quality-characterization").ends_with("\r\n\r\nok"));
     assert!(security.start_oob_listener(blocked_port).is_err());
     assert_eq!(security.oob_listener_port(), None);
+}
+
+fn send_split_request(port: u16, prefix: &[u8], suffix: &[u8]) -> String {
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_millis(400)))
+        .unwrap();
+    stream.write_all(prefix).unwrap();
+
+    let early = stream.read(&mut [0]);
+    assert!(
+        early.as_ref().is_err_and(|error| matches!(
+            error.kind(),
+            std::io::ErrorKind::TimedOut | std::io::ErrorKind::WouldBlock
+        )),
+        "listener responded before receiving the path: {early:?}"
+    );
+
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream.write_all(suffix).unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    response
+}
+
+#[test]
+fn stub_routes_a_request_split_across_reads() {
+    let engine = BackendEngine::new();
+    let port = engine
+        .start_live_stub_server(0, route("fixture"), None)
+        .unwrap();
+    let response = send_split_request(
+        port,
+        b"GET ",
+        b"/value HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    engine.stop_live_stub_server();
+    assert!(response.ends_with("\r\n\r\nfixture"), "{response}");
+}
+
+#[test]
+fn oob_listener_correlates_a_request_split_across_reads() {
+    let security = crate::features::security::SecurityEngine::new();
+    let port = security.start_oob_listener(0).unwrap();
+    let response = send_split_request(
+        port,
+        b"GET ",
+        b"/split-request-fixture HTTP/1.1\r\nHost: localhost\r\nConnection: close\r\n\r\n",
+    );
+    security.stop_oob_listener();
+    assert!(response.ends_with("\r\n\r\nok"), "{response}");
+    assert!(AppState::global()
+        .features()
+        .security()
+        .oob_interactions("split-request-fixture")
+        .iter()
+        .any(|event| event.protocol == "http"));
+}
+
+#[test]
+fn stub_routes_a_post_before_the_client_sends_its_body() {
+    let engine = BackendEngine::new();
+    let mut routes = route("fixture");
+    routes[0].method = "POST".into();
+    let port = engine.start_live_stub_server(0, routes, None).unwrap();
+    let mut stream = TcpStream::connect(("127.0.0.1", port)).unwrap();
+    stream
+        .set_read_timeout(Some(Duration::from_secs(3)))
+        .unwrap();
+    stream
+        .write_all(b"POST /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: 32768\r\nExpect: 100-continue\r\n\r\n")
+        .unwrap();
+    let mut response = String::new();
+    stream.read_to_string(&mut response).unwrap();
+    engine.stop_live_stub_server();
+    assert!(response.ends_with("\r\n\r\nfixture"), "{response}");
+}
+
+#[test]
+fn stub_counts_only_headers_toward_the_header_limit() {
+    let engine = BackendEngine::new();
+    let mut routes = route("fixture");
+    routes[0].method = "POST".into();
+    let port = engine.start_live_stub_server(0, routes, None).unwrap();
+    let mut prefix =
+        b"POST /value HTTP/1.1\r\nHost: localhost\r\nContent-Length: 4\r\nX-Fill: ".to_vec();
+    prefix.resize(16 * 1024 - 4, b'x');
+    let response = send_split_request(port, &prefix, b"\r\n\r\nbody");
+    engine.stop_live_stub_server();
+    assert!(response.ends_with("\r\n\r\nfixture"), "{response}");
 }
