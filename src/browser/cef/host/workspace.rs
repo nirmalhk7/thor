@@ -147,11 +147,17 @@ wrap_render_process_handler! {
     pub(super) struct WorkspaceRenderer;
     impl RenderProcessHandler {
         fn on_context_created(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
+            if let (Some(frame), Some(context)) = (frame.as_ref(), context.as_ref()) {
+                super::page_activity::install(frame, context);
+            }
             if frame.as_ref().is_some_and(|frame| workbench::is_tool_document(&CefString::from(&frame.url()).to_string(), frame.is_main() == 1)) {
                 RENDERER.with(|router| router.on_context_created(browser.cloned(), frame.cloned(), context.cloned()));
             }
         }
         fn on_context_released(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, context: Option<&mut V8Context>) {
+            if let Some(frame) = frame.as_ref() {
+                super::page_activity::report(frame, false);
+            }
             RENDERER.with(|router| router.on_context_released(browser.cloned(), frame.cloned(), context.cloned()));
         }
         fn on_process_message_received(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {

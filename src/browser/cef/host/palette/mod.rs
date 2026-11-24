@@ -270,6 +270,20 @@ pub(super) fn refresh() {
     });
 }
 
+pub(super) fn refresh_sites() {
+    if !MENU.with(|cell| cell.borrow().as_ref().is_some_and(|menu| menu.mode == Mode::Sites)) {
+        return;
+    }
+    let (model, unavailable) = menu_model(Mode::Sites);
+    MENU.with(|cell| {
+        if let Some(menu) = cell.borrow_mut().as_mut() {
+            menu.model = model;
+            menu.bookmarks_unavailable = unavailable;
+        }
+    });
+    refresh();
+}
+
 fn row_metrics(mode: Mode) -> (i32, i32) {
     match mode {
         Mode::Sites => (28, 5),

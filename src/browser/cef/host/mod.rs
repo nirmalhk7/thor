@@ -9,6 +9,8 @@ use crate::browser::session::BrowserSession;
 mod actions;
 mod commands;
 mod devtools;
+mod expiry;
+mod page_activity;
 mod palette;
 mod theme;
 mod workspace;
@@ -30,6 +32,7 @@ struct Host {
     contexts: HashMap<u64, RequestContext>,
     views: HashMap<u64, BrowserView>,
     closing: bool,
+    expiry_task_deadline: Option<std::time::Instant>,
     snapshots:
         Option<tokio::sync::watch::Sender<crate::engine::engine_coordinator::BrowserSnapshot>>,
     devtools: devtools::DevTools,
@@ -53,6 +56,7 @@ pub(super) fn prepare(cache_root: PathBuf) {
             contexts: HashMap::new(),
             views: HashMap::new(),
             closing: false,
+            expiry_task_deadline: None,
             snapshots: None,
             devtools: devtools::DevTools::default(),
         })
@@ -160,6 +164,7 @@ fn activate(id: u64) {
     }
     refresh_controls();
     commands::publish();
+    expiry::schedule();
 }
 
 fn display_address(url: &str) -> &str {
@@ -575,10 +580,14 @@ wrap_client! {
     impl Client {
         fn life_span_handler(&self) -> Option<LifeSpanHandler> { Some(TabLifetime::new(self.id)) }
         fn display_handler(&self) -> Option<DisplayHandler> { Some(TabDisplay::new(self.id)) }
-        fn request_handler(&self) -> Option<RequestHandler> { Some(WorkspaceRequest::new()) }
+        fn request_handler(&self) -> Option<RequestHandler> { Some(WorkspaceRequest::new(self.id)) }
+        fn frame_handler(&self) -> Option<FrameHandler> { Some(page_activity::ActivityFrames::new(self.id)) }
         fn load_handler(&self) -> Option<LoadHandler> { Some(NavigationState::new()) }
         fn keyboard_handler(&self) -> Option<KeyboardHandler> { Some(BrowserKeys::new()) }
         fn on_process_message_received(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, source_process: ProcessId, message: Option<&mut ProcessMessage>) -> i32 {
+            if page_activity::receive(self.id, frame.as_deref(), source_process, message.as_deref()) {
+                return 1;
+            }
             with_host(|host| host.tools.clone()).flatten().map_or(0, |router| i32::from(router.on_process_message_received(browser.cloned(), frame.cloned(), source_process, message.cloned())))
         }
     }
@@ -602,13 +611,19 @@ wrap_life_span_handler! {
             devtools::close(self.id);
             let removed = with_host(|host| {
                 let view = host.views.remove(&self.id);
+                let was_active = host.session.active_tab() == Some(self.id);
                 if let Ok(Some(identity)) = host.session.close_tab(self.id) { host.contexts.remove(&identity); }
-                (host.content.clone(), view, host.session.active_tab(), host.window.clone())
+                (host.content.clone(), view, host.session.active_tab(), host.window.clone(), was_active)
             });
             crate::AppState::global().tab_history().clear_tab_history(&self.id.to_string());
-            if let Some((panel, view, active, window)) = removed {
+            if let Some((panel, view, active, window, was_active)) = removed {
                 if let (Some(panel), Some(view)) = (panel, view) { panel.remove_child_view(Some(&mut View::from(&view))); }
-                if let Some(active) = active { activate(active); } else if let Some(window) = window { window.close(); }
+                if let Some(active) = active {
+                    if was_active { activate(active); } else { commands::publish(); }
+                    palette::refresh_sites();
+                } else if let Some(window) = window {
+                    window.close();
+                }
             }
         }
     }
@@ -664,13 +679,15 @@ wrap_textfield_delegate! {
 }
 
 wrap_request_handler! {
-    struct WorkspaceRequest;
+    struct WorkspaceRequest { id: u64 }
     impl RequestHandler {
         fn on_before_browse(&self, browser: Option<&mut Browser>, frame: Option<&mut Frame>, _request: Option<&mut Request>, _user_gesture: i32, _is_redirect: i32) -> i32 {
             if let Some(router) = with_host(|host| host.tools.clone()).flatten() { router.on_before_browse(browser.cloned(), frame.cloned()); }
             0
         }
         fn on_render_process_terminated(&self, browser: Option<&mut Browser>, _status: TerminationStatus, _error_code: i32, _error_string: Option<&CefString>) {
+            with_host(|host| host.session.clear_protection(self.id));
+            expiry::schedule();
             if let Some(router) = with_host(|host| host.tools.clone()).flatten() { router.on_render_process_terminated(browser.cloned()); }
         }
     }

@@ -1,6 +1,9 @@
-use std::collections::{BTreeMap, VecDeque};
+use std::collections::{BTreeMap, HashSet, VecDeque};
+use std::time::{Duration, Instant};
 
 use serde::{Deserialize, Serialize};
+
+const BACKGROUND_TIMEOUT: Duration = Duration::from_secs(30 * 60);
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, thiserror::Error)]
 pub enum SessionError {
@@ -48,6 +51,8 @@ struct Tab {
     identity: u64,
     generation: u64,
     history: VecDeque<Navigation>,
+    expires_at: Option<Instant>,
+    protected_frames: HashSet<String>,
 }
 
 /// Deliberately has no serialization implementation: browsing never becomes a
@@ -107,6 +112,10 @@ impl BrowserSession {
     }
 
     pub fn open_tab(&mut self, identity: u64) -> Result<u64, SessionError> {
+        self.open_tab_at(identity, Instant::now())
+    }
+
+    fn open_tab_at(&mut self, identity: u64, now: Instant) -> Result<u64, SessionError> {
         self.identity(identity)?;
         let id = self.next_tab;
         self.next_tab = id.checked_add(1).ok_or(SessionError::IdExhausted)?;
@@ -116,16 +125,69 @@ impl BrowserSession {
                 identity,
                 generation: 1,
                 history: VecDeque::new(),
+                expires_at: None,
+                protected_frames: HashSet::new(),
             },
         );
-        self.active = Some(id);
+        self.activate_at(id, now)?;
         Ok(id)
     }
 
     pub fn activate(&mut self, id: u64) -> Result<(), SessionError> {
-        self.target(id)?;
-        self.active = Some(id);
+        self.activate_at(id, Instant::now())
+    }
+
+    fn activate_at(&mut self, id: u64, now: Instant) -> Result<(), SessionError> {
+        self.tabs
+            .get_mut(&id)
+            .ok_or(SessionError::TabNotFound)?
+            .expires_at = None;
+        let previous = self.active.replace(id);
+        if let Some(previous) = previous.filter(|previous| *previous != id) {
+            if let Some(tab) = self.tabs.get_mut(&previous) {
+                tab.expires_at = Some(now + BACKGROUND_TIMEOUT);
+            }
+        }
         Ok(())
+    }
+
+    pub(crate) fn next_expiry(&self) -> Option<Instant> {
+        self.tabs
+            .values()
+            .filter(|tab| tab.protected_frames.is_empty())
+            .filter_map(|tab| tab.expires_at)
+            .min()
+    }
+
+    /// Each background period can request one close. Actual removal belongs
+    /// to CEF's close callback, including when a page handles beforeunload.
+    pub(crate) fn take_expired_tabs(&mut self, now: Instant) -> Vec<u64> {
+        let mut expired = Vec::new();
+        for (&id, tab) in &mut self.tabs {
+            if tab.protected_frames.is_empty()
+                && tab.expires_at.is_some_and(|deadline| deadline <= now)
+            {
+                tab.expires_at = None;
+                expired.push(id);
+            }
+        }
+        expired
+    }
+
+    pub(crate) fn set_frame_protection(&mut self, id: u64, frame: &str, protected: bool) {
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            if protected {
+                tab.protected_frames.insert(frame.to_owned());
+            } else {
+                tab.protected_frames.remove(frame);
+            }
+        }
+    }
+
+    pub(crate) fn clear_protection(&mut self, id: u64) {
+        if let Some(tab) = self.tabs.get_mut(&id) {
+            tab.protected_frames.clear();
+        }
     }
 
     pub fn active_tab(&self) -> Option<u64> {
@@ -222,6 +284,9 @@ impl BrowserSession {
         let tab = self.tabs.remove(&id).ok_or(SessionError::TabNotFound)?;
         if self.active == Some(id) {
             self.active = self.tabs.keys().next_back().copied();
+            if let Some(replacement) = self.active.and_then(|active| self.tabs.get_mut(&active)) {
+                replacement.expires_at = None;
+            }
         }
         let identity = self.identity(tab.identity)?;
         if identity.disposable
@@ -234,5 +299,104 @@ impl BrowserSession {
             return Ok(Some(tab.identity));
         }
         Ok(None)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn background_page_expires_at_thirty_minutes_and_is_removed_only_on_close() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let background = session.open_tab_at(0, start).unwrap();
+        session
+            .record_navigation(background, "https://example.test/", "Example")
+            .unwrap();
+        let left = start + Duration::from_secs(10);
+        let foreground = session.open_tab_at(0, left).unwrap();
+
+        assert_eq!(
+            session.next_expiry(),
+            Some(left + Duration::from_secs(1800))
+        );
+        assert!(session
+            .take_expired_tabs(left + Duration::from_secs(1799))
+            .is_empty());
+        assert_eq!(
+            session.take_expired_tabs(left + Duration::from_secs(1800)),
+            vec![background]
+        );
+        assert!(session
+            .take_expired_tabs(left + Duration::from_secs(1801))
+            .is_empty());
+        assert_eq!(session.active_tab(), Some(foreground));
+        assert_eq!(session.history(background).unwrap().len(), 1);
+        session.close_tab(background).unwrap();
+        assert_eq!(
+            session.history(background).unwrap_err(),
+            SessionError::TabNotFound
+        );
+    }
+
+    #[test]
+    fn returning_restarts_the_clock_only_when_the_page_goes_back_into_the_background() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let first = session.open_tab_at(0, start).unwrap();
+        let second = session.open_tab_at(0, start).unwrap();
+        let returned = start + Duration::from_secs(1799);
+        session.activate_at(first, returned).unwrap();
+
+        assert!(session
+            .take_expired_tabs(start + Duration::from_secs(1800))
+            .is_empty());
+        let left_again = start + Duration::from_secs(1900);
+        session.activate_at(second, left_again).unwrap();
+        assert_eq!(
+            session.next_expiry(),
+            Some(left_again + Duration::from_secs(1800))
+        );
+        assert!(session
+            .take_expired_tabs(left_again + Duration::from_secs(1799))
+            .is_empty());
+        assert_eq!(
+            session.take_expired_tabs(left_again + Duration::from_secs(1800)),
+            vec![first]
+        );
+    }
+
+    #[test]
+    fn expired_page_waits_for_the_last_protected_frame_and_keeps_its_deadline() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let page = session.open_tab_at(0, start).unwrap();
+        session.open_tab_at(0, start).unwrap();
+        session.set_frame_protection(page, "draft", true);
+        session.set_frame_protection(page, "call", true);
+
+        let expired_at = start + Duration::from_secs(1800);
+        assert!(session.take_expired_tabs(expired_at).is_empty());
+        assert_eq!(session.next_expiry(), None);
+        session.set_frame_protection(page, "draft", false);
+        assert!(session.take_expired_tabs(expired_at).is_empty());
+        session.set_frame_protection(page, "call", false);
+        assert_eq!(session.next_expiry(), Some(expired_at));
+        assert_eq!(session.take_expired_tabs(expired_at), vec![page]);
+    }
+
+    #[test]
+    fn closing_the_active_page_cancels_its_replacement_page_expiry() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let replacement = session.open_tab_at(0, start).unwrap();
+        let active = session.open_tab_at(0, start).unwrap();
+        session.close_tab(active).unwrap();
+
+        assert_eq!(session.active_tab(), Some(replacement));
+        assert!(session
+            .take_expired_tabs(start + Duration::from_secs(1800))
+            .is_empty());
     }
 }
