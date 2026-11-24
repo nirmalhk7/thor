@@ -18,7 +18,10 @@ pub(super) fn key(event: &KeyEvent) -> i32 {
                         .is_some_and(|menu| menu.mode == Mode::Sites)
                 })
             {
-                pin_selected();
+                // Holding Option+Return should not toggle the page repeatedly.
+                if event.modifiers & sys::cef_event_flags_t::EVENTFLAG_IS_REPEAT.0 == 0 {
+                    pin_selected();
+                }
             } else {
                 choose_selected();
             }
