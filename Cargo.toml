@@ -2,6 +2,7 @@
 name = "thor"
 version = "0.2.0"
 edition = "2021"
+license = "MIT"
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = ['cfg(cargo_clippy)', 'cfg(devtools)'] }
