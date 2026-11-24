@@ -107,6 +107,10 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
                     entry.category = "Performance · Pasted measurements".into();
                     entry.badge = Some("measure load; measure page load; check web vitals".into());
                 }
+                if feature.slug == "contract-testing" {
+                    entry.category = "QA · Pasted contract and response JSON".into();
+                    entry.badge = Some("verify response contract; test response schema".into());
+                }
                 entry
             }),
     );
@@ -153,6 +157,11 @@ mod tests {
                 "measure load",
                 "thor://workbench/tools#perf-budgets",
                 "Pasted measurements",
+            ),
+            (
+                "verify response contract",
+                "thor://workbench/tools#contract-testing",
+                "Pasted contract and response JSON",
             ),
         ] {
             palette.set_query(query.into());

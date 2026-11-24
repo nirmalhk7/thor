@@ -1,5 +1,25 @@
 # Thor Developer Testing & Quality Assurance Manual
 
+## QA quick start: check a local response contract
+
+Before merging an API change, compare an observed status and JSON body with the
+response your client expects. Open **Cmd+Shift+K**, search **verify response
+contract**, and choose **Contract Testing**. Paste the
+[widget response fixture](../tests/fixtures/qa_response_contract.json) into
+**Input JSON**, then choose **Run feature**. Thor uses the pasted data; it does
+not call the API.
+
+The fixture reports one verified interaction with `satisfied: true`. Change
+the observed `available` value to `"yes"` and run it again. The report
+identifies the incorrect field and expected type. Omitting the observed body
+does not pass when a response schema is supplied. A literal JSON `null` is a
+body and is checked against the schema.
+
+For your own fixture, include one observed `actuals` entry for each expected
+method and path. Supply an observed status and the JSON body when checking a
+response schema. This workflow checks supplied evidence; it does not generate
+a Playwright test.
+
 ## Overview
 
 Thor enforces strict testing discipline: **no code change is declared complete without empirical automated test verification**. The suite covers library unit tests, Engineer Feature Suite regression packs, integration tests, MCP RPC endpoints, performance/SLA benches, and concurrency safety checks. Some tests change process-wide environment variables and `AppState`; run regression suites with `--test-threads=1`, as CI does.

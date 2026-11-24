@@ -29,7 +29,14 @@ impl QaEngine {
                             expected.method, expected.path, actual.status, expected.expected_status
                         ));
                     }
-                    if let (Some(schema), Some(body)) = (&expected.response_schema, &actual.body) {
+                    if let Some(schema) = &expected.response_schema {
+                        let Some(body) = &actual.body else {
+                            failures.push(format!(
+                                "{} {}: observed response body is missing; expected JSON to validate",
+                                expected.method, expected.path
+                            ));
+                            continue;
+                        };
                         let errs = crate::features::backend::BackendEngine::new()
                             .validate_contract(body, schema);
                         for e in errs {
