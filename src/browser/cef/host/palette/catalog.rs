@@ -66,6 +66,12 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
             SECURITY_URL,
             "Headers, JWT, response diff",
         ),
+        (
+            "web3_call",
+            "Inspect an Ethereum call",
+            crate::workbench::WEB3_URL,
+            "Pasted eth_call JSON",
+        ),
         ("extensions", "Extensions", "", "Browser"),
         ("inspect", "Inspect page", "", "Current page"),
         ("bookmark", "Bookmark current page", "", "Saved to Thor"),
@@ -76,6 +82,9 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
         let mut entry = item(id, title, url, category, PaletteItemType::Action);
         if id == "api" {
             entry.badge = Some("replay request; resend request; send HTTP request".into());
+        }
+        if id == "web3_call" {
+            entry.badge = Some("decode calldata; decode balanceof; inspect eth_call".into());
         }
         entry
     })
@@ -167,6 +176,11 @@ mod tests {
                 first.category
             );
         }
+
+        palette.set_query("decode calldata".into());
+        let first = &palette.search()[0];
+        assert_eq!(first.path_or_url, crate::workbench::WEB3_URL);
+        assert_eq!(first.category, "Pasted eth_call JSON");
 
         palette.set_query("inspect page".into());
         assert!(palette.search()[0].category.contains("Current page"));
