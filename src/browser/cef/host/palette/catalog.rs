@@ -14,20 +14,30 @@ pub(super) fn item(
 
 pub(super) fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Vec<PaletteItem> {
     let mut items: Vec<_> = session
-        .summaries()
+        .sites_summaries()
         .into_iter()
         .map(|tab| {
-            item(
+            let mut page = item(
                 &format!("tab_{}", tab.target.id),
-                if tab.title.is_empty() {
+                if tab.title.is_empty() && tab.url.is_empty() {
+                    "New page"
+                } else if tab.title.is_empty() {
                     &tab.url
                 } else {
                     &tab.title
                 },
                 &tab.url,
-                "Open tab",
+                if tab.pinned {
+                    "Pinned page"
+                } else {
+                    "Open page"
+                },
                 PaletteItemType::Tab,
-            )
+            );
+            if tab.pinned {
+                page.badge = Some("Pinned".into());
+            }
+            page
         })
         .collect();
     if let Some(active) = session.active_tab() {

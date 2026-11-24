@@ -42,6 +42,7 @@ pub struct Navigation {
 pub struct TabSummary {
     pub target: TabRef,
     pub identity_id: u64,
+    pub pinned: bool,
     pub url: String,
     pub title: String,
 }
@@ -52,6 +53,7 @@ struct Tab {
     generation: u64,
     history: VecDeque<Navigation>,
     expires_at: Option<Instant>,
+    pinned: bool,
     protected_frames: HashSet<String>,
 }
 
@@ -61,6 +63,7 @@ pub struct BrowserSession {
     identities: BTreeMap<u64, Identity>,
     tabs: BTreeMap<u64, Tab>,
     active: Option<u64>,
+    recent: VecDeque<u64>,
     next_tab: u64,
     next_identity: u64,
 }
@@ -76,6 +79,7 @@ impl Default for BrowserSession {
             identities: BTreeMap::from([(0, identity)]),
             tabs: BTreeMap::new(),
             active: None,
+            recent: VecDeque::new(),
             next_tab: 1,
             next_identity: 1,
         }
@@ -126,6 +130,7 @@ impl BrowserSession {
                 generation: 1,
                 history: VecDeque::new(),
                 expires_at: None,
+                pinned: false,
                 protected_frames: HashSet::new(),
             },
         );
@@ -145,8 +150,30 @@ impl BrowserSession {
         let previous = self.active.replace(id);
         if let Some(previous) = previous.filter(|previous| *previous != id) {
             if let Some(tab) = self.tabs.get_mut(&previous) {
-                tab.expires_at = Some(now + BACKGROUND_TIMEOUT);
+                tab.expires_at = (!tab.pinned).then_some(now + BACKGROUND_TIMEOUT);
             }
+        }
+        self.mark_recent(id);
+        Ok(())
+    }
+
+    fn mark_recent(&mut self, id: u64) {
+        if self.recent.front() != Some(&id) {
+            self.recent.retain(|&other| other != id);
+            self.recent.push_front(id);
+        }
+    }
+
+    pub fn set_pinned(&mut self, id: u64, pinned: bool) -> Result<(), SessionError> {
+        self.set_pinned_at(id, pinned, Instant::now())
+    }
+
+    fn set_pinned_at(&mut self, id: u64, pinned: bool, now: Instant) -> Result<(), SessionError> {
+        let tab = self.tabs.get_mut(&id).ok_or(SessionError::TabNotFound)?;
+        if tab.pinned != pinned {
+            tab.pinned = pinned;
+            tab.expires_at =
+                (!pinned && self.active != Some(id)).then_some(now + BACKGROUND_TIMEOUT);
         }
         Ok(())
     }
@@ -201,19 +228,37 @@ impl BrowserSession {
     pub fn summaries(&self) -> Vec<TabSummary> {
         self.tabs
             .iter()
-            .map(|(id, tab)| {
-                let current = tab.history.back();
-                TabSummary {
-                    target: TabRef {
-                        id: *id,
-                        generation: tab.generation,
-                    },
-                    identity_id: tab.identity,
-                    url: current.map(|entry| entry.url.clone()).unwrap_or_default(),
-                    title: current.map(|entry| entry.title.clone()).unwrap_or_default(),
-                }
-            })
+            .map(|(&id, tab)| Self::summarize(id, tab))
             .collect()
+    }
+
+    /// Sites shows pinned pages first, with each group ordered by activation.
+    /// Keep this separate from ID order, which drives next/previous page shortcuts.
+    pub fn sites_summaries(&self) -> Vec<TabSummary> {
+        let (pinned, unpinned): (Vec<_>, Vec<_>) = self
+            .recent
+            .iter()
+            .filter_map(|&id| self.tabs.get(&id).map(|tab| (id, tab)))
+            .partition(|(_, tab)| tab.pinned);
+        pinned
+            .into_iter()
+            .chain(unpinned)
+            .map(|(id, tab)| Self::summarize(id, tab))
+            .collect()
+    }
+
+    fn summarize(id: u64, tab: &Tab) -> TabSummary {
+        let current = tab.history.back();
+        TabSummary {
+            target: TabRef {
+                id,
+                generation: tab.generation,
+            },
+            identity_id: tab.identity,
+            pinned: tab.pinned,
+            url: current.map(|entry| entry.url.clone()).unwrap_or_default(),
+            title: current.map(|entry| entry.title.clone()).unwrap_or_default(),
+        }
     }
 
     pub fn tab_identity(&self, id: u64) -> Result<u64, SessionError> {
@@ -282,10 +327,11 @@ impl BrowserSession {
     /// releases that request context only after its browser has really closed.
     pub fn close_tab(&mut self, id: u64) -> Result<Option<u64>, SessionError> {
         let tab = self.tabs.remove(&id).ok_or(SessionError::TabNotFound)?;
+        self.recent.retain(|&other| other != id);
         if self.active == Some(id) {
-            self.active = self.tabs.keys().next_back().copied();
-            if let Some(replacement) = self.active.and_then(|active| self.tabs.get_mut(&active)) {
-                replacement.expires_at = None;
+            self.active = None;
+            if let Some(replacement) = self.tabs.keys().next_back().copied() {
+                self.activate(replacement)?;
             }
         }
         let identity = self.identity(tab.identity)?;
@@ -398,5 +444,85 @@ mod tests {
         assert!(session
             .take_expired_tabs(start + Duration::from_secs(1800))
             .is_empty());
+    }
+    #[test]
+    fn background_pin_cancels_expiry_and_unpin_starts_a_fresh_grace_period() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let page = session.open_tab_at(0, start).unwrap();
+        session.open_tab_at(0, start).unwrap();
+
+        session
+            .set_pinned_at(page, true, start + Duration::from_secs(1799))
+            .unwrap();
+        assert_eq!(session.next_expiry(), None);
+        assert!(session
+            .take_expired_tabs(start + Duration::from_secs(3600))
+            .is_empty());
+
+        let unpinned = start + Duration::from_secs(3601);
+        session.set_frame_protection(page, "draft", true);
+        session.set_pinned_at(page, false, unpinned).unwrap();
+        assert_eq!(session.next_expiry(), None);
+        session.set_frame_protection(page, "draft", false);
+        // Repeating a queued unpin of the same row must not extend the clock.
+        session
+            .set_pinned_at(page, false, unpinned + Duration::from_secs(5))
+            .unwrap();
+        assert_eq!(session.next_expiry(), Some(unpinned + BACKGROUND_TIMEOUT));
+        assert!(session
+            .take_expired_tabs(unpinned + Duration::from_secs(1799))
+            .is_empty());
+        assert_eq!(
+            session.take_expired_tabs(unpinned + BACKGROUND_TIMEOUT),
+            [page]
+        );
+    }
+
+    #[test]
+    fn pinned_foreground_page_stays_pinned_after_switching_and_can_close_manually() {
+        let mut session = BrowserSession::default();
+        let start = Instant::now();
+        let page = session.open_tab_at(0, start).unwrap();
+        session.set_pinned_at(page, true, start).unwrap();
+        session.open_tab_at(0, start).unwrap();
+
+        assert!(session
+            .take_expired_tabs(start + BACKGROUND_TIMEOUT)
+            .is_empty());
+        session.close_tab(page).unwrap();
+        assert!(session
+            .sites_summaries()
+            .iter()
+            .all(|tab| tab.target.id != page));
+        assert_eq!(
+            session.set_pinned(page, false),
+            Err(SessionError::TabNotFound)
+        );
+    }
+
+    #[test]
+    fn sites_recency_uses_activation_even_when_events_share_the_same_instant() {
+        let mut session = BrowserSession::default();
+        let now = Instant::now();
+        let first = session.open_tab_at(0, now).unwrap();
+        let second = session.open_tab_at(0, now).unwrap();
+        let third = session.open_tab_at(0, now).unwrap();
+        session.set_pinned_at(second, true, now).unwrap();
+        session.activate_at(first, now).unwrap();
+
+        let sites_ids = |session: &BrowserSession| {
+            session
+                .sites_summaries()
+                .into_iter()
+                .map(|tab| tab.target.id)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(sites_ids(&session), [second, first, third]);
+        assert_eq!(session.tab_ids(), [first, second, third]);
+        session.set_pinned_at(second, false, now).unwrap();
+        assert_eq!(sites_ids(&session), [first, third, second]);
+        session.close_tab(first).unwrap();
+        assert_eq!(sites_ids(&session), [third, second]);
     }
 }

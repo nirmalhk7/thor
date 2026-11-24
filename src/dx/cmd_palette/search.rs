@@ -79,7 +79,7 @@ impl CmdPalette {
         } else {
             parallel_scores(&items, &prepared)
         };
-        scored.sort_unstable_by_key(|item| std::cmp::Reverse(item.0));
+        scored.sort_unstable_by_key(|&(score, index)| (std::cmp::Reverse(score), index));
         if len >= 1000 {
             scored.truncate(50);
         }

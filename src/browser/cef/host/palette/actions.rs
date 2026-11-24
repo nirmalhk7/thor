@@ -1,5 +1,5 @@
 use super::super::{activate, active_browser, perform, with_host, Action};
-use super::{close, open, refresh, Mode, MENU};
+use super::{close, open, refresh, refresh_sites_selecting, Mode, MENU};
 use crate::dx::bookmarks::BookmarkStore;
 use crate::dx::cmd_palette::{PaletteItem, PaletteItemType};
 use ::cef::*;
@@ -10,7 +10,19 @@ pub(super) fn key(event: &KeyEvent) -> i32 {
     }
     match event.windows_key_code {
         27 => defer(None),
-        13 if search_has_focus() => choose_selected(),
+        13 if search_has_focus() => {
+            if event.modifiers & sys::cef_event_flags_t::EVENTFLAG_ALT_DOWN.0 != 0
+                && MENU.with(|cell| {
+                    cell.borrow()
+                        .as_ref()
+                        .is_some_and(|menu| menu.mode == Mode::Sites)
+                })
+            {
+                pin_selected();
+            } else {
+                choose_selected();
+            }
+        }
         38 | 40 if search_has_focus() => move_selection(event.windows_key_code == 40),
         _ => return 0,
     }
@@ -38,6 +50,17 @@ fn choose_selected() {
     }
 }
 
+fn pin_selected() {
+    let pin = MENU.with(|cell| {
+        let state = cell.borrow();
+        let menu = state.as_ref().filter(|menu| menu.mode == Mode::Sites)?;
+        PinAction::for_item(menu.matches.get(menu.selected)?)
+    });
+    if let Some(pin) = pin {
+        defer_pin(pin);
+    }
+}
+
 fn move_selection(down: bool) {
     MENU.with(|cell| {
         if let Some(menu) = cell.borrow_mut().as_mut() {
@@ -54,18 +77,27 @@ fn move_selection(down: bool) {
     refresh();
 }
 
-fn choose(index: usize) {
-    let selected = MENU.with(|cell| {
-        cell.borrow().as_ref().and_then(|menu| {
-            menu.matches
-                .get(index)
-                .cloned()
-                .map(|item| (menu.mode, item))
+fn snapshot_choice(index: usize) -> Option<(Mode, PaletteItem)> {
+    MENU.with(|cell| {
+        let state = cell.borrow();
+        let menu = state.as_ref()?;
+        Some((menu.mode, menu.matches.get(index)?.clone()))
+    })
+}
+
+fn choose(mode: Mode, item: PaletteItem) {
+    let still_available = MENU.with(|cell| {
+        cell.borrow().as_ref().is_some_and(|menu| {
+            menu.mode == mode
+                && menu
+                    .matches
+                    .iter()
+                    .any(|current| current.id == item.id && current.path_or_url == item.path_or_url)
         })
     });
-    let Some((mode, item)) = selected else {
+    if !still_available {
         return;
-    };
+    }
     close();
     match mode {
         Mode::Sites => choose_site(item),
@@ -88,6 +120,68 @@ fn choose_site(item: PaletteItem) {
 
 fn tab_id(item: &PaletteItem) -> Option<u64> {
     item.id.strip_prefix("tab_")?.parse().ok()
+}
+
+#[derive(Clone, Copy)]
+pub(super) struct PinAction {
+    id: u64,
+    pin: bool,
+}
+
+impl PinAction {
+    pub(super) fn for_item(item: &PaletteItem) -> Option<Self> {
+        if item.item_type != PaletteItemType::Tab {
+            return None;
+        }
+        Some(Self {
+            id: tab_id(item)?,
+            pin: item.badge.as_deref() != Some("Pinned"),
+        })
+    }
+
+    pub(super) fn label(self) -> &'static str {
+        if self.pin {
+            "Pin"
+        } else {
+            "Unpin"
+        }
+    }
+
+    fn run(self) {
+        let search = MENU.with(|cell| {
+            let state = cell.borrow();
+            state
+                .as_ref()
+                .filter(|menu| menu.mode == Mode::Sites)
+                .map(|menu| menu.search.clone())
+        });
+        let Some(search) = search else {
+            return;
+        };
+        if let Some(Ok(())) = with_host(|host| host.session.set_pinned(self.id, self.pin)) {
+            super::super::expiry::schedule();
+            refresh_sites_selecting(Some(&format!("tab_{}", self.id)));
+            search.request_focus();
+        }
+    }
+}
+
+fn defer_pin(pin: PinAction) {
+    let mut task = PinTask::new(pin);
+    if post_task(ThreadId::UI, Some(&mut task)) != 1 {
+        crate::thor_warn!("thor::cef", "CEF rejected a Sites pin action");
+    }
+}
+
+wrap_button_delegate! {
+    pub(super) struct PinDelegate {pin:PinAction}
+    impl ViewDelegate {}
+    impl ButtonDelegate {fn on_button_pressed(&self,_button:Option<&mut Button>){defer_pin(self.pin);}}
+}
+
+wrap_task! {
+    struct PinTask {pin:PinAction}
+    impl Task {fn execute(&self){self.pin.run();}}
 }
 
 fn choose_tool(item: PaletteItem) {
@@ -127,7 +221,16 @@ fn bookmark_current_page() {
 }
 
 pub(super) fn defer(index: Option<usize>) {
-    let mut task = ChoiceTask::new(index);
+    let choice = match index {
+        Some(index) => {
+            let Some(choice) = snapshot_choice(index) else {
+                return;
+            };
+            Some(choice)
+        }
+        None => None,
+    };
+    let mut task = ChoiceTask::new(choice);
     if post_task(ThreadId::UI, Some(&mut task)) != 1 {
         crate::thor_warn!("thor::cef", "CEF rejected a command menu action");
     }
@@ -140,6 +243,10 @@ wrap_button_delegate! {
 }
 
 wrap_task! {
-    struct ChoiceTask {index:Option<usize>}
-    impl Task {fn execute(&self){if let Some(index)=self.index{choose(index);}else{close();}}}
+    struct ChoiceTask {choice:Option<(Mode, PaletteItem)>}
+    impl Task {
+        fn execute(&self) {
+            if let Some((mode,item)) = &self.choice { choose(*mode, item.clone()); } else { close(); }
+        }
+    }
 }
