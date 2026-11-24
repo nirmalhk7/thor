@@ -1,10 +1,12 @@
 //! Trusted tool surface and shared commands. External pages never reach this API.
 
+mod ai;
 mod commands;
 mod persistence;
 
 pub use commands::{Workbench, WorkbenchCommand};
 
+pub const AI_URL: &str = "thor://workbench/ai";
 pub const API_URL: &str = "thor://workbench/api";
 pub const HOME_URL: &str = "thor://workbench/";
 pub const SECURITY_URL: &str = "thor://workbench/security";
@@ -39,7 +41,8 @@ fn is_host_or_port(host: &str, candidate: &str) -> bool {
 
 pub fn is_tool_document(url: &str, main_frame: bool) -> bool {
     main_frame
-        && trusted_url(url).is_some_and(|url| matches!(url.path(), "/api" | "/security" | "/tools"))
+        && trusted_url(url)
+            .is_some_and(|url| matches!(url.path(), "/ai" | "/api" | "/security" | "/tools"))
 }
 
 pub fn command_allowed(url: &str, main_frame: bool, command: &WorkbenchCommand) -> bool {
@@ -51,10 +54,13 @@ pub fn command_allowed(url: &str, main_frame: bool, command: &WorkbenchCommand) 
             command,
             WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }
         ),
+        "/ai" => matches!(command, WorkbenchCommand::AiInspectRequest { .. }),
         "/security" => matches!(command, WorkbenchCommand::SecurityAnalyze { .. }),
         "/api" => !matches!(
             command,
-            WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }
+            WorkbenchCommand::FeatureList
+                | WorkbenchCommand::FeatureInvoke { .. }
+                | WorkbenchCommand::AiInspectRequest { .. }
         ),
         _ => false,
     })
@@ -80,6 +86,8 @@ pub fn asset(url: &str) -> Option<Asset> {
     let url = trusted_url(url)?;
     let (mime, bytes): (_, &[u8]) = match url.path() {
         "/" => ("text/html", include_bytes!("home.html")),
+        "/ai" => ("text/html", include_bytes!("ai.html")),
+        "/ai.js" => ("text/javascript", include_bytes!("ai.js")),
         "/api" => ("text/html", include_bytes!("api.html")),
         "/security" => ("text/html", include_bytes!("security.html")),
         "/tools" => ("text/html", include_bytes!("tools.html")),
