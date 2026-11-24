@@ -1,7 +1,9 @@
 use parking_lot::Mutex;
-use std::net::TcpListener;
+use std::io::Read;
+use std::net::{TcpListener, TcpStream};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::Arc;
+use std::time::Duration;
 
 pub(super) struct LoopbackHandle {
     pub(super) port: u16,
@@ -72,4 +74,55 @@ pub(super) fn validate_advertise_url(url: Option<&str>, label: &str) -> Result<(
         }
     }
     Ok(())
+}
+
+const MAX_REQUEST_BYTES: usize = 16 * 1024;
+
+pub(super) fn read_http_head(stream: &mut TcpStream) -> Option<String> {
+    let (request, body_start) = read_until_headers_end(stream)?;
+    Some(String::from_utf8_lossy(&request[..body_start]).into_owned())
+}
+
+pub(super) fn read_http_request(stream: &mut TcpStream) -> Option<String> {
+    let (mut request, body_start) = read_until_headers_end(stream)?;
+    let headers = String::from_utf8_lossy(&request[..body_start]);
+    let content_length = headers
+        .lines()
+        .filter_map(|line| line.split_once(':'))
+        .find(|(name, _)| name.trim().eq_ignore_ascii_case("content-length"))
+        .map(|(_, value)| value.trim().parse::<usize>())
+        .transpose()
+        .ok()?
+        .unwrap_or(0);
+    let expected = body_start.checked_add(content_length)?;
+    if expected > MAX_REQUEST_BYTES {
+        return None;
+    }
+
+    let received = request.len().min(expected);
+    request.resize(expected, 0);
+    stream.read_exact(&mut request[received..]).ok()?;
+    Some(String::from_utf8_lossy(&request).into_owned())
+}
+
+fn read_until_headers_end(stream: &mut TcpStream) -> Option<(Vec<u8>, usize)> {
+    stream.set_read_timeout(Some(Duration::from_secs(2))).ok()?;
+    let mut request = Vec::new();
+    let mut chunk = [0u8; 4096];
+    loop {
+        let count = match stream.read(&mut chunk) {
+            Ok(0) => return None,
+            Ok(count) => count,
+            Err(error) if error.kind() == std::io::ErrorKind::Interrupted => continue,
+            Err(_) => return None,
+        };
+        request.extend_from_slice(&chunk[..count]);
+        if let Some(header_end) = request.windows(4).position(|bytes| bytes == b"\r\n\r\n") {
+            let body_start = header_end + 4;
+            return (body_start <= MAX_REQUEST_BYTES).then_some((request, body_start));
+        }
+        if request.len() >= MAX_REQUEST_BYTES {
+            return None;
+        }
+    }
 }
