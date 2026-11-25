@@ -2,8 +2,11 @@ use super::qa;
 use super::{json, ok, op, opt, opt_str, req, reqv, str_req, AppState, FeatureEngine, Value};
 
 pub(in crate::features) fn contract_testing(f: &FeatureEngine, p: &Value) -> Result<Value, String> {
-    ok(f.qa()
-        .verify_contract(&reqv(p, "interactions")?, &reqv(p, "actuals")?))
+    let interactions = reqv(p, "interactions")?;
+    if interactions.is_empty() {
+        return Err("Add at least one expected interaction in interactions.".into());
+    }
+    ok(f.qa().verify_contract(&interactions, &reqv(p, "actuals")?))
 }
 
 pub(in crate::features) fn deflaked_export(f: &FeatureEngine, p: &Value) -> Result<Value, String> {
