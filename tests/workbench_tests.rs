@@ -135,6 +135,20 @@ fn security_document_cannot_send_requests_or_write_projects() {
             &command
         ));
     }
+    let analyzer = WorkbenchCommand::SecurityAnalyze {
+        slug: "header-analyzer".into(),
+        payload: json!({}),
+    };
+    assert!(thor::workbench::command_allowed(
+        "thor://workbench/security",
+        true,
+        &analyzer
+    ));
+    assert!(!thor::workbench::command_allowed(
+        "thor://workbench/api",
+        true,
+        &analyzer
+    ));
 }
 
 #[test]

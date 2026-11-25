@@ -11,7 +11,9 @@
 use crate::dx::cmd_palette::{parse_chrome_bookmarks, PaletteItem, PaletteItemType};
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::io;
+use std::io::{self, Read, Write};
+#[cfg(unix)]
+use std::os::unix::fs::{MetadataExt, OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -99,19 +101,7 @@ impl BookmarkStore {
             fs::create_dir_all(parent)?;
         }
 
-        let bookmarks = if path.exists() {
-            let raw = fs::read_to_string(&path)?;
-            if raw.trim().is_empty() {
-                Vec::new()
-            } else {
-                let file: BookmarkFile = serde_json::from_str(&raw)
-                    .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
-                file.bookmarks
-            }
-        } else {
-            Vec::new()
-        };
-
+        let bookmarks = read_bookmarks(&path)?;
         Ok(Self { path, bookmarks })
     }
 
@@ -288,15 +278,69 @@ impl BookmarkStore {
             let json = serde_json::to_string_pretty(&file)
                 .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
 
-            let temp_path = self.path.with_extension("tmp");
-            fs::write(&temp_path, json)?;
-            fs::rename(&temp_path, &self.path)?;
-            Ok(())
+            let mut random = [0; 16];
+            getrandom::fill(&mut random)
+                .map_err(|_| io::Error::other("Bookmark temporary filename unavailable"))?;
+            let temp_path = self
+                .path
+                .with_extension(format!("{:032x}.tmp", u128::from_ne_bytes(random)));
+            let mut options = fs::OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            options.mode(0o600);
+            let mut temp_file = options.open(&temp_path)?;
+            let written = temp_file.write_all(json.as_bytes());
+            drop(temp_file);
+            let result = written.and_then(|()| fs::rename(&temp_path, &self.path));
+            if result.is_err() {
+                let _ = fs::remove_file(&temp_path);
+            }
+            result
         })();
 
         let _ = fs::remove_file(&lock_path);
         write_result
     }
+}
+
+fn read_bookmarks(path: &Path) -> io::Result<Vec<Bookmark>> {
+    let mut options = fs::OpenOptions::new();
+    options.read(true);
+    #[cfg(unix)]
+    options.custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK);
+    let mut file = match options.open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(Vec::new()),
+        Err(error) => return Err(error),
+    };
+    let metadata = file.metadata()?;
+    if !metadata.is_file() {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "Bookmark store must be a regular file",
+        ));
+    }
+    #[cfg(unix)]
+    {
+        if metadata.uid() != unsafe { libc::geteuid() } {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "Bookmark store must be owned by the current user",
+            ));
+        }
+        if metadata.mode() & 0o077 != 0 {
+            file.set_permissions(fs::Permissions::from_mode(0o600))?;
+        }
+    }
+
+    let mut raw = String::new();
+    file.read_to_string(&mut raw)?;
+    if raw.trim().is_empty() {
+        return Ok(Vec::new());
+    }
+    let file: BookmarkFile = serde_json::from_str(&raw)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(file.bookmarks)
 }
 
 fn bookmark_icon_for_url(url: &str) -> String {
@@ -374,9 +418,17 @@ mod tests {
             assert_eq!(store.list().len(), 2);
         }
 
+        #[cfg(unix)]
+        {
+            assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
+            fs::set_permissions(&path, fs::Permissions::from_mode(0o644)).unwrap();
+        }
+
         {
             let mut store = BookmarkStore::open_at(&path).unwrap();
             assert_eq!(store.list().len(), 2);
+            #[cfg(unix)]
+            assert_eq!(fs::metadata(&path).unwrap().mode() & 0o777, 0o600);
             assert!(store.remove(&store.list()[0].id.clone()).unwrap());
             assert_eq!(store.list().len(), 1);
         }
