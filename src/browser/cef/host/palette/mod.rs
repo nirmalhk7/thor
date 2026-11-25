@@ -3,12 +3,13 @@ use std::cell::RefCell;
 
 mod actions;
 mod catalog;
+mod pin;
 
 use super::{active_browser, theme, with_host};
 use crate::dx::bookmarks::BookmarkStore;
 use crate::dx::cmd_palette::{CmdPalette, CmdPaletteMode, PaletteItem};
 use ::cef::*;
-use actions::{ChoiceDelegate, PinAction, PinDelegate};
+use actions::ChoiceDelegate;
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(super) enum Mode {
@@ -426,35 +427,8 @@ fn append_result(results: &Panel, item: &PaletteItem, selected: bool, index: usi
         button.set_background_color(background);
         button.set_enabled_text_colors(color);
     }
-    if mode == Mode::Sites {
-        if let Some(pin) = PinAction::for_item(item) {
-            append_pin_button(&row, pin, item, background);
-        }
-    }
+    pin::append_to_row(&row, mode, item, background);
     results.add_child_view(Some(&mut View::from(&row)));
-}
-
-fn append_pin_button(row: &Panel, pin: PinAction, item: &PaletteItem, background: u32) {
-    let mut delegate = PinDelegate::new(pin);
-    let Some(button) =
-        label_button_create(Some(&mut delegate), Some(&CefString::from(pin.label())))
-    else {
-        return;
-    };
-    let name = format!("{} {}", pin.label(), item.title);
-    button.set_accessible_name(Some(&CefString::from(name.as_str())));
-    button.set_tooltip_text(Some(&CefString::from(name.as_str())));
-    button.set_font_list(Some(&CefString::from(theme::FONT)));
-    button.set_background_color(background);
-    button.set_enabled_text_colors(theme::MUTED);
-    button.set_focusable(1);
-    let size = Size {
-        width: 54,
-        height: row_metrics(Mode::Sites).0,
-    };
-    button.set_minimum_size(Some(&size));
-    button.set_maximum_size(Some(&size));
-    row.add_child_view(Some(&mut View::from(&button)));
 }
 
 fn update_footer(menu: &Menu) {
@@ -462,14 +436,7 @@ fn update_footer(menu: &Menu) {
     let text = if count == 0 {
         "Esc Close".to_string()
     } else {
-        let pin_hint = if menu.mode == Mode::Sites {
-            menu.matches
-                .get(menu.selected)
-                .and_then(PinAction::for_item)
-        } else {
-            None
-        };
-        let pin_hint = pin_hint.map_or(String::new(), |pin| format!("     ⌥↵ {}", pin.label()));
+        let pin_hint = pin::shortcut_hint(menu);
         format!(
             "{} of {count}     ↑ ↓ Select     Return Open{pin_hint}     Esc Close",
             menu.selected + 1
@@ -535,6 +502,7 @@ wrap_textfield_delegate! {
 
 #[cfg(test)]
 mod tests {
+    use super::actions::PinAction;
     use super::*;
     use crate::browser::session::BrowserSession;
     use crate::dx::cmd_palette::PaletteItemType;
