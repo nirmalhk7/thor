@@ -65,11 +65,15 @@ pub fn command_allowed(url: &str, main_frame: bool, command: &WorkbenchCommand) 
         ),
         "/ai" => matches!(command, WorkbenchCommand::AiInspectRequest { .. }),
         "/security" => matches!(command, WorkbenchCommand::SecurityAnalyze { .. }),
-        "/api" => !matches!(
+        "/api" => matches!(
             command,
-            WorkbenchCommand::FeatureList
-                | WorkbenchCommand::FeatureInvoke { .. }
-                | WorkbenchCommand::AiInspectRequest { .. }
+            WorkbenchCommand::ApiSend { .. }
+                | WorkbenchCommand::SecretStore { .. }
+                | WorkbenchCommand::ProjectList
+                | WorkbenchCommand::ProjectCreate { .. }
+                | WorkbenchCommand::RequestList { .. }
+                | WorkbenchCommand::RequestOpen { .. }
+                | WorkbenchCommand::RequestSave { .. }
         ),
         _ => false,
     })
