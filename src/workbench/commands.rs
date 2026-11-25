@@ -41,6 +41,9 @@ pub enum WorkbenchCommand {
     RequestOpen {
         id: DocumentId,
     },
+    Web3InspectCall {
+        request: Value,
+    },
     RequestSave {
         project: ProjectId,
         title: String,
@@ -121,6 +124,7 @@ impl<'a> Workbench<'a> {
                 .map_err(|error| error.to_string())?;
                 Ok(json!({"reference":reference}))
             }
+            WorkbenchCommand::Web3InspectCall { request } => super::web3::inspect_call(request),
             command => super::persistence::execute(self.projects, command),
         }
     }
