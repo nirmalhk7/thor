@@ -1,4 +1,4 @@
-use crate::browser::session::BrowserSession;
+use crate::browser::session::{BrowserSession, TabSummary};
 use crate::dx::cmd_palette::{PaletteItem, PaletteItemType};
 use crate::workbench::{AI_URL, API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
 
@@ -14,21 +14,9 @@ pub(super) fn item(
 
 pub(super) fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Vec<PaletteItem> {
     let mut items: Vec<_> = session
-        .summaries()
+        .sites_summaries()
         .into_iter()
-        .map(|tab| {
-            item(
-                &format!("tab_{}", tab.target.id),
-                if tab.title.is_empty() {
-                    &tab.url
-                } else {
-                    &tab.title
-                },
-                &tab.url,
-                "Open tab",
-                PaletteItemType::Tab,
-            )
-        })
+        .map(open_page_item)
         .collect();
     if let Some(active) = session.active_tab() {
         if let Ok(history) = session.history(active) {
@@ -49,6 +37,27 @@ pub(super) fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Ve
     }
     items.extend(bookmarks);
     items
+}
+
+fn open_page_item(tab: TabSummary) -> PaletteItem {
+    let title = match (tab.title.is_empty(), tab.url.is_empty()) {
+        (true, true) => "New page",
+        (true, false) => &tab.url,
+        (false, _) => &tab.title,
+    };
+    let mut page = item(
+        &format!("tab_{}", tab.target.id),
+        title,
+        &tab.url,
+        if tab.pinned {
+            "Pinned page"
+        } else {
+            "Open page"
+        },
+        PaletteItemType::Tab,
+    );
+    page.badge = tab.pinned.then(|| "Pinned".into());
+    page
 }
 
 pub(super) fn toolbox() -> Vec<PaletteItem> {

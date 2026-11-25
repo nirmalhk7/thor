@@ -3,6 +3,7 @@ use std::cell::RefCell;
 
 mod actions;
 mod catalog;
+mod pin;
 
 use super::{active_browser, theme, with_host};
 use crate::dx::bookmarks::BookmarkStore;
@@ -252,6 +253,10 @@ pub(super) fn create_scrim(window: &Window) -> anyhow::Result<OverlayController>
 }
 
 pub(super) fn refresh() {
+    refresh_selecting(None);
+}
+
+fn refresh_selecting(selected_id: Option<&str>) {
     MENU.with(|cell| {
         let mut state = cell.borrow_mut();
         let Some(menu) = state.as_mut() else {
@@ -260,7 +265,9 @@ pub(super) fn refresh() {
         menu.model
             .set_query(CefString::from(&menu.search.text()).to_string());
         menu.matches = menu.model.search();
-        menu.selected = menu.selected.min(menu.matches.len().saturating_sub(1));
+        menu.selected = selected_id
+            .and_then(|id| menu.matches.iter().position(|item| item.id == id))
+            .unwrap_or_else(|| menu.selected.min(menu.matches.len().saturating_sub(1)));
         let Some(height) = update_bounds(menu) else {
             return;
         };
@@ -271,7 +278,15 @@ pub(super) fn refresh() {
 }
 
 pub(super) fn refresh_sites() {
-    if !MENU.with(|cell| cell.borrow().as_ref().is_some_and(|menu| menu.mode == Mode::Sites)) {
+    refresh_sites_selecting(None);
+}
+
+fn refresh_sites_selecting(selected_id: Option<&str>) {
+    if !MENU.with(|cell| {
+        cell.borrow()
+            .as_ref()
+            .is_some_and(|menu| menu.mode == Mode::Sites)
+    }) {
         return;
     }
     let (model, unavailable) = menu_model(Mode::Sites);
@@ -281,7 +296,7 @@ pub(super) fn refresh_sites() {
             menu.bookmarks_unavailable = unavailable;
         }
     });
-    refresh();
+    refresh_selecting(selected_id);
 }
 
 fn row_metrics(mode: Mode) -> (i32, i32) {
@@ -412,6 +427,7 @@ fn append_result(results: &Panel, item: &PaletteItem, selected: bool, index: usi
         button.set_background_color(background);
         button.set_enabled_text_colors(color);
     }
+    pin::append_to_row(&row, mode, item, background);
     results.add_child_view(Some(&mut View::from(&row)));
 }
 
@@ -420,8 +436,9 @@ fn update_footer(menu: &Menu) {
     let text = if count == 0 {
         "Esc Close".to_string()
     } else {
+        let pin_hint = pin::shortcut_hint(menu);
         format!(
-            "{} of {count}     ↑ ↓ Select     Return Open     Esc Close",
+            "{} of {count}     ↑ ↓ Select     Return Open{pin_hint}     Esc Close",
             menu.selected + 1
         )
     };
@@ -485,6 +502,7 @@ wrap_textfield_delegate! {
 
 #[cfg(test)]
 mod tests {
+    use super::actions::PinAction;
     use super::*;
     use crate::browser::session::BrowserSession;
     use crate::dx::cmd_palette::PaletteItemType;
@@ -531,5 +549,46 @@ mod tests {
         assert!(result
             .iter()
             .any(|item| item.item_type == PaletteItemType::Bookmark));
+    }
+    #[test]
+    fn sites_model_places_pins_first_and_keeps_recent_order_for_equally_relevant_pages() {
+        let mut session = BrowserSession::default();
+        let ids: Vec<_> = (0..3)
+            .map(|_| {
+                let tab = session.open_tab(0).unwrap();
+                session
+                    .record_navigation(tab, "https://same.test", "Same title")
+                    .unwrap();
+                tab
+            })
+            .collect();
+        session.activate(ids[0]).unwrap();
+        session.set_pinned(ids[1], true).unwrap();
+
+        let mut model = CmdPalette::new(CmdPaletteMode::BookmarksAndTabHistory);
+        model.set_items(catalog::sites(&session, Vec::new()));
+        for query in ["", "Same title"] {
+            model.set_query(query.into());
+            let pages: Vec<_> = model
+                .search()
+                .into_iter()
+                .filter(|entry| entry.item_type == PaletteItemType::Tab)
+                .collect();
+            assert_eq!(
+                pages
+                    .iter()
+                    .map(|page| page.id.as_str())
+                    .collect::<Vec<_>>(),
+                ["tab_2", "tab_1", "tab_3"]
+            );
+            assert_eq!(PinAction::for_item(&pages[0]).unwrap().label(), "Unpin");
+            assert_eq!(PinAction::for_item(&pages[1]).unwrap().label(), "Pin");
+        }
+        let history = model
+            .search()
+            .into_iter()
+            .find(|entry| entry.item_type == PaletteItemType::TabHistory)
+            .unwrap();
+        assert!(PinAction::for_item(&history).is_none());
     }
 }
