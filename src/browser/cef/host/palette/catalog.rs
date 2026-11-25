@@ -1,6 +1,6 @@
 use crate::browser::session::BrowserSession;
 use crate::dx::cmd_palette::{PaletteItem, PaletteItemType};
-use crate::workbench::{API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
+use crate::workbench::{AI_URL, API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
 
 pub(super) fn item(
     id: &str,
@@ -71,6 +71,12 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
         ),
         ("api", "API workspace", API_URL, "Request editor"),
         (
+            "ai_request",
+            "Inspect an AI request",
+            AI_URL,
+            "Pasted request JSON",
+        ),
+        (
             "security",
             "Security analyzers",
             SECURITY_URL,
@@ -84,8 +90,12 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
     .into_iter()
     .map(|(id, title, url, category)| {
         let mut entry = item(id, title, url, category, PaletteItemType::Action);
-        if id == "api" {
-            entry.badge = Some("replay request; resend request; send HTTP request".into());
+        match id {
+            "api" => entry.badge = Some("replay request; resend request; send HTTP request".into()),
+            "ai_request" => {
+                entry.badge = Some("count prompt tokens; llm request; inspect model request".into())
+            }
+            _ => {}
         }
         entry
     })
@@ -154,6 +164,7 @@ mod tests {
         palette.set_items(toolbox());
         for (query, destination, input) in [
             ("replay request", "thor://workbench/api", "Request editor"),
+            ("count prompt tokens", super::AI_URL, "Pasted request JSON"),
             (
                 "inspect headers",
                 "thor://workbench/security#headers",

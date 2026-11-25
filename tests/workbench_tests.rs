@@ -208,3 +208,97 @@ async fn saving_a_request_refuses_plaintext_credentials() {
     drop(store);
     let _ = std::fs::remove_file(path);
 }
+
+#[tokio::test]
+async fn ai_request_inspector_reports_local_summary_without_persisting_the_prompt() {
+    use thor::workbench::{asset, command_allowed, AI_URL};
+
+    let path =
+        std::env::temp_dir().join(format!("thor-ai-workbench-{}.sqlite3", std::process::id()));
+    let store = ProjectStore::open(&path).unwrap();
+    let service = HttpService::new().unwrap();
+    let workbench = Workbench::new(&service, &store);
+    let command = serde_json::from_value::<WorkbenchCommand>(json!({
+        "command": "ai_inspect_request",
+        "body": {
+            "model": "fixture-model",
+            "messages": [
+                {"role": "system", "content": "hello world"},
+                {"role": "user", "content": "1234"}
+            ],
+            "stream": true,
+            "temperature": 0.25,
+            "api_key": "ignored-fixture-secret"
+        }
+    }))
+    .unwrap();
+
+    assert_eq!(asset(AI_URL).unwrap().mime, "text/html");
+    assert_eq!(
+        asset("thor://workbench/ai.js").unwrap().mime,
+        "text/javascript"
+    );
+    assert!(command_allowed(AI_URL, true, &command));
+    for (url, main_frame) in [
+        (AI_URL, false),
+        ("https://workbench/ai", true),
+        ("thor://workbench/ai.js", true),
+        ("thor://workbench/api", true),
+        ("thor://workbench/tools", true),
+        ("thor://workbench/security", true),
+    ] {
+        assert!(!command_allowed(url, main_frame, &command), "{url}");
+    }
+    assert!(!command_allowed(
+        AI_URL,
+        true,
+        &WorkbenchCommand::ProjectList
+    ));
+    let result = workbench.execute(command).await.unwrap();
+    assert_eq!(result["model"], "fixture-model");
+    assert_eq!(result["message_count"], 2);
+    assert_eq!(result["roles"], json!(["system", "user"]));
+    assert_eq!(result["prompt_tokens"], 5);
+    assert_eq!(result["temperature"], 0.25);
+    assert_eq!(result["streaming"], true);
+    let exported_summary = result.to_string();
+    assert!(!exported_summary.contains("hello world"));
+    assert!(!exported_summary.contains("ignored-fixture-secret"));
+    assert!(store.projects().unwrap().is_empty());
+
+    for (body, message) in [
+        (json!({"prompt": "text"}), "model name"),
+        (
+            json!({"model": "fixture", "messages": []}),
+            "messages array",
+        ),
+        (
+            json!({"model": "fixture", "messages": [{"role":"user","content":[]}] }),
+            "messages array",
+        ),
+        (
+            json!({"model": "fixture", "prompt": "a", "messages": []}),
+            "either",
+        ),
+        (
+            json!({"model": "fixture", "prompt": "a".repeat(256 * 1024)}),
+            "256 KiB",
+        ),
+    ] {
+        let error = workbench
+            .execute(WorkbenchCommand::AiInspectRequest { body })
+            .await
+            .unwrap_err();
+        assert!(error.contains(message), "{error}");
+    }
+    let completion = workbench
+        .execute(WorkbenchCommand::AiInspectRequest {
+            body: json!({"model": "fixture", "prompt": "one two"}),
+        })
+        .await
+        .unwrap();
+    assert_eq!(completion["prompt_tokens"], 3);
+    assert_eq!(completion["message_count"], 1);
+    drop(store);
+    let _ = std::fs::remove_file(path);
+}

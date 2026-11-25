@@ -1,5 +1,6 @@
+use super::super::loopback::read_http_head;
 use super::{
-    now_ms, AppState, Arc, AtomicBool, Duration, OobInteraction, Ordering, Read, SecurityEngine,
+    now_ms, AppState, Arc, AtomicBool, Duration, OobInteraction, Ordering, SecurityEngine,
     TcpListener, Write,
 };
 
@@ -54,9 +55,10 @@ fn oob_listener_loop(listener: TcpListener, running: Arc<AtomicBool>) {
     while running.load(Ordering::SeqCst) {
         match listener.accept() {
             Ok((mut stream, addr)) => {
-                let mut buf = [0u8; 8192];
-                let n = stream.read(&mut buf).unwrap_or(0);
-                let raw = String::from_utf8_lossy(&buf[..n]).to_string();
+                let _ = stream.set_nonblocking(false);
+                let Some(raw) = read_http_head(&mut stream) else {
+                    continue;
+                };
                 let (token, path) = oob_token_from_request(&raw);
                 AppState::global()
                     .features()
