@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>AI request inspector · Thor</title><link rel="stylesheet" href="/workspace.css"><script defer src="/ai.js"></script></head>
+<body>
+<header class="topline"><a class="wordmark" href="/">Thor</a><nav class="workspace-nav" aria-label="Workspace"><a href="/api">API</a><a href="/security">Security</a><a href="/ai" aria-current="page">AI</a></nav></header>
+<main class="analyzer">
+  <header><h1>AI request inspector</h1><p>Check the model, roles, and estimated prompt tokens before sending a request. Thor analyzes the body locally without calling a model.</p></header>
+  <form id="request-form">
+    <label for="request-body">Request body (JSON)</label>
+    <textarea id="request-body" aria-describedby="request-help" required spellcheck="false" placeholder='{"model":"example-model","messages":[{"role":"user","content":"Summarize this."}]}'></textarea>
+    <p id="request-help" class="input-note">Paste a text prompt or chat request body without credentials. Token counts are estimates.</p>
+    <button class="analyze" id="inspect" type="submit">Inspect request</button>
+  </form>
+  <section aria-labelledby="result-title">
+    <div class="result-head"><h2 id="result-title">Request summary</h2><span id="status" role="status" aria-live="polite">Ready</span></div>
+    <pre id="result" tabindex="0" aria-label="Request summary"></pre>
+    <button class="analyze" id="copy" type="button" hidden>Copy summary</button>
+  </section>
+</main>
+</body>
+</html>

@@ -1,5 +1,19 @@
 # AI / LLM Developer Studio & Telemetry Documentation
 
+## First browser workflow: inspect an AI request before sending
+
+When debugging a surprisingly large chat payload, open **Cmd+Shift+K** and search
+for **Inspect an AI request** (or **count prompt tokens**). Paste a text-only
+request body with a model and either `prompt` or `messages`, then choose
+**Inspect request**. The local LLM Studio engine reports the model, roles,
+estimated prompt tokens, and request settings. The estimate is not a
+provider-tokenizer or billing count.
+
+Choose **Copy summary** to share the derived JSON. Thor does not call a model
+or write the pasted body or its report to a project. If the clipboard is
+unavailable, the displayed summary can be selected and copied manually.
+Do not paste credentials.
+
 ## Overview
 
 Thor incorporates a dedicated **AI / LLM Developer Studio** (`src/dx/llm_studio/mod.rs` and `src/dx/llm_clean_context.rs`) tailored for vibecoders, AI engineers, and prompt developers. Thor tracks real-time SSE stream latency, token generation rates (tok/s), API token costs with prompt caching discounts, and provides 1-click DOM-to-LLM clean context copying.
