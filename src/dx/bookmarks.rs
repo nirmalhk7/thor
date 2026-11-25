@@ -123,14 +123,7 @@ impl BookmarkStore {
         title: impl Into<String>,
         url: impl Into<String>,
     ) -> io::Result<Bookmark> {
-        let bookmark = Bookmark::new(title, url);
-        // Skip exact URL duplicates — return existing.
-        if let Some(existing) = self.bookmarks.iter().find(|b| b.url == bookmark.url) {
-            return Ok(existing.clone());
-        }
-        self.bookmarks.push(bookmark.clone());
-        self.persist()?;
-        Ok(bookmark)
+        self.add_bookmark(Bookmark::new(title, url))
     }
 
     /// Add multiple bookmarks in a single transaction to prevent O(N^2) I/O overhead.
@@ -194,9 +187,7 @@ impl BookmarkStore {
                 continue;
             }
             let mut bm = Bookmark::new(item.title, item.path_or_url);
-            if let Some(folder) = item.badge {
-                bm.folder = Some(folder);
-            }
+            bm.folder = item.badge;
             // Prefer stable id from palette when present.
             if item.id.starts_with("bm_") {
                 bm.id = item.id;
@@ -233,9 +224,7 @@ impl BookmarkStore {
         for item in crate::dx::cmd_palette::get_default_bookmarks() {
             let mut bm = Bookmark::new(item.title, item.path_or_url);
             bm.id = item.id;
-            if let Some(badge) = item.badge {
-                bm.folder = Some(badge);
-            }
+            bm.folder = item.badge;
             self.bookmarks.push(bm);
         }
         self.persist()?;
