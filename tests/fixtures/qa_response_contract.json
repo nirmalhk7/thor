@@ -1,0 +1,26 @@
+{
+  "interactions": [
+    {
+      "description": "A widget has a string ID and a boolean availability flag",
+      "method": "GET",
+      "path": "/widgets/42",
+      "expected_status": 200,
+      "response_schema": {
+        "type": "object",
+        "required": ["id", "available"],
+        "properties": {
+          "id": {"type": "string"},
+          "available": {"type": "boolean"}
+        }
+      }
+    }
+  ],
+  "actuals": [
+    {
+      "method": "GET",
+      "path": "/widgets/42",
+      "status": 200,
+      "body": {"id": "widget-42", "available": true}
+    }
+  ]
+}

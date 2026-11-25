@@ -8,6 +8,9 @@ use crate::projects::{DocumentId, ProjectId, ProjectStore};
 #[serde(tag = "command", rename_all = "snake_case", deny_unknown_fields)]
 pub enum WorkbenchCommand {
     FeatureList,
+    AiInspectRequest {
+        body: Value,
+    },
     FeatureInvoke {
         slug: String,
         #[serde(default)]
@@ -37,6 +40,9 @@ pub enum WorkbenchCommand {
     },
     RequestOpen {
         id: DocumentId,
+    },
+    Web3InspectCall {
+        request: Value,
     },
     RequestSave {
         project: ProjectId,
@@ -73,6 +79,7 @@ impl<'a> Workbench<'a> {
             return Err("Tool operation cancelled".into());
         }
         match command {
+            WorkbenchCommand::AiInspectRequest { body } => super::ai::inspect_request(body),
             WorkbenchCommand::FeatureList => {
                 encode(crate::AppState::global().features().status_report())
             }
@@ -117,6 +124,7 @@ impl<'a> Workbench<'a> {
                 .map_err(|error| error.to_string())?;
                 Ok(json!({"reference":reference}))
             }
+            WorkbenchCommand::Web3InspectCall { request } => super::web3::inspect_call(request),
             command => super::persistence::execute(self.projects, command),
         }
     }

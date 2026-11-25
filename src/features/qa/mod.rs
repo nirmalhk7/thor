@@ -154,8 +154,19 @@ pub struct ActualInteraction {
     pub method: String,
     pub path: String,
     pub status: u16,
-    #[serde(default)]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_json_body",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub body: Option<serde_json::Value>,
+}
+
+fn deserialize_json_body<'de, D>(deserializer: D) -> Result<Option<serde_json::Value>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    serde_json::Value::deserialize(deserializer).map(Some)
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

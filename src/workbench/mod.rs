@@ -1,14 +1,18 @@
 //! Trusted tool surface and shared commands. External pages never reach this API.
 
+mod ai;
 mod commands;
 mod persistence;
+mod web3;
 
 pub use commands::{Workbench, WorkbenchCommand};
 
+pub const AI_URL: &str = "thor://workbench/ai";
 pub const API_URL: &str = "thor://workbench/api";
 pub const HOME_URL: &str = "thor://workbench/";
 pub const SECURITY_URL: &str = "thor://workbench/security";
 pub const TOOLS_URL: &str = "thor://workbench/tools";
+pub const WEB3_URL: &str = "thor://workbench/web3";
 pub const CSP: &str = "default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 
 pub fn navigation_url(input: &str) -> String {
@@ -39,22 +43,37 @@ fn is_host_or_port(host: &str, candidate: &str) -> bool {
 
 pub fn is_tool_document(url: &str, main_frame: bool) -> bool {
     main_frame
-        && trusted_url(url).is_some_and(|url| matches!(url.path(), "/api" | "/security" | "/tools"))
+        && trusted_url(url).is_some_and(|url| {
+            matches!(
+                url.path(),
+                "/ai" | "/api" | "/security" | "/tools" | "/web3"
+            )
+        })
 }
 
 pub fn command_allowed(url: &str, main_frame: bool, command: &WorkbenchCommand) -> bool {
     if !is_tool_document(url, main_frame) {
         return false;
     }
+    if matches!(command, WorkbenchCommand::Web3InspectCall { .. }) {
+        return trusted_url(url).is_some_and(|url| url.path() == "/web3");
+    }
     trusted_url(url).is_some_and(|url| match url.path() {
         "/tools" => matches!(
             command,
             WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }
         ),
+        "/ai" => matches!(command, WorkbenchCommand::AiInspectRequest { .. }),
         "/security" => matches!(command, WorkbenchCommand::SecurityAnalyze { .. }),
-        "/api" => !matches!(
+        "/api" => matches!(
             command,
-            WorkbenchCommand::FeatureList | WorkbenchCommand::FeatureInvoke { .. }
+            WorkbenchCommand::ApiSend { .. }
+                | WorkbenchCommand::SecretStore { .. }
+                | WorkbenchCommand::ProjectList
+                | WorkbenchCommand::ProjectCreate { .. }
+                | WorkbenchCommand::RequestList { .. }
+                | WorkbenchCommand::RequestOpen { .. }
+                | WorkbenchCommand::RequestSave { .. }
         ),
         _ => false,
     })
@@ -80,15 +99,20 @@ pub fn asset(url: &str) -> Option<Asset> {
     let url = trusted_url(url)?;
     let (mime, bytes): (_, &[u8]) = match url.path() {
         "/" => ("text/html", include_bytes!("home.html")),
+        "/ai" => ("text/html", include_bytes!("ai.html")),
+        "/ai.js" => ("text/javascript", include_bytes!("ai.js")),
         "/api" => ("text/html", include_bytes!("api.html")),
         "/security" => ("text/html", include_bytes!("security.html")),
         "/tools" => ("text/html", include_bytes!("tools.html")),
         "/tools.js" => ("text/javascript", include_bytes!("tools.js")),
+        "/web3" => ("text/html", include_bytes!("web3.html")),
+        "/web3.js" => ("text/javascript", include_bytes!("web3.js")),
         "/workspace.css" => ("text/css", include_bytes!("workspace.css")),
         "/workspace.js" => ("text/javascript", include_bytes!("workspace.js")),
         "/security.js" => ("text/javascript", include_bytes!("security.js")),
         "/workbench.css" => ("text/css", include_bytes!("workbench.css")),
         "/workbench.js" => ("text/javascript", include_bytes!("workbench.js")),
+        "/api-collections.js" => ("text/javascript", include_bytes!("api-collections.js")),
         _ => return None,
     };
     Some(Asset { mime, bytes })

@@ -1,0 +1,20 @@
+<!doctype html>
+<html lang="en">
+<head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Ethereum call inspector · Thor</title><link rel="stylesheet" href="/workspace.css"><script defer src="/web3.js"></script></head>
+<body>
+<header class="topline"><a class="wordmark" href="/">Thor</a><nav class="workspace-nav" aria-label="Workspace"><a href="/api">API</a><a href="/security">Security</a><a href="/web3" aria-current="page">Web3</a></nav></header>
+<main class="analyzer">
+  <header><h1>Ethereum call inspector</h1><p>See which contract and account a balance request names. Thor inspects the request locally, without connecting to a wallet or the chain.</p></header>
+  <form id="call-form">
+    <label for="call-request">Call request (JSON)</label>
+    <textarea id="call-request" aria-describedby="call-help" required spellcheck="false" placeholder="Paste an eth_call JSON request from your local trace."></textarea>
+    <p id="call-help" class="input-note">Paste one eth_call request. Thor decodes balanceOf(address) and shows just the selector for other calls. No balance is fetched.</p>
+    <button class="analyze" id="inspect" type="submit">Inspect call</button>
+  </form>
+  <section aria-labelledby="result-title">
+    <div class="result-head"><h2 id="result-title">Call summary</h2><span id="status" role="status" aria-live="polite">Ready</span></div>
+    <pre id="result" tabindex="0" aria-label="Call summary"></pre>
+  </section>
+</main>
+</body>
+</html>

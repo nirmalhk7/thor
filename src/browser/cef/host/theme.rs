@@ -2,11 +2,17 @@ use ::cef::*;
 
 pub(super) const BG: u32 = 0xff151a20;
 pub(super) const INSET: u32 = 0xff101419;
-pub(super) const TEXT: u32 = 0xffedf1f5;
+pub(super) const TEXT: u32 = 0xffc9c9c9;
+// Keep secondary text readable on both the drawer and selected-row backgrounds.
+// The export’s #838383 falls below 4.5:1 on these surfaces.
 pub(super) const MUTED: u32 = 0xffa6b0bd;
 pub(super) const ACCENT: u32 = 0xff90b8f8;
 pub(super) const CHROME: u32 = 0xff000000;
 pub(super) const FIELD: u32 = 0xff393939;
+pub(super) const SHORTCUT: u32 = 0xff777777;
+pub(super) const ICON: u32 = 0xff8f9da3;
+pub(super) const FONT: &str = "Source Sans Pro, Arial, 12px";
+pub(super) const DETAIL_FONT: &str = "Source Sans Pro, Arial, 10px";
 pub(super) const DRAWER: u32 = 0xff262626;
 pub(super) const SCRIM: u32 = 0x80262626;
 pub(super) const TOOLBAR_HEIGHT: i32 = 35;
@@ -91,6 +97,8 @@ pub(super) enum Icon {
     Forward,
     Reload,
     Home,
+    Site,
+    Tool,
 }
 
 pub(super) fn icon(kind: Icon, color: u32) -> Option<Image> {
@@ -107,6 +115,23 @@ pub(super) fn icon(kind: Icon, color: u32) -> Option<Image> {
             (12., 14., 14., 11.),
             (14., 3., 14., 7.),
             (10., 7., 14., 7.),
+        ],
+        Icon::Site => &[
+            (3., 3., 15., 3.),
+            (15., 3., 15., 15.),
+            (15., 15., 3., 15.),
+            (3., 15., 3., 3.),
+            (3., 7., 15., 7.),
+        ],
+        Icon::Tool => &[
+            (4., 8., 14., 8.),
+            (14., 8., 14., 16.),
+            (14., 16., 4., 16.),
+            (4., 16., 4., 8.),
+            (6., 8., 6., 4.),
+            (6., 4., 9., 2.),
+            (9., 2., 12., 4.),
+            (12., 4., 12., 8.),
         ],
         Icon::Home => &[
             (3., 9., 9., 3.),

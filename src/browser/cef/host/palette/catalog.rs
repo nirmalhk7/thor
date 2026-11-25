@@ -1,6 +1,6 @@
-use crate::browser::session::BrowserSession;
+use crate::browser::session::{BrowserSession, TabSummary};
 use crate::dx::cmd_palette::{PaletteItem, PaletteItemType};
-use crate::workbench::{API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
+use crate::workbench::{AI_URL, API_URL, HOME_URL, SECURITY_URL, TOOLS_URL};
 
 pub(super) fn item(
     id: &str,
@@ -14,21 +14,9 @@ pub(super) fn item(
 
 pub(super) fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Vec<PaletteItem> {
     let mut items: Vec<_> = session
-        .summaries()
+        .sites_summaries()
         .into_iter()
-        .map(|tab| {
-            item(
-                &format!("tab_{}", tab.target.id),
-                if tab.title.is_empty() {
-                    &tab.url
-                } else {
-                    &tab.title
-                },
-                &tab.url,
-                "Open tab",
-                PaletteItemType::Tab,
-            )
-        })
+        .map(open_page_item)
         .collect();
     if let Some(active) = session.active_tab() {
         if let Ok(history) = session.history(active) {
@@ -51,6 +39,27 @@ pub(super) fn sites(session: &BrowserSession, bookmarks: Vec<PaletteItem>) -> Ve
     items
 }
 
+fn open_page_item(tab: TabSummary) -> PaletteItem {
+    let title = match (tab.title.is_empty(), tab.url.is_empty()) {
+        (true, true) => "New page",
+        (true, false) => &tab.url,
+        (false, _) => &tab.title,
+    };
+    let mut page = item(
+        &format!("tab_{}", tab.target.id),
+        title,
+        &tab.url,
+        if tab.pinned {
+            "Pinned page"
+        } else {
+            "Open page"
+        },
+        PaletteItemType::Tab,
+    );
+    page.badge = tab.pinned.then(|| "Pinned".into());
+    page
+}
+
 pub(super) fn toolbox() -> Vec<PaletteItem> {
     let mut items: Vec<_> = [
         (
@@ -59,21 +68,55 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
             TOOLS_URL,
             "144 engineer features",
         ),
-        ("api", "API workspace", API_URL, "Requests and responses"),
+        ("api", "API workspace", API_URL, "Request editor"),
+        (
+            "ai_request",
+            "Inspect an AI request",
+            AI_URL,
+            "Pasted request JSON",
+        ),
         (
             "security",
             "Security analyzers",
             SECURITY_URL,
             "Headers, JWT, response diff",
         ),
+        (
+            "web3_call",
+            "Inspect an Ethereum call",
+            crate::workbench::WEB3_URL,
+            "Pasted eth_call JSON",
+        ),
         ("extensions", "Extensions", "", "Browser"),
-        ("inspect", "Inspect page", "", "Developer Tools"),
+        ("inspect", "Inspect page", "", "Current page"),
         ("bookmark", "Bookmark current page", "", "Saved to Thor"),
         ("new_tab", "New tab", HOME_URL, "Browse"),
     ]
     .into_iter()
-    .map(|(id, title, url, category)| item(id, title, url, category, PaletteItemType::Action))
+    .map(|(id, title, url, category)| {
+        let mut entry = item(id, title, url, category, PaletteItemType::Action);
+        match id {
+            "api" => entry.badge = Some("replay request; resend request; send HTTP request".into()),
+            "ai_request" => {
+                entry.badge = Some("count prompt tokens; llm request; inspect model request".into())
+            }
+            _ => {}
+        }
+        if id == "web3_call" {
+            entry.badge = Some("decode calldata; decode balanceof; inspect eth_call".into());
+        }
+        entry
+    })
     .collect();
+    let mut headers = item(
+        "headers",
+        "Security headers",
+        &format!("{SECURITY_URL}#headers"),
+        "Pasted headers",
+        PaletteItemType::Action,
+    );
+    headers.badge = Some("inspect headers; analyze response headers".into());
+    items.push(headers);
     items.extend(
         crate::AppState::global()
             .features()
@@ -81,13 +124,22 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
             .all()
             .iter()
             .map(|feature| {
-                item(
+                let mut entry = item(
                     &format!("feature_{}", feature.slug),
                     &feature.name,
                     &format!("{TOOLS_URL}#{}", feature.slug),
-                    feature.category.as_str(),
+                    &format!("{} · Pasted JSON", feature.category.as_str()),
                     PaletteItemType::Action,
-                )
+                );
+                if feature.slug == "perf-budgets" {
+                    entry.category = "Performance · Pasted measurements".into();
+                    entry.badge = Some("measure load; measure page load; check web vitals".into());
+                }
+                if feature.slug == "contract-testing" {
+                    entry.category = "QA · Pasted contract and response JSON".into();
+                    entry.badge = Some("verify response contract; test response schema".into());
+                }
+                entry
             }),
     );
     items
@@ -95,9 +147,9 @@ pub(super) fn toolbox() -> Vec<PaletteItem> {
 
 pub(super) fn security() -> Vec<PaletteItem> {
     [
-        ("headers", "Security headers", "Review browser protections"),
-        ("jwt", "JWT inspector", "Inspect claims and expiry"),
-        ("diff", "Response diff", "Compare HTTP snapshots"),
+        ("headers", "Security headers", "Pasted headers"),
+        ("jwt", "JWT inspector", "Pasted token"),
+        ("diff", "Response diff", "Pasted HTTP snapshots"),
     ]
     .into_iter()
     .map(|(id, title, detail)| {
@@ -117,6 +169,53 @@ mod tests {
     use super::*;
 
     #[test]
+    fn toolbox_search_finds_tasks_and_describes_their_input() {
+        use crate::dx::cmd_palette::{CmdPalette, CmdPaletteMode};
+
+        let mut palette = CmdPalette::new(CmdPaletteMode::SettingsMenu);
+        palette.set_items(toolbox());
+        for (query, destination, input) in [
+            ("replay request", "thor://workbench/api", "Request editor"),
+            ("count prompt tokens", super::AI_URL, "Pasted request JSON"),
+            (
+                "inspect headers",
+                "thor://workbench/security#headers",
+                "Pasted headers",
+            ),
+            (
+                "measure load",
+                "thor://workbench/tools#perf-budgets",
+                "Pasted measurements",
+            ),
+            (
+                "verify response contract",
+                "thor://workbench/tools#contract-testing",
+                "Pasted contract and response JSON",
+            ),
+        ] {
+            palette.set_query(query.into());
+            let matches = palette.search();
+            let first = matches
+                .first()
+                .unwrap_or_else(|| panic!("No match for {query}"));
+            assert_eq!(first.path_or_url, destination, "{query}");
+            assert!(
+                first.category.contains(input),
+                "{query}: {}",
+                first.category
+            );
+        }
+
+        palette.set_query("decode calldata".into());
+        let first = &palette.search()[0];
+        assert_eq!(first.path_or_url, crate::workbench::WEB3_URL);
+        assert_eq!(first.category, "Pasted eth_call JSON");
+
+        palette.set_query("inspect page".into());
+        assert!(palette.search()[0].category.contains("Current page"));
+    }
+
+    #[test]
     fn security_drawer_opens_the_matching_offline_analyzer() {
         let items = security();
         for (title, url) in [
@@ -124,7 +223,9 @@ mod tests {
             ("JWT inspector", "thor://workbench/security#jwt"),
             ("Response diff", "thor://workbench/security#diff"),
         ] {
-            assert!(items.iter().any(|item| item.title == title && item.path_or_url == url));
+            assert!(items
+                .iter()
+                .any(|item| item.title == title && item.path_or_url == url));
         }
     }
 }
